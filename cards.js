@@ -1,0 +1,194 @@
+window.CARDS = [
+  {
+    "id": "CVE-2025-0312",
+    "cve_id": "CVE-2025-0312",
+    "title": "CVE-2025-0312",
+    "description": "A vulnerability in ollama/ollama versions <=0.3.14 allows a malicious user to create a customized GGUF model file that, when uploaded and created on the Ollama server, can cause a crash due to an unchecked null pointer dereference. This can lead to a Denial of Service (DoS) attack via remote network.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0312",
+    "published_at": "2025-03-20T10:15:52.280",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://huntr.com/bounties/522c87b6-a7ac-41b2-84f3-62fd58921f21"
+    ]
+  },
+  {
+    "id": "CVE-2024-8063",
+    "cve_id": "CVE-2024-8063",
+    "title": "CVE-2024-8063",
+    "description": "A divide by zero vulnerability exists in ollama/ollama version v0.3.3. The vulnerability occurs when importing GGUF models with a crafted type for `block_count` in the Modelfile. This can lead to a denial of service (DoS) condition when the server processes the model, causing it to crash.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-8063",
+    "published_at": "2025-03-20T10:15:40.757",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 0.3.3"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://huntr.com/bounties/fd8e1ed6-21d2-4c9e-8395-2098f11b7db9"
+    ]
+  },
+  {
+    "id": "CVE-2024-12055",
+    "cve_id": "CVE-2024-12055",
+    "title": "CVE-2024-12055",
+    "description": "A vulnerability in Ollama versions <=0.3.14 allows a malicious user to create a customized gguf model file that can be uploaded to the public Ollama server. When the server processes this malicious model, it crashes, leading to a Denial of Service (DoS) attack. The root cause of the issue is an out-of-bounds read in the gguf.go file.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-12055",
+    "published_at": "2025-03-20T10:15:26.647",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://huntr.com/bounties/7b111d55-8215-4727-8807-c5ed4cf1bfbe"
+    ]
+  },
+  {
+    "id": "CVE-2024-39722",
+    "cve_id": "CVE-2024-39722",
+    "title": "CVE-2024-39722",
+    "description": "An issue was discovered in Ollama before 0.1.46. It exposes which files exist on the server on which it is deployed via path traversal in the api/push route.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39722",
+    "published_at": "2024-10-31T20:15:05.080",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://www.oligo.security/blog/more-models-more-probllms"
+    ]
+  },
+  {
+    "id": "CVE-2024-39721",
+    "cve_id": "CVE-2024-39721",
+    "title": "CVE-2024-39721",
+    "description": "An issue was discovered in Ollama before 0.1.34. The CreateModelHandler function uses os.Open to read a file until completion. The req.Path parameter is user-controlled and can be set to /dev/random, which is blocking, causing the goroutine to run infinitely (even after the HTTP request is aborted by the client).",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39721",
+    "published_at": "2024-10-31T20:15:04.993",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://github.com/ollama/ollama/blob/9164b0161bcb24e543cba835a8863b80af2c0c21/server/routes.go#L557",
+      "https://github.com/ollama/ollama/blob/adeb40eaf29039b8964425f69a9315f9f1694ba8/server/routes.go#L536",
+      "https://www.oligo.security/blog/more-models-more-probllms"
+    ]
+  },
+  {
+    "id": "CVE-2024-39720",
+    "cve_id": "CVE-2024-39720",
+    "title": "CVE-2024-39720",
+    "description": "An issue was discovered in Ollama before 0.1.46. An attacker can use two HTTP requests to upload a malformed GGUF file containing just 4 bytes starting with the GGUF custom magic header. By leveraging a custom Modelfile that includes a FROM statement pointing to the attacker-controlled blob file, the attacker can crash the application through the CreateModel route, leading to a segmentation fault (signal SIGSEGV: segmentation violation).",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39720",
+    "published_at": "2024-10-31T20:15:04.877",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 8.2,
+    "references": [
+      "https://github.com/ollama/ollama/compare/v0.1.45...v0.1.46#diff-782c2737eecfa83b7cb46a77c8bdaf40023e7067baccd4f806ac5517b4563131L417",
+      "https://oligo.security/blog/more-models-more-probllms"
+    ]
+  },
+  {
+    "id": "CVE-2024-39719",
+    "cve_id": "CVE-2024-39719",
+    "title": "CVE-2024-39719",
+    "description": "An issue was discovered in Ollama through 0.3.14. File existence disclosure can occur via api/create. When calling the CreateModel route with a path parameter that does not exist, it reflects the \"File does not exist\" error message to the attacker, providing a primitive for file existence on the server.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39719",
+    "published_at": "2024-10-31T20:15:04.770",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://www.oligo.security/blog/more-models-more-probllms"
+    ]
+  },
+  {
+    "id": "CVE-2024-45436",
+    "cve_id": "CVE-2024-45436",
+    "title": "CVE-2024-45436",
+    "description": "extractFromZipFile in model.go in Ollama before 0.1.47 can extract members of a ZIP archive outside of the parent directory.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-45436",
+    "published_at": "2024-08-29T03:15:05.460",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://github.com/ollama/ollama/compare/v0.1.46...v0.1.47",
+      "https://github.com/ollama/ollama/pull/5314"
+    ]
+  },
+  {
+    "id": "CVE-2024-37032",
+    "cve_id": "CVE-2024-37032",
+    "title": "CVE-2024-37032",
+    "description": "Ollama before 0.1.34 does not validate the format of the digest (sha256 with 64 hex digits) when getting the model path, and thus mishandles the TestGetBlobsPath test cases such as fewer than 64 hex digits, more than 64 hex digits, or an initial ../ substring.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+    "published_at": "2024-05-31T04:15:09.617",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 8.8,
+    "references": [
+      "https://github.com/ollama/ollama/blob/adeb40eaf29039b8964425f69a9315f9f1694ba8/server/modelpath_test.go#L41-L58",
+      "https://github.com/ollama/ollama/compare/v0.1.33...v0.1.34",
+      "https://github.com/ollama/ollama/pull/4175",
+      "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032",
+      "https://github.com/ollama/ollama/blob/adeb40eaf29039b8964425f69a9315f9f1694ba8/server/modelpath_test.go#L41-L58"
+    ]
+  },
+  {
+    "id": "CVE-2024-28224",
+    "cve_id": "CVE-2024-28224",
+    "title": "CVE-2024-28224",
+    "description": "Ollama before 0.1.29 has a DNS rebinding vulnerability that can inadvertently allow remote access to the full API, thereby letting an unauthorized user chat with a large language model, delete a model, or cause a denial of service (resource exhaustion).",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-28224",
+    "published_at": "2024-04-08T19:15:07.353",
+    "collected_at": "2026-10-07T08:25:09Z",
+    "product": "ollama",
+    "affected": [
+      "ollama 见原文"
+    ],
+    "cvss": 6.6,
+    "references": [
+      "https://github.com/ollama/ollama/releases",
+      "https://research.nccgroup.com/2024/04/08/technical-advisory-ollama-dns-rebinding-attack-cve-2024-28224/",
+      "https://www.nccgroup.trust/us/our-research/?research=Technical+advisories",
+      "https://github.com/ollama/ollama/releases",
+      "https://research.nccgroup.com/2024/04/08/technical-advisory-ollama-dns-rebinding-attack-cve-2024-28224/"
+    ]
+  }
+];
