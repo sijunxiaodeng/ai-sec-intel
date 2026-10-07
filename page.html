@@ -2,64 +2,20 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <title>AI 安全漏洞卡片</title>
+  <title>AI 安全知识情报系统</title>
   <style>
-    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 24px; color: #1a1a1a; }
-    h1 { font-size: 22px; font-weight: 600; }
-    p { color: #555; }
-    input { width: 320px; padding: 8px 10px; font-size: 16px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-    th, td { border-bottom: 1px solid #ddd; text-align: left; padding: 8px; vertical-align: top; }
-    th { font-size: 13px; color: #444; }
-    a { color: #0b57d0; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f3efe7; color: #1b1914; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+    main { width: min(560px, calc(100% - 32px)); background: #fbf9f5; border: 1px solid #e3dcd0; border-radius: 16px; padding: 28px; }
+    h1 { font-family: Palatino, "Songti SC", serif; font-size: 28px; margin: 0 0 8px; }
+    p { line-height: 1.6; color: #5f584e; }
+    code { background: #f6f3ed; padding: 2px 6px; border-radius: 6px; }
+    a { color: #1f6b4a; }
   </style>
 </head>
 <body>
-  <h1>AI 安全漏洞卡片</h1>
-  <p>在框里输入编号或产品名，例如 ollama。</p>
-  <input id="q" placeholder="搜索" />
-  <table>
-    <thead>
-      <tr>
-        <th>编号</th>
-        <th>产品</th>
-        <th>分数</th>
-        <th>发布时间</th>
-        <th>摘要</th>
-      </tr>
-    </thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <script src="cards.js"></script>
-  <script>
-    var cards = window.CARDS || [];
-    var q = document.getElementById("q");
-    var rows = document.getElementById("rows");
-
-    function show() {
-      var text = q.value.trim().toLowerCase();
-      rows.innerHTML = "";
-      cards.forEach(function (card) {
-        var description = card.description || card.summary || "";
-        var url = card.url || card.link || "";
-        var blob = (card.id + " " + (card.product || "") + " " + description).toLowerCase();
-        if (text && blob.indexOf(text) === -1) return;
-        var tr = document.createElement("tr");
-        tr.innerHTML =
-          "<td><a href='" + url + "' target='_blank' rel='noopener'>" + card.id + "</a></td>" +
-          "<td>" + (card.product || "") + "</td>" +
-          "<td>" + (card.cvss == null ? "原文没有" : card.cvss) + "</td>" +
-          "<td>" + (card.published_at || "").slice(0, 10) + "</td>" +
-          "<td>" + description.slice(0, 140) + "</td>";
-        rows.appendChild(tr);
-      });
-      if (!rows.children.length) {
-        rows.innerHTML = "<tr><td colspan='5'>还没有卡片。请先运行 python collect_nvd.py</td></tr>";
-      }
-    }
-
-    q.addEventListener("input", show);
-    show();
-  </script>
+  <main>
+    <h1>AI 安全知识情报系统</h1>
+    <p>演示页由本地服务打开。在本文件夹的终端执行 <code>python main.py</code>，然后访问 <a href="http://127.0.0.1:8023">http://127.0.0.1:8023</a>。</p>
+  </main>
 </body>
 </html>

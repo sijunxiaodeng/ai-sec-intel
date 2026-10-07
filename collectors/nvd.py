@@ -17,16 +17,44 @@ def fetch_nvd(keyword, limit=10):
         return json.loads(response.read().decode("utf-8"))
 
 
-def cvss_score(cve):
+def cvss_detail(cve):
     metrics = cve.get("metrics") or {}
-    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+    for key, version in (("cvssMetricV31", "3.1"), ("cvssMetricV30", "3.0"), ("cvssMetricV2", "2.0")):
         rows = metrics.get(key) or []
-        if rows:
-            data = rows[0].get("cvssData") or {}
-            score = data.get("baseScore")
-            if score is not None:
-                return score
+        if not rows:
+            continue
+        data = rows[0].get("cvssData") or {}
+        if data.get("baseScore") is None:
+            continue
+        return {
+            "score": data.get("baseScore"),
+            "severity": data.get("baseSeverity"),
+            "version": version,
+            "vector": data.get("vectorString"),
+        }
     return None
+
+
+def cvss_score(cve):
+    detail = cvss_detail(cve)
+    if not detail:
+        return None
+    return detail.get("score")
+
+
+def split_references(cve):
+    links = []
+    exploits = []
+    for ref in (cve.get("references") or [])[:8]:
+        url = ref.get("url")
+        if not url:
+            continue
+        if url not in links:
+            links.append(url)
+        tags = [str(tag).lower() for tag in (ref.get("tags") or [])]
+        if "exploit" in tags and url not in exploits:
+            exploits.append(url)
+    return links[:5], exploits
 
 
 def affected_products(cve):
@@ -45,30 +73,59 @@ def affected_products(cve):
     return unique[:5]
 
 
-def to_card(item, keyword, collected_at):
-    cve = item.get("cve") or {}
-    description = ""
+def describe(cve):
     for row in cve.get("descriptions") or []:
         if row.get("lang") == "en":
-            description = row.get("value") or ""
-            break
-    links = []
-    for ref in (cve.get("references") or [])[:5]:
-        url = ref.get("url")
-        if url:
-            links.append(url)
+            return row.get("value") or ""
+    return ""
+
+
+def to_card(item, keyword, collected_at):
+    cve = item.get("cve") or {}
+    links, exploits = split_references(cve)
+    detail = cvss_detail(cve) or {}
     cve_id = cve.get("id") or ""
-    return normalize({
+    card = normalize({
         "id": cve_id,
         "cve_id": cve_id,
         "title": cve_id,
-        "description": description,
+        "description": describe(cve),
         "source": "NVD",
         "url": "https://nvd.nist.gov/vuln/detail/%s" % cve_id if cve_id else "",
         "published_at": cve.get("published") or "",
         "collected_at": collected_at,
         "product": keyword,
         "affected": affected_products(cve),
-        "cvss": cvss_score(cve),
+        "cvss": detail.get("score"),
         "references": links,
     })
+    card["raw_data"] = {
+        "cvss_score": detail.get("score"),
+        "cvss_severity": detail.get("severity"),
+        "cvss_version": detail.get("version"),
+        "cvss_vector": detail.get("vector"),
+        "exploit_refs": exploits,
+    }
+    return card
+
+
+class NVDCollector(object):
+    """B 的采集接口：collect() 返回 IntelligenceItem 列表。"""
+
+    def __init__(self, keyword="ollama", limit=10):
+        self.keyword = keyword
+        self.limit = limit
+
+    def collect(self):
+        from datetime import datetime, timezone
+
+        from models import intelligence_item
+
+        payload = fetch_nvd(self.keyword, self.limit)
+        collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        items = []
+        for vuln in payload.get("vulnerabilities") or []:
+            card = to_card(vuln, self.keyword, collected_at)
+            if card.get("cve_id"):
+                items.append(intelligence_item(card))
+        return items

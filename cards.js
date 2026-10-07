@@ -1,20 +1,401 @@
 window.CARDS = [
   {
+    "id": "CVE-2026-102697",
+    "cve_id": "CVE-2026-102697",
+    "title": "Ollama 0.14.0 before 0.31.2 Experimental Agent Bash Approval Bypass via Prefix-Based Authorization",
+    "description": "Ollama versions 0.14.0 before 0.31.2 contain an incorrect authorization vulnerability in the experimental agent mode Bash tool approval mechanism that fails to properly parse shell syntax. Attackers who can influence model output through prompt injection can execute additional shell commands by appending control operators like semicolons or logical operators to approved commands, bypassing the session approval requirement.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-102697",
+    "published_at": "2026-09-29T16:46:08.734Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，修复于 0.31.2"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-102697",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/102xxx/CVE-2026-102697.json",
+      "https://github.com/ollama/ollama/releases/tag/v0.31.2",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-102697",
+      "https://www.vulncheck.com/advisories/ollama-0.14.0-before-0.31.2-experimental-agent-bash-approval-bypass-via-prefix-based-authorization",
+      "https://github.com/ollama/ollama/commit/a2b3a5e9a3956bc0700a8505580c11faf4da09b5",
+      "https://github.com/ollama/ollama",
+      "https://github.com/ollama/ollama/blob/v0.31.1/x/agent/approval.go#L204-L206"
+    ]
+  },
+  {
+    "id": "CVE-2026-86289",
+    "cve_id": "CVE-2026-86289",
+    "title": "Ollama GGUF Decoder gguf.go readGGUFV1String integer overflow",
+    "description": "A vulnerability was found in Ollama up to 0.31.1. This issue affects the function readGGUFV1String of the file fs/ggml/gguf.go of the component GGUF Decoder. Performing a manipulation results in integer overflow. The attack is possible to be carried out remotely. The exploit has been made public and could be used. Upgrading to version 0.31.2-rc1 is capable of addressing this issue. The patch is named 67b6a1c2d45321e0cb3c04a18073f9818de7724b. It is recommended to upgrade the affected component.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-86289",
+    "published_at": "2026-09-07T08:45:15.290Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.31.0",
+      "ollama，受影响至 0.31.1"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-86289",
+      "https://github.com/ollama/ollama/",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/86xxx/CVE-2026-86289.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-86289",
+      "https://vuldb.com/cve/CVE-2026-86289",
+      "https://vuldb.com/submit/906136",
+      "https://vuldb.com/vuln/399448",
+      "https://github.com/ollama/ollama/issues/17033"
+    ]
+  },
+  {
+    "id": "CVE-2026-85180",
+    "cve_id": "CVE-2026-85180",
+    "title": "Ollama 0.30.0 through 0.33.2 SSRF via Cross-Host Tensor Blob Redirect",
+    "description": "Ollama fails to validate redirect destinations when pulling tensor-layer models, allowing unauthenticated attackers to redirect blob downloads to arbitrary hosts. An attacker can control a registry, serve a malicious tensor-layer manifest, and cause the server to issue GET requests to internal hosts including cloud metadata endpoints.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-85180",
+    "published_at": "2026-09-03T14:12:19.048Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.33.2"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-85180",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/85xxx/CVE-2026-85180.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-85180",
+      "https://www.vulncheck.com/advisories/ollama-0.30.0-through-0.33.2-ssrf-via-cross-host-tensor-blob-redirect",
+      "https://github.com/ollama/ollama/issues/17041",
+      "https://github.com/ollama/ollama",
+      "https://github.com/ollama/ollama/blob/v0.33.2/x/transfer/download.go"
+    ]
+  },
+  {
+    "id": "CVE-2026-15685",
+    "cve_id": "CVE-2026-15685",
+    "title": "Ollama downloadBlob Improper Validation of Array Index Denial-of-Service Vulnerability",
+    "description": "Ollama downloadBlob Improper Validation of Array Index Denial-of-Service Vulnerability. This vulnerability allows remote attackers to create a denial-of-service condition on affected installations of Ollama. Authentication is not required to exploit this vulnerability.\n\nThe specific flaw exists within the downloadBlob function. The issue results from the lack of proper validation of user-supplied data, which can result in a memory access past the end of an allocated array. An attacker can leverage this vulnerability to create a denial-of-service condition on the system. Was ZDI-CAN-27277.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-15685",
+    "published_at": "2026-07-13T21:30:09.180Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.7.1-NA"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-15685",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/15xxx/CVE-2026-15685.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-15685",
+      "https://www.zerodayinitiative.com/advisories/ZDI-26-403/"
+    ]
+  },
+  {
+    "id": "CVE-2026-5757",
+    "cve_id": "CVE-2026-5757",
+    "title": "There exists an unauthenticated remote information disclosure vulnerability in Ollama's model quantization engine",
+    "description": "Unauthenticated remote information disclosure vulnerability in Ollama's model quantization engine allows an attacker to read and exfiltrate the server's heap memory, potentially leading to sensitive data exposure, further compromise, and stealthy persistence.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-5757",
+    "published_at": "2026-06-26T15:15:28.464Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.13.5"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-5757",
+      "https://kb.cert.org/vuls/id/518910",
+      "https://ollama.com",
+      "https://www.kb.cert.org/vuls/id/518910",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/5xxx/CVE-2026-5757.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-5757"
+    ]
+  },
+  {
+    "id": "CVE-2026-7482",
+    "cve_id": "CVE-2026-7482",
+    "title": "Ollama heap out-of-bounds read in GGUF tensor parsing leaks server process memory to unauthenticated remote attackers",
+    "description": "Ollama before 0.17.1 contains a heap out-of-bounds read vulnerability in the GGUF model loader. The /api/create endpoint accepts an attacker-supplied GGUF file in which the declared tensor offset and size exceed the file's actual length; during quantization in fs/ggml/gguf.go and server/quantization.go (WriteTo()), the server reads past the allocated heap buffer. The leaked memory contents may include environment variables, API keys, system prompts, and concurrent users' conversation data, and can be exfiltrated by uploading the resulting model artifact through the /api/push endpoint to an attacker-controlled registry. The /api/create and /api/push endpoints have no authentication in the upstream distribution. Default deployments bind to 127.0.0.1, but the documented OLLAMA_HOST=0.0.0.0 configuration is widely used in practice (large public-internet exposure observed).",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-7482",
+    "published_at": "2026-05-04T12:38:28.464Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，修复于 0.17.1"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-7482",
+      "https://github.com",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/7xxx/CVE-2026-7482.json",
+      "https://github.com/ollama/ollama/releases/tag/v0.17.1",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-7482",
+      "https://github.com/ollama/ollama/commit/88d57d0483cca907e0b23a968c83627a20b21047",
+      "https://github.com/ollama/ollama/pull/14406",
+      "https://github.com/ollama/ollama"
+    ]
+  },
+  {
+    "id": "CVE-2026-42249",
+    "cve_id": "CVE-2026-42249",
+    "title": "Remote Code Execution in Ollama via Update Mechanism",
+    "description": "Ollama for Windows contains a Remote Code Execution vulnerability in its update mechanism due to improper handling of attacker‑controlled HTTP response headers. When downloading updates, the application constructs local file paths using values derived from HTTP headers without validation. These values are passed directly to filepath.Join, allowing path traversal sequences (../) to be resolved and enabling files to be written outside the intended update staging directory.\nAn attacker who can influence update responses can exploit this flaw to write arbitrary executables to attacker‑chosen locations accessible to the current user, including the Windows Startup directory. This allows execution of arbitrary executables.\n\nCritically, when chained with CVE‑2026‑42248 (Missing Signature Verification for Updates), an attacker can deliver malicious payloads that are written to sensitive locations and executed automatically. Because Ollama for Windows performs silent automatic updates and executes staged binaries without user interaction, this results in automatic and persistent code execution without user awareness.\n\nMaintainers of this project were notified early about this vulnerability, but didn't respond with the details of vulnerability or vulnerable version range. Versions from 0.12.10 to 0.17.5 were tested and confirmed as vulnerable, other versions were not tested but might also be vulnerable.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-42249",
+    "published_at": "2026-04-29T11:44:39.807Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.17.5"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-42249",
+      "https://ollama.com/",
+      "https://cert.pl/en/posts/2026/04/CVE-2026-42248/",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/42xxx/CVE-2026-42249.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-42249",
+      "https://github.com/ollama/ollama"
+    ]
+  },
+  {
+    "id": "CVE-2026-42248",
+    "cve_id": "CVE-2026-42248",
+    "title": "Missing Signature Verification for Updates in Ollama",
+    "description": "Ollama for Windows does not perform integrity or authenticity verification of downloaded update executables. Unlike other platforms, the Windows implementation of the update verification routine unconditionally returns success so no digital signature or trust validation is performed before staging or executing update payloads, enabling attacker‑supplied executables to be accepted and later executed by the application.\n\nCritically, Ollama for Windows performs silent automatic updates, so the malicious payload may be installed automatically without user awareness.\n\nMaintainers of this project were notified early about this vulnerability, but didn't respond with the details of vulnerability or vulnerable version range. Versions from 0.12.10 to 0.17.5 were tested and confirmed as vulnerable, other versions were not tested but might also be vulnerable.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-42248",
+    "published_at": "2026-04-29T11:44:33.770Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.17.5"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-42248",
+      "https://ollama.com/",
+      "https://cert.pl/en/posts/2026/04/CVE-2026-42248/",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/42xxx/CVE-2026-42248.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-42248",
+      "https://github.com/ollama/ollama"
+    ]
+  },
+  {
+    "id": "CVE-2026-7020",
+    "cve_id": "CVE-2026-7020",
+    "title": "Ollama Tensor Model Transfer transfer.go digestToPath path traversal",
+    "description": "A security flaw has been discovered in Ollama up to 0.20.2. This affects the function digestToPath of the file x/imagegen/transfer/transfer.go of the component Tensor Model Transfer Handler. The manipulation of the argument digest results in path traversal. The attack may be performed from remote. This attack is characterized by high complexity. The exploitability is reported as difficult. The exploit has been released to the public and may be used for attacks. The vendor was contacted early about this disclosure but did not respond in any way.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-7020",
+    "published_at": "2026-04-26T04:45:11.467Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.20.2"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-7020",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/7xxx/CVE-2026-7020.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-7020",
+      "https://vuldb.com/submit/797576",
+      "https://vuldb.com/vuln/359599",
+      "https://vuldb.com/vuln/359599/cti"
+    ]
+  },
+  {
+    "id": "CVE-2025-66959",
+    "cve_id": "CVE-2025-66959",
+    "title": "CVE-2025-66959",
+    "description": "An issue in ollama v.0.12.10 allows a remote attacker to cause a denial of service via the GGUF decoder",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-66959",
+    "published_at": "2026-01-21T00:00:00Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.12.10-NA"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-66959",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/66xxx/CVE-2025-66959.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-66959",
+      "https://github.com/ollama/ollama/issues/9820",
+      "https://zero.shotlearni.ng/blog/cve-2025-66959panic-dos-via-unchecked-length-in-gguf-decoder-copy/"
+    ]
+  },
+  {
+    "id": "CVE-2025-66960",
+    "cve_id": "CVE-2025-66960",
+    "title": "CVE-2025-66960",
+    "description": "An issue in ollama v.0.12.10 allows a remote attacker to cause a denial of service via the fs/ggml/gguf.go, function readGGUFV1String reads a string length from untrusted GGUF metadata",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-66960",
+    "published_at": "2026-01-21T00:00:00Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.12.10-NA"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-66960",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/66xxx/CVE-2025-66960.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-66960",
+      "https://github.com/ollama/ollama/issues/9820",
+      "https://zero.shotlearni.ng/blog/cve-2025-66960guf-v1-string-length-cause-panic-in-readggufv1string/"
+    ]
+  },
+  {
+    "id": "CVE-2025-15514",
+    "cve_id": "CVE-2025-15514",
+    "title": "Ollama Multi-Modal Model Image Processing NULL Pointer Dereference",
+    "description": "Ollama 0.11.5-rc0 through current version 0.13.5 contain a null pointer dereference vulnerability in the multi-modal model image processing functionality. When processing base64-encoded image data via the /api/chat endpoint, the application fails to validate that the decoded data represents valid media before passing it to the mtmd_helper_bitmap_init_from_buf function. This function can return NULL for malformed input, but the code does not check this return value before dereferencing the pointer in subsequent operations. A remote attacker can exploit this by sending specially crafted base64 image data that decodes to invalid media, causing a segmentation fault and crashing the runner process. This results in a denial of service condition where the model becomes unavailable to all users until the service is restarted.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-15514",
+    "published_at": "2026-01-12T23:03:52.922Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.13.5",
+      "ollama，受影响至 0.11.5-NA",
+      "ollama，受影响至 0.11.5-rc3",
+      "ollama，受影响至 0.11.5-rc4",
+      "ollama，受影响至 0.11.5-rc5"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-15514",
+      "https://https://github.com/ollama/ollama",
+      "https://ollama.com/",
+      "https://security.access.redhat.com/data/csaf/v2/vex/2025/cve-2025-15514.json",
+      "https://access.redhat.com/security/cve/CVE-2025-15514",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/15xxx/CVE-2025-15514.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-15514",
+      "https://www.vulncheck.com/advisories/ollama-multi-modal-image-processing-null-pointer-dereference"
+    ]
+  },
+  {
+    "id": "CVE-2025-63389",
+    "cve_id": "CVE-2025-63389",
+    "title": "CVE-2025-63389",
+    "description": "A critical authentication bypass vulnerability exists in Ollama platform's API endpoints in versions prior to and including v0.12.3. The platform exposes multiple API endpoints without requiring authentication, enabling remote attackers to perform unauthorized model management operations.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-63389",
+    "published_at": "2025-12-18T00:00:00Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.12.3"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-63389",
+      "https://gist.github.com/Cristliu/48dae561696374744d9fced07a544ecd",
+      "https://gist.github.com/Cristliu/b6f4d070fb27932f581be1aadc0923e7",
+      "https://github.com/ollama/ollama/issues",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/63xxx/CVE-2025-63389.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-63389"
+    ]
+  },
+  {
+    "id": "CVE-2025-44779",
+    "cve_id": "CVE-2025-44779",
+    "title": "CVE-2025-44779",
+    "description": "An issue in Ollama v0.1.33 allows attackers to delete arbitrary files via sending a crafted packet to the endpoint /api/pull.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-44779",
+    "published_at": "2025-08-07T00:00:00Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.1.33-NA"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-44779",
+      "https://a1batr0ss.top/2025/03/17/Ollama-arbitrary-file-deletion-vulnerability/",
+      "https://a1batr0ss.top/2025/08/06/CVE-2025-44779-Ollama-arbitrary-file-deletion/",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/44xxx/CVE-2025-44779.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-44779",
+      "https://github.com/ollama/ollama"
+    ]
+  },
+  {
+    "id": "CVE-2025-51471",
+    "cve_id": "CVE-2025-51471",
+    "title": "CVE-2025-51471",
+    "description": "Cross-Domain Token Exposure in server.auth.getAuthorizationToken in Ollama 0.6.7 allows remote attackers to steal authentication tokens and bypass access controls via a malicious realm value in a WWW-Authenticate header returned by the /api/pull endpoint.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-51471",
+    "published_at": "2025-07-22T00:00:00Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.6.7-NA"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-51471",
+      "https://huntr.com/bounties/94eea285-fd65-4e01-a035-f533575ebdc2",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/51xxx/CVE-2025-51471.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-51471",
+      "https://github.com/ollama/ollama/pull/10750",
+      "https://github.com/ollama/ollama",
+      "https://www.gecko.security/blog/cve-2025-51471"
+    ]
+  },
+  {
+    "id": "CVE-2025-1975",
+    "cve_id": "CVE-2025-1975",
+    "title": "Improper Validation of Array Index in ollama/ollama",
+    "description": "A vulnerability in the Ollama server version 0.5.11 allows a malicious user to cause a Denial of Service (DoS) attack by customizing the manifest content and spoofing a service. This is due to improper validation of array index access when downloading a model via the /api/pull endpoint, which can lead to a server crash.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-1975",
+    "published_at": "2025-05-16T08:25:57.177Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.5.11"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-1975",
+      "https://huntr.com/bounties/921ba5d4-f1d0-4c66-9764-4f72dffe7acd",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/1xxx/CVE-2025-1975.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-1975"
+    ]
+  },
+  {
     "id": "CVE-2025-0312",
     "cve_id": "CVE-2025-0312",
     "title": "CVE-2025-0312",
     "description": "A vulnerability in ollama/ollama versions <=0.3.14 allows a malicious user to create a customized GGUF model file that, when uploaded and created on the Ollama server, can cause a crash due to an unchecked null pointer dereference. This can lead to a Denial of Service (DoS) attack via remote network.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0312",
     "published_at": "2025-03-20T10:15:52.280",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，受影响至 0.3.14"
     ],
     "cvss": 7.5,
     "references": [
-      "https://huntr.com/bounties/522c87b6-a7ac-41b2-84f3-62fd58921f21"
+      "https://huntr.com/bounties/522c87b6-a7ac-41b2-84f3-62fd58921f21",
+      "https://osv.dev/vulnerability/CVE-2025-0312",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/0xxx/CVE-2025-0312.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-0312"
     ]
   },
   {
@@ -22,17 +403,21 @@ window.CARDS = [
     "cve_id": "CVE-2024-8063",
     "title": "CVE-2024-8063",
     "description": "A divide by zero vulnerability exists in ollama/ollama version v0.3.3. The vulnerability occurs when importing GGUF models with a crafted type for `block_count` in the Modelfile. This can lead to a denial of service (DoS) condition when the server processes the model, causing it to crash.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-8063",
     "published_at": "2025-03-20T10:15:40.757",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 0.3.3"
+      "ollama 0.3.3",
+      "ollama，受影响至 0.3.3"
     ],
     "cvss": 7.5,
     "references": [
-      "https://huntr.com/bounties/fd8e1ed6-21d2-4c9e-8395-2098f11b7db9"
+      "https://huntr.com/bounties/fd8e1ed6-21d2-4c9e-8395-2098f11b7db9",
+      "https://osv.dev/vulnerability/CVE-2024-8063",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/8xxx/CVE-2024-8063.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-8063"
     ]
   },
   {
@@ -40,17 +425,63 @@ window.CARDS = [
     "cve_id": "CVE-2024-12055",
     "title": "CVE-2024-12055",
     "description": "A vulnerability in Ollama versions <=0.3.14 allows a malicious user to create a customized gguf model file that can be uploaded to the public Ollama server. When the server processes this malicious model, it crashes, leading to a Denial of Service (DoS) attack. The root cause of the issue is an out-of-bounds read in the gguf.go file.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-12055",
     "published_at": "2025-03-20T10:15:26.647",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，受影响至 0.3.14"
     ],
     "cvss": 7.5,
     "references": [
-      "https://huntr.com/bounties/7b111d55-8215-4727-8807-c5ed4cf1bfbe"
+      "https://huntr.com/bounties/7b111d55-8215-4727-8807-c5ed4cf1bfbe",
+      "https://osv.dev/vulnerability/CVE-2024-12055",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/12xxx/CVE-2024-12055.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-12055"
+    ]
+  },
+  {
+    "id": "CVE-2025-0317",
+    "cve_id": "CVE-2025-0317",
+    "title": "Divide By Zero in ollama/ollama",
+    "description": "A vulnerability in ollama/ollama versions <=0.3.14 allows a malicious user to upload and create a customized GGUF model file on the Ollama server. This can lead to a division by zero error in the ggufPadding function, causing the server to crash and resulting in a Denial of Service (DoS) attack.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-0317",
+    "published_at": "2025-03-20T10:10:02.331Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.3.14"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-0317",
+      "https://huntr.com/bounties/a9951bca-9bd8-49b2-b143-4cd4219f9fa0",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/0xxx/CVE-2025-0317.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-0317"
+    ]
+  },
+  {
+    "id": "CVE-2025-0315",
+    "cve_id": "CVE-2025-0315",
+    "title": "Allocation of Resources Without Limits or Throttling in ollama/ollama",
+    "description": "A vulnerability in ollama/ollama <=0.3.14 allows a malicious user to create a customized GGUF model file, upload it to the Ollama server, and create it. This can cause the server to allocate unlimited memory, leading to a Denial of Service (DoS) attack.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2025-0315",
+    "published_at": "2025-03-20T10:09:48.446Z",
+    "collected_at": "2026-10-07T14:35:24Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，受影响至 0.3.14"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2025-0315",
+      "https://huntr.com/bounties/da414d29-b55a-496f-b135-17e0fcec67bc",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2025/0xxx/CVE-2025-0315.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2025-0315"
     ]
   },
   {
@@ -58,17 +489,21 @@ window.CARDS = [
     "cve_id": "CVE-2024-39722",
     "title": "CVE-2024-39722",
     "description": "An issue was discovered in Ollama before 0.1.46. It exposes which files exist on the server on which it is deployed via path traversal in the api/push route.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39722",
     "published_at": "2024-10-31T20:15:05.080",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.46"
     ],
     "cvss": 7.5,
     "references": [
-      "https://www.oligo.security/blog/more-models-more-probllms"
+      "https://www.oligo.security/blog/more-models-more-probllms",
+      "https://osv.dev/vulnerability/CVE-2024-39722",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/39xxx/CVE-2024-39722.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-39722"
     ]
   },
   {
@@ -76,19 +511,23 @@ window.CARDS = [
     "cve_id": "CVE-2024-39721",
     "title": "CVE-2024-39721",
     "description": "An issue was discovered in Ollama before 0.1.34. The CreateModelHandler function uses os.Open to read a file until completion. The req.Path parameter is user-controlled and can be set to /dev/random, which is blocking, causing the goroutine to run infinitely (even after the HTTP request is aborted by the client).",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39721",
     "published_at": "2024-10-31T20:15:04.993",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.34"
     ],
     "cvss": 7.5,
     "references": [
       "https://github.com/ollama/ollama/blob/9164b0161bcb24e543cba835a8863b80af2c0c21/server/routes.go#L557",
       "https://github.com/ollama/ollama/blob/adeb40eaf29039b8964425f69a9315f9f1694ba8/server/routes.go#L536",
-      "https://www.oligo.security/blog/more-models-more-probllms"
+      "https://www.oligo.security/blog/more-models-more-probllms",
+      "https://osv.dev/vulnerability/CVE-2024-39721",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/39xxx/CVE-2024-39721.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-39721"
     ]
   },
   {
@@ -96,18 +535,22 @@ window.CARDS = [
     "cve_id": "CVE-2024-39720",
     "title": "CVE-2024-39720",
     "description": "An issue was discovered in Ollama before 0.1.46. An attacker can use two HTTP requests to upload a malformed GGUF file containing just 4 bytes starting with the GGUF custom magic header. By leveraging a custom Modelfile that includes a FROM statement pointing to the attacker-controlled blob file, the attacker can crash the application through the CreateModel route, leading to a segmentation fault (signal SIGSEGV: segmentation violation).",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39720",
     "published_at": "2024-10-31T20:15:04.877",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.46"
     ],
     "cvss": 8.2,
     "references": [
       "https://github.com/ollama/ollama/compare/v0.1.45...v0.1.46#diff-782c2737eecfa83b7cb46a77c8bdaf40023e7067baccd4f806ac5517b4563131L417",
-      "https://oligo.security/blog/more-models-more-probllms"
+      "https://oligo.security/blog/more-models-more-probllms",
+      "https://osv.dev/vulnerability/CVE-2024-39720",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/39xxx/CVE-2024-39720.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-39720"
     ]
   },
   {
@@ -115,17 +558,21 @@ window.CARDS = [
     "cve_id": "CVE-2024-39719",
     "title": "CVE-2024-39719",
     "description": "An issue was discovered in Ollama through 0.3.14. File existence disclosure can occur via api/create. When calling the CreateModel route with a path parameter that does not exist, it reflects the \"File does not exist\" error message to the attacker, providing a primitive for file existence on the server.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39719",
     "published_at": "2024-10-31T20:15:04.770",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，受影响至 0.3.14"
     ],
     "cvss": 7.5,
     "references": [
-      "https://www.oligo.security/blog/more-models-more-probllms"
+      "https://www.oligo.security/blog/more-models-more-probllms",
+      "https://osv.dev/vulnerability/CVE-2024-39719",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/39xxx/CVE-2024-39719.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-39719"
     ]
   },
   {
@@ -133,18 +580,22 @@ window.CARDS = [
     "cve_id": "CVE-2024-45436",
     "title": "CVE-2024-45436",
     "description": "extractFromZipFile in model.go in Ollama before 0.1.47 can extract members of a ZIP archive outside of the parent directory.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-45436",
     "published_at": "2024-08-29T03:15:05.460",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.47"
     ],
     "cvss": 7.5,
     "references": [
       "https://github.com/ollama/ollama/compare/v0.1.46...v0.1.47",
-      "https://github.com/ollama/ollama/pull/5314"
+      "https://github.com/ollama/ollama/pull/5314",
+      "https://osv.dev/vulnerability/CVE-2024-45436",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/45xxx/CVE-2024-45436.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-45436"
     ]
   },
   {
@@ -152,13 +603,14 @@ window.CARDS = [
     "cve_id": "CVE-2024-37032",
     "title": "CVE-2024-37032",
     "description": "Ollama before 0.1.34 does not validate the format of the digest (sha256 with 64 hex digits) when getting the model path, and thus mishandles the TestGetBlobsPath test cases such as fewer than 64 hex digits, more than 64 hex digits, or an initial ../ substring.",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
     "published_at": "2024-05-31T04:15:09.617",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.34"
     ],
     "cvss": 8.8,
     "references": [
@@ -166,7 +618,9 @@ window.CARDS = [
       "https://github.com/ollama/ollama/compare/v0.1.33...v0.1.34",
       "https://github.com/ollama/ollama/pull/4175",
       "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032",
-      "https://github.com/ollama/ollama/blob/adeb40eaf29039b8964425f69a9315f9f1694ba8/server/modelpath_test.go#L41-L58"
+      "https://osv.dev/vulnerability/CVE-2024-37032",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/37xxx/CVE-2024-37032.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-37032"
     ]
   },
   {
@@ -174,21 +628,23 @@ window.CARDS = [
     "cve_id": "CVE-2024-28224",
     "title": "CVE-2024-28224",
     "description": "Ollama before 0.1.29 has a DNS rebinding vulnerability that can inadvertently allow remote access to the full API, thereby letting an unauthorized user chat with a large language model, delete a model, or cause a denial of service (resource exhaustion).",
-    "source": "NVD",
+    "source": "NVD、OSV",
     "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-28224",
     "published_at": "2024-04-08T19:15:07.353",
     "collected_at": "2026-10-07T08:25:09Z",
     "product": "ollama",
     "affected": [
-      "ollama 见原文"
+      "ollama 见原文",
+      "ollama，修复于 0.1.29"
     ],
     "cvss": 6.6,
     "references": [
       "https://github.com/ollama/ollama/releases",
       "https://research.nccgroup.com/2024/04/08/technical-advisory-ollama-dns-rebinding-attack-cve-2024-28224/",
       "https://www.nccgroup.trust/us/our-research/?research=Technical+advisories",
-      "https://github.com/ollama/ollama/releases",
-      "https://research.nccgroup.com/2024/04/08/technical-advisory-ollama-dns-rebinding-attack-cve-2024-28224/"
+      "https://osv.dev/vulnerability/CVE-2024-28224",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/28xxx/CVE-2024-28224.json",
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-28224"
     ]
   }
 ];

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI 安全知识情报系统</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="side">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <strong>AI 安全知识情报</strong>
+          <em>赛题九 · 监测 / 富化 / 问答</em>
+        </div>
+      </div>
+      <nav class="nav" aria-label="功能">
+        <button type="button" data-view="overview" class="is-on">总览</button>
+        <button type="button" data-view="monitor">情报监测</button>
+        <button type="button" data-view="enrich">情报富化</button>
+        <button type="button" data-view="ask">情报问答</button>
+        <button type="button" data-view="settings">模型设置</button>
+      </nav>
+      <p class="side-note">同一条工作流：发现漏洞，补齐公开字段，再按证据回答。</p>
+    </aside>
+    <div class="main">
+      <header class="top">
+        <div>
+          <p class="eyebrow">智能体驱动的知识情报系统</p>
+          <h1 id="page-title">总览</h1>
+        </div>
+        <div id="llm-pill" class="pill">正在读取配置</div>
+      </header>
+      <div id="banner" class="banner" hidden></div>
+
+      <section id="overview" class="view">
+        <div class="stats" id="stats"></div>
+        <p id="monitor-line" class="hint"></p>
+        <ol class="flow" id="flow">
+          <li><b>监测</b><span>从 NVD 和 OSV 拉取，并按编号合并</span></li>
+          <li><b>富化</b><span>抄写 CVSS，并查询 EPSS、KEV</span></li>
+          <li><b>入库</b><span>同一编号合并成一条情报</span></li>
+          <li><b>问答</b><span>先检索，再组织回答</span></li>
+          <li><b>核对</b><span>编号和分数必须来自证据</span></li>
+        </ol>
+        <div class="split">
+          <article class="panel">
+            <header class="panel-head">
+              <h2>最近入库</h2>
+              <button type="button" class="text-btn" id="goto-monitor">去监测</button>
+            </header>
+            <div id="recent"></div>
+          </article>
+          <article class="panel">
+            <header class="panel-head"><h2>最近一次智能体步骤</h2></header>
+            <div id="steps"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="monitor" class="view" hidden>
+        <form id="collect-form" class="toolbar">
+          <label>监测关键词
+            <input id="keyword" value="ollama" />
+          </label>
+          <button type="submit" class="primary" id="collect-btn">开始监测</button>
+          <p class="hint">一次监测会同时询问 NVD 和 OSV。某一个失败时，另一个仍会入库。同一编号合并成一条。</p>
+        </form>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>情报列表</h2>
+            <input id="filter" placeholder="按编号或产品筛选" />
+          </div>
+          <div id="monitor-list"></div>
+        </div>
+      </section>
+
+      <section id="enrich" class="view" hidden>
+        <div class="toolbar">
+          <button type="button" class="primary" id="enrich-btn">查询 EPSS、KEV 与论文</button>
+          <p class="hint">分数来自 NVD。EPSS 与 KEV 来自公开目录。论文和未标注的利用链接保持空白。</p>
+        </div>
+        <div class="split enrich-layout">
+          <div class="panel" id="enrich-list"></div>
+          <article class="panel" id="enrich-detail">
+            <p class="empty">从左侧选择一条情报，查看富化结果。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="ask" class="view" hidden>
+        <form id="ask-form" class="ask-box">
+          <label>问题
+            <textarea id="question" rows="3" placeholder="例如：CVE-2025-0312 的风险有多高？影响哪个版本？"></textarea>
+          </label>
+          <div class="ask-row">
+            <label>围绕这条情报
+              <select id="focus"></select>
+            </label>
+            <button type="submit" class="primary" id="ask-btn">提问</button>
+          </div>
+          <div class="prompts" id="prompts"></div>
+        </form>
+        <div class="split">
+          <article class="panel">
+            <header class="panel-head"><h2>回答</h2><span id="verdict"></span></header>
+            <div id="answer" class="answer"><p class="empty">提问后，这里给出带来源的回答。</p></div>
+            <div id="ask-steps"></div>
+          </article>
+          <article class="panel">
+            <header class="panel-head"><h2>证据</h2></header>
+            <div id="evidence"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="settings" class="view" hidden>
+        <form id="settings-form" class="panel settings">
+          <h2>国产大模型接口</h2>
+          <p class="hint">使用 OpenAI 兼容地址。DeepSeek 默认是 https://api.deepseek.com/v1 ，模型名 deepseek-chat。通义千问可改成兼容模式地址和对应模型名。密钥只保存在本机。</p>
+          <label>API 地址
+            <input id="base-url" placeholder="https://api.deepseek.com/v1" />
+          </label>
+          <label>模型名
+            <input id="model-name" placeholder="deepseek-chat" />
+          </label>
+          <label>API Key
+            <input id="api-key" type="password" placeholder="留空表示不修改已保存的密钥" autocomplete="off" />
+          </label>
+          <p id="key-hint" class="hint"></p>
+          <div class="ask-row">
+            <button type="submit" class="primary">保存</button>
+            <button type="button" id="test-llm" class="ghost">测试连接</button>
+          </div>
+          <p id="test-result" class="hint"></p>
+        </form>
+      </section>
+    </div>
+  </div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>
