@@ -7,6 +7,7 @@ var titles = {
 };
 
 var prompts = [
+  "CVE-2024-37032 的受影响版本是什么，如何修复？有没有修复记录？",
   "CVE-2025-0312 的风险有多高？影响哪个版本？",
   "ollama 相关漏洞里，哪些写了受影响版本？",
   "当前记录有没有被标成 Exploit 的链接？"
@@ -242,6 +243,20 @@ function loadAsk() {
   }).catch(showError);
 }
 
+$("sample-btn").addEventListener("click", function () {
+  var button = $("sample-btn");
+  button.disabled = true;
+  clearError();
+  api("/api/sample", { method: "POST" }).then(function (sample) {
+    return api("/api/items").then(function (data) {
+      fillFocus(data.items || []);
+      $("focus").value = sample.cve_id;
+      $("question").value = prompts[0];
+      button.textContent = "历史样例已载入";
+    });
+  }).catch(showError).then(function () { button.disabled = false; });
+});
+
 function loadSettings() {
   api("/api/settings").then(function (data) {
     $("base-url").value = data.base_url || "";
@@ -319,13 +334,24 @@ $("ask-form").addEventListener("submit", function (event) {
     var answer = $("answer");
     clear(answer);
     add(answer, "div", "", data.answer);
-    $("verdict").textContent = data.verdict.passed ? "核对通过" : "核对未通过";
+    $("verdict").textContent = !data.evidence.length ? "证据不足" : (data.verdict.passed ? "引用、编号与分数检查通过" : "检查未通过");
     renderSteps($("ask-steps"), data.steps);
     var evidence = $("evidence");
     clear(evidence);
     if (!data.evidence.length) {
       add(evidence, "p", "empty", "没有召回到情报。");
     }
+    (data.evidence_chunks || []).forEach(function (chunk) {
+      var block = add(evidence, "div", "evidence-chunk");
+      add(block, "div", "title", "[" + chunk.citation_id + "] " + chunk.title);
+      add(block, "p", "desc", chunk.text);
+      add(block, "div", "meta", "原文定位：" + chunk.locator);
+      add(block, "div", "meta", "获取日期：" + dateText(chunk.retrieved_at) + " · " + (chunk.text_kind === "reviewed_manual_summary" ? "人工核对摘要" : "来源片段"));
+      var link = add(block, "a", "", "打开这段证据的来源");
+      link.href = chunk.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+    });
     data.evidence.forEach(function (item, index) {
       var block = add(evidence, "div", "mini");
       var text = add(block, "div");

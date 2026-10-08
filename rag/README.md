@@ -47,9 +47,46 @@ hits = search_evidence("路径遍历", top_k=3)
 result = answer("如何修复？", cve_id=record["item"]["cve_id"])
 ```
 
-这是词法检索与抽取式问答基线。多文档组合依据人工主题标签和来源片段，还没有实现向量语义检索、自动文章关联、自由推理或大模型生成。CLI 默认固定在这一条样例上下文；未知编号会拒答。通用产品和资产判断需要后续补充实体识别与资产证据。
+首日 CLI 保留词法检索与抽取式问答基线。多文档组合依据人工主题标签和来源片段；CLI 默认固定在这一条样例上下文，未知编号会拒答。下一步接入见下文。通用产品和资产判断仍需要补充实体识别与资产证据。
 
-这一步没有改动主流程、主数据模型、采集器和 Web 问答接口；主系统暂时不会自动展示这个独立样例入口。公共模型允许扩展的 raw_data.reviewed_facts 保存了富化结论与 evidence_ids，便于后续联调。现有 `rag.retrieve.search()` 返回整条情报；新增 `search_evidence()` 返回片段，不改变其返回格式。
+公共模型允许扩展的 raw_data.reviewed_facts 保存了富化结论与 evidence_ids。`rag.retrieve.search()` 继续返回整条情报，现附带 evidence_chunks；`search_evidence()` 继续提供首日 BM25 基线。主数据模型、采集器和编排步骤顺序保持兼容。
+
+## 第二步：混合检索与网页问答
+
+使用 Python 3.10 或更新版本，在仓库根目录准备依赖：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-rag.txt
+.venv\Scripts\python.exe -m rag.prepare --semantic
+.venv\Scripts\python.exe main.py
+```
+
+打开 http://127.0.0.1:8023 ，进入「情报问答」，点击「载入历史演示样例」，再提问。按钮只载入人工样例，不会下载模型或运行联网监测；模型下载发生在显式的 --semantic 准备步骤。
+
+若 Windows 的 Python 下载客户端出现 TLS 超时，可使用 PowerShell 从同一个官方模型仓库下载，然后加载本地目录：
+
+```powershell
+& .\rag\download_model.ps1
+.venv\Scripts\python.exe -m rag.prepare --semantic --model-dir data/models/bge-small-zh-v1.5-local
+```
+
+下载脚本固定官方仓库修订 46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59，并核对仓库提供的 LFS 文件 SHA256；不降低 TLS 校验。
+
+向量检索使用 [FastEmbed](https://qdrant.github.io/fastembed/) 的 [BAAI/bge-small-zh-v1.5 中文模型](https://qdrant.github.io/fastembed/examples/Supported_Models/)，CPU 推理，512 维。BM25 与向量检索的名次通过 RRF 合并；余弦相似度门槛 0.45 是初始工程参数，不是准确率或可信度。SQLite 持久保存片段、向量、模型名称与文本摘要，避免旧向量被用于新证据。查询时只加载本机模型；缺依赖、索引未准备好或文本更新时明确回退到 BM25，重新运行准备命令即可重建。
+
+当前向量索引覆盖人工核对样例的 8 个片段。监测库中的其他卡片仍按现有字段检索，还没有实现自动抓取参考文章正文、自动关联文章和资产核验。人工主题标签辅助多意图召回，不能当作已实现通用多跳推理的证明。
+
+网页证据区展示完整片段、稳定引用标识、来源链接、原文定位、获取日期和摘要类型。原有 evidence 字段继续返回卡片摘要，新增 evidence_chunks 字段返回片段，旧调用方可继续使用。历史样例不新增为实时监测数据源。
+
+未配置大模型时直接摘录证据；配置现有 DeepSeek/通义兼容接口后，问答会使用片段组织回答。引用标识、编号、显式评分或 PoC 验证状态检查失败时回退到摘录。这些检查不等同于完整的语义事实核验，也没有在本次工作中用真实付费模型接口验证回答质量。
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.venv\Scripts\python.exe -m unittest discover -s questions -p "test_*.py" -v
+```
+
+这套测试覆盖混合检索融合、模型不可用回退、证据更新失效、未知范围拒答、引用检查及 API 集成；使用临时数据库，不运行联网采集。原 requirements.txt 的 Pydantic 从 1.10.13 更新为 1.10.26，以兼容本机 Python 3.12 的 ForwardRef 接口；没有迁移到 Pydantic 2。
 
 ## 验收及仓库范围
 

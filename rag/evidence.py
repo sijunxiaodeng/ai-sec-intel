@@ -58,6 +58,14 @@ def load_record(cve_id, db_path=DEFAULT_DB):
     return json.loads(row[0]) if row else None
 
 
+def load_records(db_path=DEFAULT_DB):
+    if not Path(db_path).exists():
+        return []
+    with _connection(db_path) as conn:
+        rows = conn.execute("SELECT payload FROM records ORDER BY cve_id").fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
 def _all_evidence(db_path):
     if not Path(db_path).exists():
         return []
@@ -76,10 +84,7 @@ def _tokens(text):
     return tokens
 
 
-def search_evidence(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_DB):
-    """BM25：中文二元字片段与英文词；编号过滤独立于词法得分。"""
-    if not isinstance(top_k, int) or top_k <= 0:
-        return []
+def candidates(query, *, cve_id="", topics=None, db_path=DEFAULT_DB):
     rows = _all_evidence(db_path)
     requested = {value.upper() for value in CVE.findall(query or "")}
     if cve_id:
@@ -91,6 +96,10 @@ def search_evidence(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_D
         rows = [row for row in rows if row["cve_id"] in requested]
     if topics is not None:
         rows = [row for row in rows if set(row["topics"]) & set(topics)]
+    return rows
+
+
+def rank_bm25(query, rows):
     if not rows or not (query or "").strip():
         return []
     terms = set(_tokens(query))
@@ -111,4 +120,12 @@ def search_evidence(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_D
         if score > 0:
             ranked.append(dict(row, score=round(score, 6)))
     ranked.sort(key=lambda row: (-row["score"], row["evidence_id"]))
-    return ranked[:top_k]
+    return ranked
+
+
+def search_evidence(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_DB):
+    """BM25：中文二元字片段与英文词；编号过滤独立于词法得分。"""
+    if not isinstance(top_k, int) or top_k <= 0:
+        return []
+    rows = candidates(query, cve_id=cve_id, topics=topics, db_path=db_path)
+    return rank_bm25(query, rows)[:top_k]

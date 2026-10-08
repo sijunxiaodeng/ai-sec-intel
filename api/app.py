@@ -9,8 +9,7 @@ from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
-from database.store import get_record, load_kb
-from rag.retrieve import search
+from rag.retrieve import get_record, knowledge_records, search
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
@@ -58,14 +57,17 @@ def _summary(record):
         "kev": record.get("kev"),
         "poc_count": len(record.get("poc") or []),
         "paper_count": len(record.get("papers") or []),
+        "sample_mode": (item.get("raw_data") or {}).get("sample_mode"),
     }
 
 
 @app.get("/api/overview")
 def overview():
-    records = load_kb()
+    records = knowledge_records()
     names = []
     for record in records:
+        if (record.get("item", {}).get("raw_data") or {}).get("sample_mode"):
+            continue
         for name in (record.get("item") or {}).get("sources") or []:
             if name and name not in names:
                 names.append(name)
@@ -85,7 +87,7 @@ def overview():
 
 @app.get("/api/items")
 def items(q: str = ""):
-    records = search(q, top_k=50) if q else load_kb()
+    records = search(q, top_k=50) if q else knowledge_records()
     return {"items": [_summary(record) for record in records]}
 
 
@@ -140,7 +142,14 @@ def ask(body: AskBody):
         },
         "steps": result["steps"],
         "evidence": [_summary(record) for record in result["evidence"]],
+        "evidence_chunks": [chunk for record in result["evidence"] for chunk in record.get("evidence_chunks") or []],
     }
+
+
+@app.post("/api/sample")
+def sample():
+    from rag.prepare import prepare
+    return prepare()  # 只载入人工历史样例；不下载模型、不运行采集。
 
 
 @app.get("/api/settings")

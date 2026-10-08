@@ -176,3 +176,7 @@ button.row {
   .main { padding: 20px 16px 40px; }
   .row { grid-template-columns: 1fr; }
 }
+/* 片段证据使用现有页面字号与颜色，允许长标识换行。 */
+.evidence-chunk { padding: 14px 0; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
+.evidence-chunk .title { overflow-wrap: anywhere; }
+.evidence-chunk a { display: inline-block; margin-top: 8px; }

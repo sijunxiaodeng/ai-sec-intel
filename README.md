@@ -48,4 +48,14 @@ python collect_nvd.py
 
 在仓库根目录运行 `python -m rag.demo`，可离线演示 CVE-2024-37032 的富化样例、证据入库、检索和带引用的抽取式问答。它使用 Python 标准库，无须大模型密钥；样例明确标注人工整理，PoC 尚未由本项目复现。
 
-运行和验收说明见 [rag/README.md](rag/README.md)。这是独立的任务 C 开发入口，尚未接入上面的 Web 页面。
+运行和验收说明见 [rag/README.md](rag/README.md)。网页的「情报问答」现可载入历史样例，查看跨文档回答、片段引用及来源。
+
+需要本地中文向量检索时，使用 Python 3.10 或更新版本，执行：
+
+```powershell
+python -m pip install -r requirements-rag.txt
+python -m rag.prepare --semantic
+python main.py
+```
+
+首次准备会下载模型。向量索引尚未就绪时，页面会明确显示使用 BM25。Windows 下载替代入口及测试方法见 [rag/README.md](rag/README.md)。
