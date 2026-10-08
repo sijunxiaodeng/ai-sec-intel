@@ -44,6 +44,11 @@ class SettingsBody(BaseModel):
     api_key: str = ""
 
 
+class LibrarySyncBody(BaseModel):
+    per_source: int = Field(3, ge=1, le=8)
+    include_seeds: bool = True
+
+
 def _summary(record):
     item = record.get("item") or {}
     cvss = record.get("cvss") or {}
@@ -79,6 +84,8 @@ def overview():
             if name and name not in names:
                 names.append(name)
     monitor = monitor_state()
+    from rag.library import overview as library_overview
+    library = library_overview()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
         "items": len(records),
@@ -87,6 +94,8 @@ def overview():
         "latency_count": countable_latency(records),
         "llm_ready": configured(),
         "monitor": monitor,
+        "library": {"documents": library["documents"], "chunks": library["chunks"],
+                    "source_categories": library["source_categories"]},
         "steps": last_steps(),
         "recent": [_summary(record) for record in records[:6]],
     }
@@ -193,6 +202,43 @@ def documents(body: DocumentsBody):
     if not record:
         raise HTTPException(status_code=404, detail="请先收录这条情报")
     return run_documents(record)
+
+
+@app.get("/api/library")
+def library_list(document_type: str = ""):
+    from rag.library import DOCUMENT_TYPES, documents, overview
+    if document_type and document_type not in DOCUMENT_TYPES:
+        raise HTTPException(status_code=422, detail="未知资料类型")
+    return {"items": documents(document_type=document_type), "overview": overview()}
+
+
+@app.get("/api/library/search")
+def library_search(q: str = "", document_type: str = "", cve_id: str = "", top_k: int = 8):
+    from rag.library import search as search_library
+    if len(q) > 4000:
+        raise HTTPException(status_code=422, detail="检索内容过长")
+    try:
+        return search_library(q, top_k, document_type=document_type, cve_id=cve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/library/sync")
+def library_sync(body: LibrarySyncBody):
+    from rag.library import sync
+    try:
+        return sync(per_source=body.per_source, include_seeds=body.include_seeds)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/library/{document_id}")
+def library_detail(document_id: str):
+    from rag.library import detail
+    result = detail(document_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="资料库里没有这份资料")
+    return result
 
 
 @app.post("/api/ask")

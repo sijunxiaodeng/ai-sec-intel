@@ -57,11 +57,12 @@ class PublicRedirect(urllib.request.HTTPRedirectHandler):
 def fetch(url):
     public_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "ai-sec-intel-student/0.3",
-                                                  "Accept": "application/json,text/html,text/plain"})
+                                                  "Accept": "application/json,text/html,text/plain,application/atom+xml,application/xml"})
     opener = urllib.request.build_opener(PublicRedirect())
     with opener.open(request, timeout=15) as response:
         content_type = response.headers.get_content_type()
-        if content_type not in ("application/json", "text/html", "text/plain", "application/xhtml+xml"):
+        if content_type not in ("application/json", "text/html", "text/plain", "application/xhtml+xml",
+                                "application/atom+xml", "application/xml", "text/xml", "application/rss+xml"):
             raise ValueError("暂不支持此文档类型：" + content_type)
         body = response.read(MAX_BYTES + 1)
         if len(body) > MAX_BYTES:
@@ -77,6 +78,9 @@ def fetch_url(url):
     if p.hostname == "github.com" and match:
         owner, repo, number = match.groups()
         return "https://api.github.com/repos/%s/%s/pulls/%s" % (owner, repo, number)
+    advisory = re.fullmatch(r"/([^/]+)/([^/]+)/security/advisories/(GHSA-[\w-]+)", p.path)
+    if p.hostname == "github.com" and advisory:
+        return "https://api.github.com/repos/%s/%s/security-advisories/%s" % advisory.groups()
     if p.hostname == "github.com" and re.fullmatch(r"/advisories/GHSA-[\w-]+", p.path):
         return "https://api.github.com" + p.path
     if p.hostname == "github.com" and p.path.startswith("/CVEProject/cvelistV5/"):

@@ -20,6 +20,7 @@
         <button type="button" data-view="overview" class="is-on">总览</button>
         <button type="button" data-view="monitor">情报监测</button>
         <button type="button" data-view="enrich">情报富化</button>
+        <button type="button" data-view="library">安全资料库</button>
         <button type="button" data-view="assets">资产影响</button>
         <button type="button" data-view="ask">情报问答</button>
         <button type="button" data-view="settings">模型设置</button>
@@ -88,6 +89,27 @@
           <article class="panel" id="enrich-detail">
             <p class="empty">从左侧选择一条情报，查看富化结果。</p>
           </article>
+        </div>
+      </section>
+
+      <section id="library" class="view" hidden>
+        <div class="toolbar">
+          <button type="button" class="primary" id="library-sync">同步公开资料</button>
+          <p class="hint">同步项目公告、研究博客和论文。论文当前收录摘要；历史起始资料不计入实时发现。</p>
+        </div>
+        <p id="library-summary" class="hint"></p>
+        <form id="library-search-form" class="toolbar">
+          <label for="library-query">检索资料<input id="library-query" placeholder="例如：提示注入、模型供应链、vLLM 或 CVE 编号" /></label>
+          <label for="library-type">资料类型<select id="library-type">
+            <option value="">全部</option><option value="vendor_advisory">项目安全公告</option>
+            <option value="vendor_guidance">厂商安全文档</option><option value="research_article">安全研究文章</option>
+            <option value="academic_paper">学术论文</option><option value="standard">技术标准</option><option value="policy">政策法规</option>
+          </select></label>
+          <button type="submit" class="ghost">检索原文</button>
+        </form>
+        <div class="split enrich-layout">
+          <article class="panel"><h2>资料与同步状态</h2><div id="library-sources"></div><div id="library-list"></div></article>
+          <article class="panel"><h2>原文证据</h2><div id="library-evidence"><p class="empty">选择一份资料查看片段，或输入主题检索。</p></div></article>
         </div>
       </section>
 

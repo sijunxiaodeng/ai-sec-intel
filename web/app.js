@@ -2,6 +2,7 @@ var titles = {
   overview: "总览",
   monitor: "情报监测",
   enrich: "情报富化",
+  library: "安全资料库",
   assets: "资产影响",
   ask: "情报问答",
   settings: "模型设置"
@@ -131,6 +132,7 @@ function setView(name) {
   if (name === "overview") loadOverview();
   if (name === "monitor" || name === "enrich") loadItems(name);
   if (name === "ask") loadAsk();
+  if (name === "library") loadLibrary();
   if (name === "assets") loadAssets().catch(showError);
   if (name === "settings") loadSettings();
 }
@@ -146,10 +148,10 @@ function loadOverview() {
       " 小时，开始于 " + dateText(monitor.started_at) +
       "。可计时效的新漏洞 " + data.latency_count +
       " 条。更早公布的记录只用于演示。当前来源：" +
-      ((data.sources || []).join("、") || "还没有");
+      ((data.sources || []).join("、") || "还没有") + "。安全资料库另收录 " + ((data.library || {}).documents || 0) + " 份资料，可在安全资料库查看与检索。";
     [
       [String(data.items), "知识库情报"],
-      [String(data.source_count || 0), "已接入来源"],
+      [String(data.source_count || 0), "漏洞数据库来源"],
       [String(data.latency_count || 0), "可计时效"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
@@ -619,6 +621,80 @@ $("test-llm").addEventListener("click", function () {
   }).catch(function (error) {
     $("test-result").textContent = error.message;
   });
+});
+
+var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文摘要", standard: "技术标准", policy: "政策法规"};
+var libraryScopes = {abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段"};
+var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施"};
+
+function libraryLink(parent, url, text) {
+  var link = add(parent, "a", "", text);
+  link.href = url; link.target = "_blank"; link.rel = "noopener";
+  return link;
+}
+
+function renderLibraryEvidence(data) {
+  var target = $("library-evidence"); clear(target);
+  add(target, "p", "hint", data.notice || "引用对应已存档的提取内容；字符定位不是网页行号。");
+  var rows = data.evidence || [];
+  if (!rows.length) add(target, "p", "empty", "没有匹配的原文。可切换资料类型或检索词。");
+  rows.forEach(function (row) {
+    var block = add(target, "div", "evidence-chunk");
+    add(block, "div", "title", row.title);
+    add(block, "p", "meta", "[" + row.citation_id + "] · " + libraryScopes[row.content_scope]);
+    add(block, "p", "desc", row.text);
+    add(block, "p", "meta", "原文定位：" + row.locator);
+    add(block, "p", "meta", "获取时间：" + dateText(row.retrieved_at));
+    (row.associations || []).forEach(function (relation) {
+      add(block, "p", "meta", relation.entity_id + " · " + relation.reason);
+    });
+    libraryLink(block, row.url, "打开原始来源");
+  });
+}
+
+function loadLibrary() {
+  return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
+    var counts = data.overview.types;
+    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段原文；标准 " + counts.standard + "、政策法规 " + counts.policy + "。";
+    var sources = $("library-sources"); clear(sources);
+    (data.overview.sources || []).forEach(function (source) {
+      add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
+    });
+    (data.overview.failed_documents || []).forEach(function (row) {
+      var block = add(sources, "div", "meta");
+      add(block, "p", "", "资料抓取失败" + (row.retained_previous ? "，保留上次成功证据" : "，尚未入库") + "：" + row.error);
+      libraryLink(block, row.url, "查看失败来源");
+    });
+    var target = $("library-list"); clear(target);
+    if (!data.items.length) add(target, "p", "empty", "此类型尚未收录资料。");
+    data.items.forEach(function (doc) {
+      var block = add(target, "div", "evidence-chunk");
+      var button = add(block, "button", "text-btn", doc.title);
+      button.type = "button";
+      button.addEventListener("click", function () {
+        api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
+      });
+      add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
+      add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段" + (doc.discovery === "historical_seed" ? " · 历史起始资料" : " · 订阅发现") + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
+      add(block, "p", "meta", "主题：" + (doc.topic_tags || []).map(function (tag) { return libraryTopics[tag] || tag; }).join("、"));
+      libraryLink(block, doc.url, "打开来源");
+    });
+  }).catch(showError);
+}
+
+$("library-type").addEventListener("change", function () { loadLibrary(); clear($("library-evidence")); });
+$("library-search-form").addEventListener("submit", function (event) {
+  event.preventDefault(); clearError();
+  api("/api/library/search?q=" + encodeURIComponent($("library-query").value.trim()) + "&document_type=" + encodeURIComponent($("library-type").value)).then(renderLibraryEvidence).catch(showError);
+});
+$("library-sync").addEventListener("click", function () {
+  var button = $("library-sync"); button.disabled = true; button.textContent = "正在同步公开资料…"; clearError();
+  api("/api/library/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({per_source: 3, include_seeds: true})}).then(function (data) {
+    button.textContent = "本轮入库成功 " + data.ok + "/" + data.attempted + " 份";
+    clear($("library-evidence"));
+    add($("library-evidence"), "p", "hint", "资料已更新，请重新选择资料或检索。");
+    return loadLibrary();
+  }).catch(showError).then(function () { button.disabled = false; });
 });
 
 setView("overview");
