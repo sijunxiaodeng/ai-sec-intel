@@ -205,7 +205,7 @@ def assess(cve_id, db_path=DEFAULT_DB):
     report["detail"] = "来源字段自动提取；影响说明依据 CVSS 向量，不是对具体部署的漏洞验证"
     standards = {"4.0": FIRST4, "3.1": FIRST, "3.0": FIRST30}
     report["interpretation_standard"] = standards.get(metrics[0]["version"]) if metrics and explanations else None
-    report["warnings"].append("受影响范围的排除上界不自动等于厂商确认的修复版本")
+    report["warnings"].append("受影响版本范围本身不自动等于厂商确认的修复版本")
     return report
 
 

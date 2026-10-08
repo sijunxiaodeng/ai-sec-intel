@@ -107,7 +107,7 @@ class ModelTest(unittest.TestCase):
         texts += ["按 CVSS 向量解释，%s。" % field for field in (
             "易受攻击系统保密性影响无", "易受攻击系统完整性影响无", "易受攻击系统可用性影响高",
             "后续系统保密性影响无", "后续系统完整性影响无", "后续系统可用性影响无")]
-        texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "PoC 尚未由本项目验证。"]
+        texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "参考链接被来源标为 Exploit。"]
         claims = [{"text": text, "citations": [self.eid]} for text in texts]
         self.assertEqual(len(_render_model_json(json.dumps({"claims": claims}), [self.record]).splitlines()), 17)
         with self.assertRaises(ValueError):
@@ -168,7 +168,8 @@ class ModelTest(unittest.TestCase):
         self.assertNotIn("排除上界", metric_answer)
         self.assertNotIn("资产匹配", metric_answer)
         fix_answer = _extractive([record], "应该怎么修复？", model_attempted=True)
-        self.assertEqual(fix_answer.count("排除上界"), 1)
+        self.assertEqual(fix_answer.count("版本范围本身"), 1)
+        self.assertNotIn("排除上界", fix_answer)
         self.assertIn("本项目未测试修复效果", fix_answer)
         self.assertNotIn(original, fix_answer)
         self.assertIn(original, _extractive([record], "修复文章的原文？"))

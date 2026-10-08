@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "parent_revision": "709bdce",
+  "dataset_sha256": "a31de624aadb7103df6e448984c49df311ca6b1ad0a448f79f450787ddf9af39",
+  "source_manifest": [
+    {
+      "cve_id": "CVE-2024-37032",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+      "response_sha256": "ad4850df5aca8c9f9d430af3c694867bbd17f67637cfbd22428d12e1f1033269",
+      "last_modified": "2026-06-17T07:37:38.427"
+    },
+    {
+      "cve_id": "CVE-2025-0312",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0312",
+      "response_sha256": "8740f42096b5d3e9425b4ac082e7a2c3746222d38ce9a8e44c7b6e7c6e6688da",
+      "last_modified": "2026-06-17T08:26:15.890"
+    },
+    {
+      "cve_id": "CVE-2025-15514",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-15514",
+      "response_sha256": "a499728d44215217fddd7277f7b3872b65df88cd25170e3695dfc35e12754a09",
+      "last_modified": "2026-08-17T19:16:23.087"
+    },
+    {
+      "cve_id": "CVE-2024-37032",
+      "url": "https://github.com/ollama/ollama/pull/4175",
+      "response_sha256": "24340f0dc6e0ffa544a809b58ca89fc0ef0dde371db2024ce5be90bb5f8d33eb",
+      "retrieved_at": "2026-10-08T10:22:36.859888+00:00"
+    }
+  ],
+  "code_sha256": {
+    "agents/citation_guard.py": "1c66ac3fa6b39a53a7583ecb9012e7c4865afe56300ff2fe4882ab6e26dec9c0",
+    "agents/qa_agent.py": "b0130540777e315a4553032cb2457827d94abdeb4d375ba339000bad6d5cfe13",
+    "agents/verifier_agent.py": "74901ea433c6dc5467989b4d8719fbc1d21706d0f4955995051cb0875aa8aa96",
+    "enrichment/assessment.py": "910146d4b77320f83ad7c2ca2d5d5640bea2fdd80c95f3ac7b7e8dad03cc64f3"
+  },
+  "unit_tests_passed": 100,
+  "rules": {
+    "cases": 36,
+    "automatic_passed": 36,
+    "used_model_cases": 0,
+    "accepted_model_automatic_passed": 0,
+    "model_attempted_cases": 0,
+    "model_fallback_cases": 0,
+    "median_seconds": 0.01545,
+    "p95_seconds": 0.0301,
+    "max_seconds": 0.0361,
+    "over_5_seconds": 0,
+    "manual_accuracy": null,
+    "manual_citation_support_rate": null,
+    "accepted_model_manual_accuracy": null
+  },
+  "deepseek_subset": {
+    "run_at": "2026-10-08T12:16:49.386203+00:00",
+    "summary": {
+      "cases": 8,
+      "automatic_passed": 8,
+      "used_model_cases": 5,
+      "accepted_model_automatic_passed": 5,
+      "model_attempted_cases": 8,
+      "model_fallback_cases": 3,
+      "median_seconds": 1.1733500000000001,
+      "p95_seconds": 3.0444,
+      "max_seconds": 3.0444,
+      "over_5_seconds": 0,
+      "manual_accuracy": null,
+      "manual_citation_support_rate": null,
+      "accepted_model_manual_accuracy": null
+    },
+    "case_status": [
+      {
+        "id": "Q01",
+        "automatic_passed": true,
+        "used_model": true,
+        "seconds": 1.2864
+      },
+      {
+        "id": "Q03",
+        "automatic_passed": true,
+        "used_model": true,
+        "seconds": 1.1145
+      },
+      {
+        "id": "Q05",
+        "automatic_passed": true,
+        "used_model": false,
+        "seconds": 1.0644
+      },
+      {
+        "id": "Q14",
+        "automatic_passed": true,
+        "used_model": false,
+        "seconds": 1.0869
+      },
+      {
+        "id": "Q16",
+        "automatic_passed": true,
+        "used_model": true,
+        "seconds": 0.8874
+      },
+      {
+        "id": "Q18",
+        "automatic_passed": true,
+        "used_model": true,
+        "seconds": 2.5395
+      },
+      {
+        "id": "Q23",
+        "automatic_passed": true,
+        "used_model": false,
+        "seconds": 3.0444
+      },
+      {
+        "id": "Q25",
+        "automatic_passed": true,
+        "used_model": true,
+        "seconds": 1.2322
+      }
+    ]
+  },
+  "historical_error_replay": {
+    "method": "上一轮实际服务错误回答的离线回放，不是新模型样本",
+    "blocked": true,
+    "issues": [
+      "引用字段不支持 description 结论：ssvc"
+    ]
+  },
+  "production_smoke": {
+    "cases": 3,
+    "used_model_cases": 2,
+    "context_check_passed": true
+  },
+  "limits": [
+    "这是字段范围和部分可解析数值检查，不是完整语义推理。",
+    "自由文本、未知格式与分片大 JSON 的完整语义及全部数值仍需复核。",
+    "可能保守拒绝正确的另一种表述，后续要评估误拦截。",
+    "8题为公开开发题的定向实测，不是新的36题成绩或独立准确率。",
+    "历史错误回放不是新增模型调用，不计入实测样本。",
+    "实际服务三轮联调与独立证据库评测分开，不合并为准确率。",
+    "未写入人工准确率，原始模型输出与密钥不提交。"
+  ]
+}

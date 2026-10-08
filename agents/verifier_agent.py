@@ -1,4 +1,5 @@
 import re
+from agents.citation_guard import answer_issues
 
 CVE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 SCORE = re.compile(r"CVSS(?!:[234]\.[01]/)(?:\s*v?[234]\.[01])?\s*(?:基础分(?:为|是)?|评分(?:为|是)?|分数(?:为|是)?|为|是|:|：)\s*([0-9]+(?:\.[0-9]+)?)", re.I)
@@ -150,7 +151,8 @@ def run(answer, evidence):
             if not any(word in clause for word in ("未", "没有", "不能", "不代表", "无法")):
                 claims_verified = True
     bad_poc = claims_verified and not verified_poc
-    passed = not missing and not bad_scores and not invalid and not lacks_citations and not bad_poc and not wrong_owner
+    field_issues = answer_issues(answer or "", evidence or [])
+    passed = not missing and not bad_scores and not invalid and not lacks_citations and not bad_poc and not wrong_owner and not field_issues
     notes = []
     if missing:
         notes.append("回答里出现了证据中没有的编号：" + "、".join(missing))
@@ -164,14 +166,15 @@ def run(answer, evidence):
         notes.append("证据没有本项目已验证可用的 PoC 状态")
     if wrong_owner:
         notes.append("显式评分不属于该句引用的漏洞：" + "、".join(wrong_owner))
+    notes.extend(field_issues)
     if passed:
-        notes.append("已检查引用标识、编号与显式评分；尚未验证每个结论与引用原文的语义一致性。")
+        notes.append("已检查引用标识、编号、显式评分与已识别结构化字段范围；未知字段和自由文本的完整语义仍需复核。")
     return {
         "passed": passed,
         "notes": notes,
         "steps": [{
             "role": "核对",
-            "action": "检查引用、编号与分数",
-            "detail": "通过" if passed else "；".join(notes),
+            "action": "检查引用字段、编号与分数",
+            "detail": notes[0] if passed else "；".join(notes),
         }],
     }

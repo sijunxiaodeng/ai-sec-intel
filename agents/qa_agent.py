@@ -5,8 +5,27 @@ from rag.answer import TOPIC_WORDS
 from rag.evidence import CVE, DEFAULT_DB
 import json
 from urllib.parse import urlsplit
+from agents.citation_guard import claim_issues
 
 MAX_CLAIMS = 24
+
+
+def _local_notes(record, question):
+    report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
+    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    notes = []
+    if "poc" in topics and report.get("poc_candidates"):
+        if all(row.get("validation") == "not_run" for row in report["poc_candidates"]):
+            notes.append("系统记录：本项目未运行复现，不能认定已验证可用。")
+    if "remediation" in topics and report.get("status") in ("ok", "partial"):
+        if report.get("fix_records"):
+            if all(row.get("validation", "not_tested") == "not_tested" for row in report["fix_records"]):
+                notes.append("系统记录：本项目未测试修复效果。")
+        else:
+            notes.append("系统记录：当前知识库尚未收录可用的修复记录；不能据此断言厂商没有修复。")
+        if report.get("affected_ranges"):
+            notes.append("评估说明：受影响版本范围本身不能单独证明修复版本；修复版本需核对厂商公告。")
+    return notes
 
 
 def _assessment_lines(record, question):
@@ -35,17 +54,17 @@ def _assessment_lines(record, question):
                 add("按 CVSS 向量解释，%s：%s。" % (row["label"], row["text"]), row["evidence_ids"])
     if "remediation" in topics:
         for row in report["fix_records"]:
-            add("关联修复记录：%s；%s。本项目未测试修复效果。" % (row["title"], row["url"]), row["evidence_ids"])
-        if report["affected_ranges"]:
-            add("受影响范围的排除上界不能单独证明该版本已经修复；修复版本需核对厂商公告。",
-                list(dict.fromkeys(eid for row in report["affected_ranges"] for eid in row["evidence_ids"])))
+            add("关联修复记录：%s；%s。" % (row["title"], row["url"]), row["evidence_ids"])
+        if not report["fix_records"] and "versions" not in topics:
+            for row in report["affected_ranges"]:
+                add("来源配置中的受影响范围：" + row["display"] + "。", row["evidence_ids"])
     if "poc" in topics:
         for row in report["poc_candidates"]:
-            add("NVD 标为 Exploit 的候选参考：%s；本项目未运行复现，不能认定已验证可用。" % row["url"], row.get("evidence_ids", []))
+            add("NVD 标为 Exploit 的候选参考：%s。" % row["url"], row.get("evidence_ids", []))
     if lines:
         for warning in report["warnings"]:
             # 修复版本的边界已在修复回答中带引用说明，不向每个问题重复追加。
-            if "受影响范围的排除上界" in warning:
+            if "受影响范围的排除上界" in warning or "受影响版本范围本身" in warning:
                 continue
             if "评分" in warning and "cvss" not in topics:
                 continue
@@ -92,6 +111,7 @@ def _evidence_text(records, question=""):
         report = (item.get("raw_data") or {}).get("automatic_assessment")
         if report:
             blocks.append("已校验来源字段及向量解释（照抄其引用标识）：\n" + "\n".join(_assessment_lines(record, question)))
+            blocks.append("系统单独追加的状态说明（不是外部证据，不输出到 claims）：\n" + "\n".join(_local_notes(record, question)))
     return "\n".join(blocks)
 
 
@@ -137,6 +157,7 @@ def _extractive(records, question="", model_attempted=False):
         structured = _assessment_lines(record, question)
         if structured:
             lines.extend(structured)
+            lines.extend(_local_notes(record, question))
             topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
             extras = topics & {"ai_relevance", "conditions", "impact", "remediation"}
             report = item.get("raw_data", {}).get("automatic_assessment") or {}
@@ -222,6 +243,10 @@ def _render_model_json(raw, records):
             raise ValueError("模型事实文本无效")
         if not isinstance(citations, list) or not 1 <= len(citations) <= 6 or any(not isinstance(c, str) or c not in allowed for c in citations):
             raise ValueError("模型条目缺少有效引用")
+        cited = [chunk for record in records for chunk in record.get("evidence_chunks", []) if chunk["citation_id"] in citations]
+        problems = claim_issues(text, cited)
+        if problems:
+            raise ValueError("；".join(problems))
         # 有些模型同时在 text 和 citations 写入同一个引用，只渲染一次。
         for citation in dict.fromkeys(citations):
             text = text.replace("[%s]" % citation, "")
@@ -299,6 +324,8 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
                 "NVD 是收录库，评分提供者请使用给定 source 字段，不能把 Secondary 评分说成 NVD 自评。"
                 "直接回答本轮问题，使用简短段落；不要重复整个证据，不输出 Markdown 表格。"
                 "只回答本轮所问的内容，不补充未询问的 SSVC、修复时间线或资产说明；相同含义的提醒只说一次。"
+                "逐条选择真正支持本句的字段：SSVC 不能支持漏洞成因，版本配置不能支持评分或项目状态。"
+                "项目执行状态、知识库缺失状态与修复版本边界由系统单独追加，不输出到 claims，也不要替这些说明附外部引用。"
                 "询问利用条件时须覆盖给定的攻击途径、复杂度、附加攻击要求、权限和用户交互，并明确这是 CVSS 向量解释。"
                 "仅询问权限时回答权限即可。不要把评分向量解释说成已验证的具体部署条件。"
                 "输出 JSON 对象，唯一字段 claims 是数组。每项只有 text（中文事实句）和 citations（给定引用标识数组，不含方括号）。"
@@ -315,6 +342,7 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
     ]
     try:
         answer = _render_model_json(chat(messages, max_tokens=_answer_tokens(records, question), response_format=_answer_format(records)), records)
+        answer += "".join("\n" + note for record in records for note in _local_notes(record, question))
         checked = verify_answer(answer, records)
         omitted = required_fields(answer, records, question)
         if omitted:
