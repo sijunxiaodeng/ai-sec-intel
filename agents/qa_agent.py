@@ -1,6 +1,50 @@
 from config.llm import chat, configured
 from rag.retrieve import search
 from agents.verifier_agent import run as verify_answer
+from rag.answer import TOPIC_WORDS
+
+
+def _assessment_lines(record, question):
+    report = (record["item"].get("raw_data") or {}).get("automatic_assessment")
+    if not report or report["status"] not in ("ok", "partial"):
+        return []
+    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    lines, ids = [], set()
+
+    def add(text, evidence_ids):
+        if evidence_ids:
+            lines.append(text + " " + " ".join("[%s]" % eid for eid in evidence_ids))
+            ids.update(evidence_ids)
+
+    metric = report.get("cvss")
+    if "cvss" in topics and metric:
+        from enrichment.assessment import SEVERITY
+        add("CVSS %s 基础分为 %s，严重等级 %s；向量 %s。评分记录来源：%s，类型 %s。" %
+            (metric["version"], metric["score"], SEVERITY.get(metric["severity"], metric["severity"] or "未提供"), metric["vector"] or "未提供", metric["source"] or "未提供", metric["metric_type"] or "未提供"), metric["evidence_ids"])
+    if "versions" in topics:
+        for row in report["affected_ranges"]:
+            add("来源配置中的受影响范围：" + row["display"] + ("；需要同时核对环境配置逻辑。" if row["requires_environment_review"] else "。"), row["evidence_ids"])
+    for topic, key in (("conditions", "attack_conditions"), ("impact", "technical_impact")):
+        if topic in topics:
+            for row in report[key]:
+                add("按 CVSS 向量解释，%s：%s。" % (row["label"], row["text"]), row["evidence_ids"])
+    if "remediation" in topics:
+        for row in report["fix_records"]:
+            add("关联修复记录：%s；%s。本项目未测试修复效果。" % (row["title"], row["url"]), row["evidence_ids"])
+        if report["affected_ranges"]:
+            lines.append("受影响范围的排除上界不能单独证明该版本已经修复；修复版本需核对厂商公告。")
+    if "poc" in topics:
+        for row in report["poc_candidates"]:
+            add("NVD 标为 Exploit 的候选参考：%s；本项目未运行复现，不能认定已验证可用。" % row["url"], row.get("evidence_ids", []))
+    if lines:
+        lines.append("这是来源字段和评分向量的解释。缺少资产与部署信息，具体资产影响未知。")
+        lines.extend(report["warnings"])
+        known = {chunk["citation_id"] for chunk in record.get("evidence_chunks") or []}
+        for chunk in report["evidence"]:
+            if chunk["citation_id"] in ids and chunk["citation_id"] not in known:
+                record.setdefault("evidence_chunks", []).append(chunk)
+                known.add(chunk["citation_id"])
+    return lines
 
 
 def _evidence_text(records):
@@ -30,6 +74,9 @@ def _evidence_text(records):
         for chunk in record.get("evidence_chunks") or []:
             blocks.append("[%s] %s | 来源 %s | 定位 %s | %s" % (
                 chunk["citation_id"], chunk["text"], chunk["url"], chunk["locator"], chunk["text_kind"]))
+        report = (item.get("raw_data") or {}).get("automatic_assessment")
+        if report:
+            blocks.append("字段提取与评估边界：" + "；".join(report["warnings"]) + "；" + report["asset_impact"]["reason"])
     return "\n".join(blocks)
 
 
@@ -65,13 +112,21 @@ def _field_line(record):
     return score + version + extra
 
 
-def _extractive(records):
+def _extractive(records, question=""):
     if not records:
         return "当前知识库里没有能回答这个问题的情报。"
     lines = []
     for index, record in enumerate(records, start=1):
         item = record.get("item") or {}
         lines.append("[%d] %s" % (index, item.get("cve_id") or "无编号"))
+        structured = _assessment_lines(record, question)
+        if structured:
+            lines.extend(structured)
+            topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+            extras = topics & {"ai_relevance", "conditions", "impact", "remediation"}
+            lines.extend("来源补充原文：%s [%s]" % (chunk["text"], chunk["citation_id"]) for chunk in record.get("evidence_chunks") or []
+                         if chunk.get("relation_type") in ("direct_analysis", "poc_candidate") and extras & set(chunk.get("topics") or []))
+            continue
         chunks = record.get("evidence_chunks") or []
         if chunks:
             lines.extend("%s [%s]" % (chunk["text"], chunk["citation_id"]) for chunk in chunks)
@@ -85,6 +140,9 @@ def run(question, top_k=4, cve_id=""):
     if any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司", "资产清单", "哪些ip", "哪些 ip")):
         return {"answer": "当前没有你的资产清单、实际版本和网络暴露信息，无法判断具体资产是否受影响。", "evidence": [], "used_model": False, "steps": []}
     records = search(question, top_k=top_k, cve_id=cve_id)
+    for record in records:
+        # 即使调用大模型，也显式提供结构化字段所需的证据。
+        _assessment_lines(record, question)
     steps = [{
         "role": "问答",
         "action": "检索知识库",
@@ -104,7 +162,7 @@ def run(question, top_k=4, cve_id=""):
             "detail": "未配置大模型，改为直接摘录检索结果",
         })
         return {
-            "answer": _extractive(records),
+            "answer": _extractive(records, question),
             "evidence": records,
             "used_model": False,
             "steps": steps,
@@ -131,7 +189,7 @@ def run(question, top_k=4, cve_id=""):
         checked = verify_answer(answer, records)
         if not checked["passed"]:
             steps.append({"role": "问答", "action": "回答检查未通过", "detail": "已回退到带引用的证据摘录"})
-            return {"answer": _extractive(records), "evidence": records, "used_model": False, "steps": steps}
+            return {"answer": _extractive(records, question), "evidence": records, "used_model": False, "steps": steps}
         steps.append({
             "role": "问答",
             "action": "调用大模型",
@@ -150,7 +208,7 @@ def run(question, top_k=4, cve_id=""):
             "detail": "已改用原文摘录。%s" % exc,
         })
         return {
-            "answer": _extractive(records),
+            "answer": _extractive(records, question),
             "evidence": records,
             "used_model": False,
             "steps": steps,

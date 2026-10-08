@@ -108,7 +108,18 @@ def item_detail(cve_id: str):
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
     from rag.ingest import document_status
     payload["documents"] = document_status(cve_id.upper())
+    from enrichment.assessment import assess
+    payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
     return payload
+
+
+@app.get("/api/assessment/{cve_id}")
+def assessment(cve_id: str):
+    record = get_record(cve_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="知识库里没有这条情报")
+    from enrichment.assessment import assess
+    return (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
 
 
 @app.post("/api/collect")

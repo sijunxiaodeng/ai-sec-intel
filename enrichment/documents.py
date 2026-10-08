@@ -120,6 +120,8 @@ def nvd_document(cve_id, response):
             parts.append(("metrics/%s/%d" % (key, i), json.dumps(metric, ensure_ascii=False)))
     for i, block in enumerate(cve.get("configurations", [])):
         parts.append(("configurations/%d" % i, json.dumps(block, ensure_ascii=False)))
+    if cve.get("references"):
+        parts.append(("references", json.dumps(cve["references"], ensure_ascii=False)))
     refs = []
     for ref in cve.get("references", []):
         if ref.get("url", "").startswith("https://"):

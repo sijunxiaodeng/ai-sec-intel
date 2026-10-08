@@ -18,7 +18,8 @@ def knowledge_records(db_path=DEFAULT_DB):
         else:
             current = known[key]
             current["references"] = list(dict.fromkeys((current.get("references") or []) + (row.get("references") or []) + (row["item"].get("references") or [])))
-    return records
+    from enrichment.assessment import enrich_view
+    return enrich_view(records, db_path)
 
 
 def get_record(cve_id, db_path=DEFAULT_DB):

@@ -1,6 +1,7 @@
 """抓取关联资料并增量入库。完整原文、失败状态、索引仅保存在 data/。"""
 
 import argparse
+import copy
 import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,8 @@ def document_status(cve_id, db_path=DEFAULT_DB):
 def store_document(record, doc, db_path):
     """失败只写尝试状态；成功才替换这个来源的证据，保留其他来源。"""
     cve_id = record["item"]["cve_id"]
+    record = copy.deepcopy(record)
+    record["item"].get("raw_data", {}).pop("automatic_assessment", None)
     status = {key: value for key, value in doc.items() if key not in ("parts", "text", "chunks", "references", "_response_body")}
     status["chunks"] = len(doc.get("chunks", []))
     with _connection(db_path) as conn:

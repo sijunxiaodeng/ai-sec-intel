@@ -184,6 +184,44 @@ function openDetail(cveId) {
   api("/api/items/" + encodeURIComponent(cveId)).then(renderDetail).catch(showError);
 }
 
+function renderAssessment(panel, report) {
+  if (!report) return;
+  var section = add(panel, "div", "assessment");
+  add(section, "h3", "", "自动富化与影响评估");
+  if (report.status !== "ok" && report.status !== "partial") {
+    add(section, "p", "meta", report.detail || "评估证据不足，请先抓取关联资料。");
+    return;
+  }
+  var metric = report.cvss;
+  if (metric) {
+    var levels = {NONE: "无", LOW: "低", MEDIUM: "中", HIGH: "高", CRITICAL: "严重"};
+    fact("CVSS " + metric.version + " · " + metric.score + " · " + (levels[metric.severity] || metric.severity || "等级未提供"), metric.evidence_ids);
+    add(section, "p", "meta", "评分提供者：" + (metric.source || "未提供") + " · 记录类型：" + (metric.metric_type || "未提供"));
+    add(section, "p", "desc", metric.vector || "来源未提供向量");
+  }
+  (report.cvss_candidates || []).slice(1).forEach(function (row) {
+    fact("其他来源评分：CVSS " + row.version + " · " + row.score + "；提供者 " + (row.source || "未提供") + "；类型 " + (row.metric_type || "未提供"), row.evidence_ids);
+  });
+  function fact(text, ids) {
+    var block = add(section, "div", "field");
+    add(block, "p", "desc", text);
+    (ids || []).forEach(function (id) {
+      var evidence = (report.evidence || []).find(function (row) { return row.citation_id === id; });
+      if (!evidence) return;
+      var link = add(block, "a", "meta", "证据：" + id);
+      link.href = evidence.url; link.target = "_blank"; link.rel = "noopener";
+      add(block, "p", "meta", evidence.locator);
+    });
+  }
+  (report.affected_ranges || []).forEach(function (row) { fact("受影响组件范围：" + row.display, row.evidence_ids); });
+  (report.attack_conditions || []).concat(report.technical_impact || []).forEach(function (row) { fact("评分向量解释 · " + row.label + "：" + row.text, row.evidence_ids); });
+  (report.fix_records || []).forEach(function (row) { fact("修复记录：" + row.title + "；修复效果尚未由本项目测试。", row.evidence_ids); });
+  (report.poc_candidates || []).forEach(function (row) { fact("利用代码候选：" + row.url + "；本项目未运行复现。", row.evidence_ids); });
+  add(section, "p", "desc", "具体资产影响：未知。" + report.asset_impact.reason + "。");
+  (report.warnings || []).forEach(function (warning) { add(section, "p", "meta", warning); });
+  if (report.source) add(section, "p", "meta", "报告依据获取于 " + dateText(report.source.retrieved_at) + " 的来源快照。");
+}
+
 function renderDetail(item) {
   var panel = $("enrich-detail");
   clear(panel);
@@ -205,6 +243,7 @@ function renderDetail(item) {
     add(field, "span", "", pair[0]);
     add(field, "b", "", pair[1]);
   });
+  renderAssessment(panel, item.assessment);
   var links = add(panel, "div", "links");
   (item.papers || []).forEach(function (paper) {
     var link = add(links, "a", "", "论文：" + (paper.title || paper.url));
@@ -250,6 +289,11 @@ function renderDetail(item) {
     api("/api/documents", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({cve_id: item.cve_id})}).then(function (data) {
       showDocuments(data.documents);
       fetchButton.textContent = "本次成功 " + data.ok + "/" + data.attempted + " 个来源；" + (data.index.status === "ok" ? "索引已更新" : "使用原文词法检索");
+      return api("/api/assessment/" + encodeURIComponent(item.cve_id)).then(function (report) {
+        var previous = panel.querySelector(".assessment");
+        renderAssessment(panel, report);
+        if (previous) previous.replaceWith(panel.lastElementChild);
+      });
     }).catch(showError).then(function () { fetchButton.disabled = false; });
   });
 }

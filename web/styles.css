@@ -180,3 +180,7 @@ button.row {
 .evidence-chunk { padding: 14px 0; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
 .evidence-chunk .title { overflow-wrap: anywhere; }
 .evidence-chunk a { display: inline-block; margin-top: 8px; }
+.assessment { margin-top: 20px; overflow-wrap: anywhere; }
+.assessment .field { margin-bottom: 10px; }
+.assessment .field p { margin: 0 0 6px; }
+.assessment a { color: var(--accent); display: block; }
