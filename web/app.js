@@ -222,6 +222,36 @@ function renderDetail(item) {
   nvd.href = item.url;
   nvd.target = "_blank";
   nvd.rel = "noopener";
+  var fetchButton = add(panel, "button", "", "抓取关联资料");
+  fetchButton.type = "button";
+  var statusBox = add(panel, "div", "links");
+  function showDocuments(rows) {
+    clear(statusBox);
+    (rows || []).forEach(function (doc) {
+      var block = add(statusBox, "div", "field");
+      var labels = {vulnerability_record: "漏洞记录", direct_analysis: "漏洞分析", fix_record: "修复记录", poc_candidate: "利用代码候选（未执行）", background: "背景资料（不进入问答）"};
+      add(block, "b", "", doc.status === "error" ? "抓取失败" : (labels[doc.relation_type] || "关联资料"));
+      var errorText = "来源暂时无法读取，可以稍后重试。";
+      if (/timed out|timeout/i.test(doc.error || "")) errorText = "连接超时，可以稍后重试。";
+      if (/没有可用|暂不支持/.test(doc.error || "")) errorText = "未提取到可用正文，或暂不支持此文档格式。";
+      add(block, "p", "meta", doc.association_reason || (doc.status === "error" ? errorText : ""));
+      add(block, "p", "meta", "尝试时间：" + dateText(doc.retrieved_at) + " · 片段 " + (doc.chunks || 0) + (doc.retained_previous ? " · 保留上次成功证据：" + dateText(doc.last_success_at) : ""));
+      var link = add(block, "a", "", doc.url);
+      link.href = doc.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+    });
+  }
+  showDocuments(item.documents);
+  fetchButton.addEventListener("click", function () {
+    fetchButton.disabled = true;
+    fetchButton.textContent = "正在抓取关联资料…";
+    clearError();
+    api("/api/documents", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({cve_id: item.cve_id})}).then(function (data) {
+      showDocuments(data.documents);
+      fetchButton.textContent = "本次成功 " + data.ok + "/" + data.attempted + " 个来源；" + (data.index.status === "ok" ? "索引已更新" : "使用原文词法检索");
+    }).catch(showError).then(function () { fetchButton.disabled = false; });
+  });
 }
 
 function fillFocus(items) {
@@ -346,7 +376,7 @@ $("ask-form").addEventListener("submit", function (event) {
       add(block, "div", "title", "[" + chunk.citation_id + "] " + chunk.title);
       add(block, "p", "desc", chunk.text);
       add(block, "div", "meta", "原文定位：" + chunk.locator);
-      add(block, "div", "meta", "获取日期：" + dateText(chunk.retrieved_at) + " · " + (chunk.text_kind === "reviewed_manual_summary" ? "人工核对摘要" : "来源片段"));
+      add(block, "div", "meta", "获取日期：" + dateText(chunk.retrieved_at) + " · " + (chunk.text_kind === "reviewed_manual_summary" ? "人工核对摘要" : "自动提取原文"));
       var link = add(block, "a", "", "打开这段证据的来源");
       link.href = chunk.url;
       link.target = "_blank";

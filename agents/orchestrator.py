@@ -6,19 +6,38 @@ from database.store import append_run, latest_run, load_kb, upsert
 from enrichment.papers import fetch_papers
 from enrichment.service import apply_public_feeds
 from models import enriched_record
+from rag.ingest import ingest
+
+
+def _documents_step(records, limit=3):
+    results = [ingest(record, max_sources=4) for record in records[:limit]]
+    return results, [{"role": "富化", "action": "抓取关联资料并更新证据索引",
+                      "detail": "本次处理 %d 条情报，抓取成功 %d 个来源；失败状态已保留。其余情报可在详情中单独处理。" %
+                      (len(results), sum(row["ok"] for row in results))}]
+
+
+def run_documents(record):
+    result = ingest(record)
+    steps = [{"role": "富化", "action": "抓取关联资料并更新证据索引",
+              "detail": "%s：尝试 %d 个来源，成功 %d 个，新增/更新 %d 段。" %
+              (result["cve_id"], result["attempted"], result["ok"], result["chunks"])}]
+    append_run(steps, "documents")
+    return dict(result, steps=steps)
 
 
 def run_collect(keyword="ollama"):
     monitored = monitor_run(keyword)
     enriched = enrich_run(monitored["items"], online=False)
     saved = upsert(enriched["records"])
+    documents, document_steps = _documents_step(enriched["records"])
     steps = monitored["steps"] + enriched["steps"] + [{
         "role": "编排",
         "action": "写入知识库",
         "detail": "当前共 %d 条" % len(saved),
     }]
+    steps += document_steps
     append_run(steps, "collect")
-    return {"records": saved, "steps": steps}
+    return {"records": saved, "steps": steps, "documents": documents}
 
 
 def run_enrich():
@@ -42,8 +61,10 @@ def run_enrich():
         "action": "补充 EPSS、KEV 与论文",
         "detail": detail,
     }]
+    documents, document_steps = _documents_step(saved)
+    steps += document_steps
     append_run(steps, "enrich")
-    return {"records": saved, "steps": steps, "feed": feed}
+    return {"records": saved, "steps": steps, "feed": feed, "documents": documents}
 
 
 def run_answer(question, cve_id=""):

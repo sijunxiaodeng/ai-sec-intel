@@ -84,6 +84,37 @@ def _dense(query, rows, db_path):
     return ranked
 
 
+def update_index(db_path=DEFAULT_DB):
+    """自动入库只增量使用已准备的本机模型，不下载模型。"""
+    path = config_path(db_path)
+    if not path.exists():
+        return {"status": "deferred", "detail": "本机模型未准备，证据可使用 BM25"}
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        if not config.get("enabled") or config.get("model") != MODEL_NAME:
+            raise ValueError("索引未启用")
+        rows = candidates("", db_path=db_path)
+        with _connection(db_path) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS embeddings (cve_id TEXT, evidence_id TEXT, model TEXT, digest TEXT, vector TEXT, PRIMARY KEY(cve_id, evidence_id, model))")
+            old = {(cve, eid): hash_ for cve, eid, hash_ in conn.execute("SELECT cve_id, evidence_id, digest FROM embeddings WHERE model=?", (MODEL_NAME,))}
+        live = {(row["cve_id"], row["evidence_id"]) for row in rows}
+        changed = [row for row in rows if old.get((row["cve_id"], row["evidence_id"])) != _digest(row)]
+        vectors = []
+        if changed:
+            model = _model(config["cache_dir"], True, config.get("model_dir"))
+            vectors = [_normal(v) for v in model.passage_embed([row["text"] for row in changed])]
+            if len(vectors) != len(changed):
+                raise ValueError("嵌入数量不一致")
+        with _connection(db_path) as conn:
+            conn.executemany("DELETE FROM embeddings WHERE cve_id=? AND evidence_id=? AND model=?", [(cve, eid, MODEL_NAME) for cve, eid in old if (cve, eid) not in live])
+            conn.executemany("INSERT OR REPLACE INTO embeddings VALUES (?, ?, ?, ?, ?)", [
+                (row["cve_id"], row["evidence_id"], MODEL_NAME, _digest(row), json.dumps(vector))
+                for row, vector in zip(changed, vectors)])
+        return {"status": "ok", "updated": len(changed), "reused": len(rows) - len(changed), "chunks": len(rows)}
+    except Exception:
+        return {"status": "deferred", "detail": "向量更新未完成，检索会检查摘要并按需使用 BM25"}
+
+
 def fuse(lexical, dense, top_k):
     """按名次融合，避免把 BM25 分数当成余弦相似度。"""
     combined = {}
@@ -98,8 +129,11 @@ def fuse(lexical, dense, top_k):
     return sorted(combined.values(), key=lambda row: (-row["rrf_score"], row["cve_id"], row["evidence_id"]))[:top_k]
 
 
-def search(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_DB):
+def search(query, top_k=5, *, cve_id="", topics=None, db_path=DEFAULT_DB, prefer_automatic=False):
     rows = candidates(query, cve_id=cve_id, topics=topics, db_path=db_path)
+    if prefer_automatic:
+        auto_urls = {(row["cve_id"], row["url"]) for row in candidates(query, cve_id=cve_id, db_path=db_path) if row.get("text_kind") == "automatic_source_extract"}
+        rows = [row for row in rows if row.get("text_kind") == "automatic_source_extract" or (row["cve_id"], row["url"]) not in auto_urls]
     if not rows or not (query or "").strip() or top_k <= 0:
         return {"evidence": [], "mode": "bm25", "notice": "没有匹配的证据"}
     lexical = rank_bm25(query, rows)

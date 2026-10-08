@@ -8,9 +8,17 @@ from rag.hybrid import search as search_chunks
 
 
 def knowledge_records(db_path=DEFAULT_DB):
-    records = load_kb()
-    known = {(row.get("item") or {}).get("cve_id") for row in records}
-    return records + [row for row in load_records(db_path) if row["item"]["cve_id"] not in known]
+    records = copy.deepcopy(load_kb())
+    known = {row["item"]["cve_id"]: row for row in records}
+    for row in load_records(db_path):
+        key = row["item"]["cve_id"]
+        if key not in known:
+            records.append(row)
+            known[key] = row
+        else:
+            current = known[key]
+            current["references"] = list(dict.fromkeys((current.get("references") or []) + (row.get("references") or []) + (row["item"].get("references") or [])))
+    return records
 
 
 def get_record(cve_id, db_path=DEFAULT_DB):
@@ -45,11 +53,19 @@ def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB):
     topics = [topic for topic, words in TOPIC_WORDS.items() if any(word in text.lower() for word in words)]
     hits, seen, notices, modes = [], set(), set(), set()
     for topic in topics or [None]:
-        result = search_chunks(text, top_k=2 if topic else 8, cve_id=cve_id,
-                               topics=[topic] if topic else None, db_path=db_path)
+        result = search_chunks(text, top_k=10 if topic else 8, cve_id=cve_id,
+                               topics=[topic] if topic else None, db_path=db_path, prefer_automatic=True)
         modes.add(result["mode"])
         notices.add(result["notice"])
-        for hit in result["evidence"]:
+        selected = result["evidence"]
+        if topic:
+            preferred = {"versions": "vulnerability_record", "cvss": "vulnerability_record", "remediation": "fix_record"}.get(topic)
+            first = next((hit for hit in selected if hit.get("relation_type") == preferred), None) if preferred else None
+            first = first or (selected[0] if selected else None)
+            second = next((hit for hit in selected if first and hit["source_id"] != first["source_id"] and hit.get("relation_type") != first.get("relation_type")), None)
+            second = second or next((hit for hit in selected if first and hit["source_id"] != first["source_id"]), None)
+            selected = [hit for hit in (first, second) if hit]
+        for hit in selected:
             key = (hit["cve_id"], hit["evidence_id"])
             if key not in seen:
                 hit["citation_id"] = "%s/%s" % key

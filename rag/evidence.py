@@ -25,7 +25,7 @@ def _connection(path):
 
 
 def save(record, documents, db_path=DEFAULT_DB):
-    """同一 CVE 原子替换样例及片段，重复运行不会累积旧证据。"""
+    """原子替换人工样例片段，保留自动资料；重复运行不会累积旧证据。"""
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     cve_id = record["item"]["cve_id"]
@@ -45,7 +45,12 @@ def save(record, documents, db_path=DEFAULT_DB):
         conn.execute("CREATE TABLE IF NOT EXISTS records (cve_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         conn.execute("CREATE TABLE IF NOT EXISTS evidence (cve_id TEXT NOT NULL, evidence_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(cve_id, evidence_id))")
         conn.execute("INSERT OR REPLACE INTO records VALUES (?, ?)", (cve_id, json.dumps(record, ensure_ascii=False)))
-        conn.execute("DELETE FROM evidence WHERE cve_id = ?", (cve_id,))
+        # 历史演示按钮只替换人工样例，不能清除已自动抓取的其他来源。
+        previous = conn.execute("SELECT evidence_id, payload FROM evidence WHERE cve_id=?", (cve_id,)).fetchall()
+        conn.executemany("DELETE FROM evidence WHERE cve_id=? AND evidence_id=?", [
+            (cve_id, eid) for eid, payload in previous
+            if json.loads(payload).get("text_kind") != "automatic_source_extract"
+        ])
         conn.executemany("INSERT INTO evidence VALUES (?, ?, ?)", rows)
     return len(rows)
 
@@ -103,7 +108,7 @@ def rank_bm25(query, rows):
     if not rows or not (query or "").strip():
         return []
     terms = set(_tokens(query))
-    counters = [Counter(_tokens(" ".join((row["cve_id"], row["title"], row["text"], " ".join(row["topics"]))))) for row in rows]
+    counters = [Counter(_tokens(" ".join((row["cve_id"], row["title"], row["text"], " ".join(row["topics"]), row.get("search_terms", ""))))) for row in rows]
     lengths = [sum(counter.values()) for counter in counters]
     average = sum(lengths) / len(lengths)
     frequencies = Counter(term for counter in counters for term in counter)

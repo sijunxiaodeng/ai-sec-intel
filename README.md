@@ -1,6 +1,6 @@
 # AI 安全知识情报（赛题九）
 
-三人共用的仓库。现在只做一件能演示的事：从 NVD 拉取与 AI 产品相关的漏洞，存成同一张卡片，在页面上按编号或产品名搜到它。
+三人共用的仓库。目前支持 NVD/OSV 漏洞监测、关联资料抓取与证据入库，以及带来源引用的检索问答。
 
 ## 怎么打开系统
 
@@ -55,7 +55,20 @@ python collect_nvd.py
 ```powershell
 python -m pip install -r requirements-rag.txt
 python -m rag.prepare --semantic
+python -m pip install -r requirements.txt
 python main.py
 ```
 
 首次准备会下载模型。向量索引尚未就绪时，页面会明确显示使用 BM25。Windows 下载替代入口及测试方法见 [rag/README.md](rag/README.md)。
+
+## 第三步：自动处理关联资料
+
+打开「情报富化」，选择一条 CVE，点击「抓取关联资料」。页面会显示各来源的关联类型、抓取状态和片段数；随后可以在「情报问答」按这个编号提问。也可运行：
+
+```powershell
+python -m rag.ingest --cve CVE-2024-37032
+```
+
+这一步从现有参考链接和对应 NVD 记录发现资料，自动提取正文、分块、保存来源快照，并增量更新已准备的本地向量索引。未准备模型时仍可使用 BM25；不会在抓取或提问时下载模型。监测与公开源富化完成后，自动处理本批前 3 条情报，每条最多 4 个来源；其他情报可在详情页逐条处理。
+
+完整原文、数据库、运行报告和模型留在被忽略的 `data/` 中。仓库只提交源码、接口与运行说明、离线测试。关联规则、支持范围和失败处理见 [rag/README.md](rag/README.md#第三步自动关联资料与证据入库)。

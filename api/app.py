@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich
+from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich, run_documents
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
@@ -29,6 +29,10 @@ class CollectBody(BaseModel):
 class AskBody(BaseModel):
     question: str
     cve_id: str = ""
+
+
+class DocumentsBody(BaseModel):
+    cve_id: str
 
 
 class SettingsBody(BaseModel):
@@ -102,6 +106,8 @@ def item_detail(cve_id: str):
     payload["papers"] = record.get("papers") or []
     payload["vector"] = (record.get("cvss") or {}).get("vector")
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
+    from rag.ingest import document_status
+    payload["documents"] = document_status(cve_id.upper())
     return payload
 
 
@@ -124,7 +130,15 @@ def enrich():
         result = run_enrich()
     except Exception as exc:
         raise HTTPException(status_code=502, detail="富化没有完成：%s" % exc)
-    return {"steps": result["steps"], "items": len(result["records"])}
+    return {"steps": result["steps"], "items": len(result["records"]), "documents": result["documents"]}
+
+
+@app.post("/api/documents")
+def documents(body: DocumentsBody):
+    record = get_record(body.cve_id.strip().upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="请先收录这条情报")
+    return run_documents(record)
 
 
 @app.post("/api/ask")

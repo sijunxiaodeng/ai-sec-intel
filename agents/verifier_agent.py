@@ -32,7 +32,13 @@ def run(answer, evidence):
         value = float(found)
         if not any(abs(value - score) < 0.05 for score in scores):
             bad_scores.append(found)
-    citations = CITATION.findall(answer or "")
+    # 摘录原文可能有 Markdown 链接或 JSON 数组，它们不是回答的引用标识。
+    citation_text = answer or ""
+    for record in evidence or []:
+        for chunk in record.get("evidence_chunks") or []:
+            if chunk.get("text"):
+                citation_text = citation_text.replace(chunk["text"], "")
+    citations = CITATION.findall(citation_text)
     invalid = [citation for citation in citations if citation not in allowed]
     lacks_citations = bool(evidence) and not citations
     verified_poc = any(row.get("validation") == "verified" for record in evidence or [] for row in record.get("poc") or [])
