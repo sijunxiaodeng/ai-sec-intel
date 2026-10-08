@@ -2,6 +2,7 @@ from config.llm import chat, configured
 from rag.retrieve import search
 from agents.verifier_agent import run as verify_answer
 from rag.answer import TOPIC_WORDS
+from rag.evidence import CVE, DEFAULT_DB
 
 
 def _assessment_lines(record, question):
@@ -32,7 +33,8 @@ def _assessment_lines(record, question):
         for row in report["fix_records"]:
             add("关联修复记录：%s；%s。本项目未测试修复效果。" % (row["title"], row["url"]), row["evidence_ids"])
         if report["affected_ranges"]:
-            lines.append("受影响范围的排除上界不能单独证明该版本已经修复；修复版本需核对厂商公告。")
+            add("受影响范围的排除上界不能单独证明该版本已经修复；修复版本需核对厂商公告。",
+                list(dict.fromkeys(eid for row in report["affected_ranges"] for eid in row["evidence_ids"])))
     if "poc" in topics:
         for row in report["poc_candidates"]:
             add("NVD 标为 Exploit 的候选参考：%s；本项目未运行复现，不能认定已验证可用。" % row["url"], row.get("evidence_ids", []))
@@ -136,11 +138,50 @@ def _extractive(records, question=""):
     return "\n".join(lines)
 
 
-def run(question, top_k=4, cve_id=""):
+def _comparison(records):
+    """只比较来源评分；不同版本不排序，也不推导业务风险。"""
+    metrics = []
+    for record in records:
+        report = record["item"].get("raw_data", {}).get("automatic_assessment") or {}
+        metric = report.get("cvss")
+        if not metric or not metric.get("evidence_ids"):
+            return "部分漏洞缺少可引用的 CVSS 评分，无法可靠比较。"
+        metrics.append((record["item"]["cve_id"], metric))
+    if len({metric["version"] for _, metric in metrics}) != 1:
+        return "这些默认评分使用不同 CVSS 版本，不能直接据此排出风险顺序；请先对齐评分版本。"
+    highest = max(metric["score"] for _, metric in metrics)
+    winners = [cve for cve, metric in metrics if metric["score"] == highest]
+    cites = " ".join("[%s]" % eid for _, metric in metrics for eid in metric["evidence_ids"])
+    return "在相同 CVSS 版本下，基础分最高的是 %s（%s 分）%s。基础分比较不等于实际资产处置顺序，还需结合版本、暴露与部署条件。" % ("、".join(winners), highest, cites)
+
+
+def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
+    requested = list(dict.fromkeys(value.upper() for value in (cve_ids if cve_ids is not None else CVE.findall(question))))
+    if not requested and cve_id:
+        requested = [cve_id.upper()]
+    if len(requested) > 4:
+        return {"answer": "一次最多比较 4 条漏洞，请缩小范围。", "evidence": [], "used_model": False, "steps": []}
     if any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司", "资产", "哪些ip", "哪些 ip")):
         from enrichment.assets import answer_assets
-        return answer_assets(question, cve_id)
-    records = search(question, top_k=top_k, cve_id=cve_id)
+        if len(requested) > 1:
+            return {"answer": "资产匹配每次需要唯一的 CVE 编号，请指定其中一条漏洞。", "evidence": [], "used_model": False, "steps": []}
+        return answer_assets(question, requested[0] if requested else "")
+    if requested:
+        records = []
+        query = CVE.sub("", question)
+        for target in requested:
+            found = search(query + " " + target, top_k=1, cve_id=target, db_path=db_path)
+            if not found:
+                return {"answer": "当前知识库缺少部分指定漏洞的对应情报，无法完成本轮回答，请先收录并补充资料。", "evidence": [], "used_model": False, "steps": []}
+            records.extend(found)
+    else:
+        records = search(question, top_k=top_k, db_path=db_path)
+    if len(requested) > 1:
+        # 比较逐条展示 CVSS、范围与修复证据，不让不同实体争抢同一个 top_k。
+        detail_question = question + " CVSS 评分 受影响版本 修复 利用条件 技术影响"
+        answer = _extractive(records, detail_question) + "\n" + _comparison(records)
+        return {"answer": answer, "evidence": records, "used_model": False,
+                "steps": [{"role": "问答", "action": "按漏洞分别检索并比较", "detail": "分别引用 %d 条漏洞的证据；评分版本不同时不排序" % len(records)}]}
     for record in records:
         # 即使调用大模型，也显式提供结构化字段所需的证据。
         _assessment_lines(record, question)

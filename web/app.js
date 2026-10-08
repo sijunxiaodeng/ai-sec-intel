@@ -11,8 +11,10 @@ var prompts = [
   "CVE-2024-37032 的受影响版本是什么，如何修复？有没有修复记录？",
   "CVE-2025-0312 的风险有多高？影响哪个版本？",
   "ollama 相关漏洞里，哪些写了受影响版本？",
-  "当前记录有没有被标成 Exploit 的链接？"
+  "当前记录有没有被标成 Exploit 的链接？",
+  "比较 CVE-2024-37032 和 CVE-2025-0312 的 CVSS、受影响版本与修复记录"
 ];
+var askSessionId = "";
 
 function $(id) {
   return document.getElementById(id);
@@ -511,22 +513,50 @@ prompts.forEach(function (text) {
   });
 });
 
+$("new-session").addEventListener("click", function () {
+  askSessionId = "";
+  $("focus").value = "";
+  $("question").value = "";
+  ["answer", "evidence", "ask-steps"].forEach(function (id) { clear($(id)); });
+  $("verdict").textContent = "";
+  $("conversation-context").textContent = "已开始新会话，请先指定漏洞。会话在本机进程内保留，空闲两小时或服务重启后失效。";
+  clearError();
+});
+
 $("ask-form").addEventListener("submit", function (event) {
   event.preventDefault();
   var button = $("ask-btn");
   button.disabled = true;
+  $("new-session").disabled = true;
   clearError();
+  var question = $("question").value.trim();
+  var explicit = question.match(/CVE-\d{4}-\d{4,7}\b/gi) || [];
+  if (explicit.length) $("focus").value = "";
   api("/api/ask", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      question: $("question").value.trim(),
-      cve_id: $("focus").value
+      question: question,
+      cve_id: $("focus").value,
+      session_id: askSessionId
     })
   }).then(function (data) {
     var answer = $("answer");
     clear(answer);
-    add(answer, "div", "", data.answer);
+    askSessionId = data.session_id;
+    $("conversation-context").textContent = "第 " + data.turn + " 轮 · " + ((data.context.cve_ids || []).join("、") || "未限定漏洞") + " · " + data.context.notice;
+    (data.history || []).forEach(function (turn) {
+      if (turn.turn === data.turn) {
+        add(answer, "h3", "", "第 " + turn.turn + " 轮：" + turn.question);
+        add(answer, "div", "", data.answer);
+      } else {
+        var previous = add(answer, "details", "conversation-turn");
+        add(previous, "summary", "", "第 " + turn.turn + " 轮：" + turn.question);
+        add(previous, "div", "", turn.answer);
+        add(previous, "p", "meta", "历史回答；右侧证据对应最新一轮。超过长度的历史回答仅保留前 12000 字符。");
+      }
+    });
+    $("question").value = "";
     $("verdict").textContent = !data.evidence.length ? "证据不足" : (data.verdict.passed ? "引用、编号与分数检查通过" : "检查未通过");
     renderSteps($("ask-steps"), data.steps);
     var evidence = $("evidence");
@@ -559,6 +589,7 @@ $("ask-form").addEventListener("submit", function (event) {
     });
   }).catch(showError).then(function () {
     button.disabled = false;
+    $("new-session").disabled = false;
   });
 });
 

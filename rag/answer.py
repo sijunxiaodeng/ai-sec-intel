@@ -5,7 +5,7 @@ from rag.evidence import DEFAULT_DB, search_evidence
 TOPIC_WORDS = {
     "ai_relevance": ("ai", "人工智能", "推理", "关联", "相关"),
     "versions": ("版本", "范围", "影响哪些", "受影响"),
-    "conditions": ("条件", "利用", "攻击", "暴露", "成因", "原理"),
+    "conditions": ("条件", "利用", "攻击", "暴露", "成因", "原理", "所需权限", "需要权限", "用户交互"),
     "impact": ("有什么影响", "技术影响", "影响程度", "危害", "后果", "风险"),
     "remediation": ("修复", "缓解", "升级", "防护", "补丁", "处理"),
     "cvss": ("cvss", "评分", "分数", "严重等级", "向量"),

@@ -132,7 +132,9 @@
               <select id="focus"></select>
             </label>
             <button type="submit" class="primary" id="ask-btn">提问</button>
+            <button type="button" class="ghost" id="new-session">开始新会话</button>
           </div>
+          <p id="conversation-context" class="hint">可以连续追问「那应该怎么修复？」。问题中明确写出的编号优先；比较时写出两个 CVE。</p>
           <div class="prompts" id="prompts"></div>
         </form>
         <div class="split">
@@ -142,7 +144,7 @@
             <div id="ask-steps"></div>
           </article>
           <article class="panel">
-            <header class="panel-head"><h2>证据</h2></header>
+            <header class="panel-head"><h2>本轮证据</h2></header>
             <div id="evidence"></div>
           </article>
         </div>

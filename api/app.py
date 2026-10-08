@@ -3,7 +3,8 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from agents.conversation import sessions, SessionError
 
 from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich, run_documents
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
@@ -28,8 +29,9 @@ class CollectBody(BaseModel):
 
 
 class AskBody(BaseModel):
-    question: str
-    cve_id: str = ""
+    question: str = Field(..., max_length=4000)
+    cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
+    session_id: str = Field("", max_length=32)
 
 
 class DocumentsBody(BaseModel):
@@ -198,9 +200,16 @@ def ask(body: AskBody):
     question = (body.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="请先写下问题")
-    result = run_answer(question, body.cve_id.strip())
+    try:
+        result = sessions.run(question, body.cve_id.strip(), body.session_id, run_answer)
+    except SessionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {
         "answer": result["answer"],
+        "session_id": result["session_id"],
+        "turn": result["turn"],
+        "context": result["context"],
+        "history": result["history"],
         "used_model": result["used_model"],
         "verdict": {
             "passed": result["verdict"]["passed"],

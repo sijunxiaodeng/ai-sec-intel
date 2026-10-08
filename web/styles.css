@@ -192,3 +192,7 @@ button.row {
 .asset-card.matched_version { border-color: var(--high); }
 .asset-card.unknown { border-color: var(--mid); }
 .asset-card a { display: block; color: var(--accent); }
+.conversation-turn { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.conversation-turn summary { cursor: pointer; font-weight: 600; white-space: normal; }
+.answer { overflow-wrap: anywhere; }
+.ask-box .ask-row { flex-wrap: wrap; }

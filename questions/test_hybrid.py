@@ -23,7 +23,7 @@ class HybridTest(unittest.TestCase):
         save(self.record, self.docs, self.db)
         self.addCleanup(patch.stopall)
         patch("rag.retrieve.load_kb", return_value=[]).start()
-        patch("agents.qa_agent.search", side_effect=lambda q, top_k=4, cve_id="": record_search(q, top_k, cve_id=cve_id, db_path=self.db)).start()
+        patch("agents.qa_agent.search", side_effect=lambda q, top_k=4, cve_id="", **kwargs: record_search(q, top_k, cve_id=cve_id, db_path=self.db)).start()
         patch("agents.qa_agent.configured", return_value=False).start()
 
     def test_missing_model_falls_back_and_scope_stays_exact(self):

@@ -67,8 +67,13 @@ def run_enrich():
     return {"records": saved, "steps": steps, "feed": feed, "documents": documents}
 
 
-def run_answer(question, cve_id=""):
-    answered = qa_run(question, cve_id=cve_id)
+def run_answer(question, cve_id="", *, cve_ids=None, db_path=None):
+    options = {"cve_id": cve_id}
+    if cve_ids is not None:
+        options["cve_ids"] = cve_ids
+    if db_path is not None:
+        options["db_path"] = db_path
+    answered = qa_run(question, **options)
     verdict = verify_run(answered["answer"], answered["evidence"])
     answer = answered["answer"]
     if not verdict["passed"]:
