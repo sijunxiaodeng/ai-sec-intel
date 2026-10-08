@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from config.llm import chat
-from agents.qa_agent import run, _render_model_json, _answer_format
+from agents.qa_agent import run, _render_model_json, _answer_format, _extractive
 from agents.verifier_agent import required_fields
 
 
@@ -17,6 +17,24 @@ class ModelTest(unittest.TestCase):
                        "text": "Synthetic CVSS 8.8 fixture.", "url": "https://example.org/fixture",
                        "locator": "metrics/0", "text_kind": "automatic_structured_extract"}]}
         self.settings = {"base_url": "http://127.0.0.1:11434/v1", "model": "fixture", "api_key": "ollama"}
+
+    def assessed_record(self):
+        record = json.loads(json.dumps(self.record))
+        record["item"]["raw_data"]["automatic_assessment"] = {
+            "status": "ok", "cvss": {"score": 8.8, "version": "3.1", "severity": "HIGH",
+                "source": "vendor@example.org", "metric_type": "Secondary",
+                "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "evidence_ids": [self.eid]},
+            "attack_conditions": [dict(metric=k, value=v, label=label, text=text, evidence_ids=[self.eid])
+                for k, v, label, text in (("AV", "N", "攻击途径", "网络"),
+                    ("AC", "L", "攻击复杂度", "低"), ("PR", "L", "所需权限", "低"),
+                    ("UI", "N", "用户交互", "不需要"))],
+            "affected_ranges": [{"display": "fixture：版本 < 0.1.34", "requires_environment_review": False,
+                "versionEndExcluding": "0.1.34", "evidence_ids": [self.eid]}],
+            "technical_impact": [], "poc_candidates": [],
+            "fix_records": [{"title": "Synthetic fix", "url": "https://example.org/fix", "evidence_ids": [self.eid]}],
+            "warnings": ["受影响范围的排除上界不自动等于厂商确认的修复版本"],
+            "evidence": record["evidence_chunks"], "asset_impact": {"reason": "Fixture only"}}
+        return record
 
     def test_chat_sends_bounded_output_and_optional_format(self):
         result = {"choices": [{"message": {"content": "  test  "}, "finish_reason": "stop"}]}
@@ -51,6 +69,60 @@ class ModelTest(unittest.TestCase):
             result = run(self.cve + " 的 CVSS 是多少？")
         self.assertTrue(result["used_model"])
         self.assertTrue(result["model_attempted"])
+
+    def test_duplicate_inline_citation_is_rendered_once(self):
+        raw = json.dumps({"claims": [{"text": "CVSS 为 8.8。 [%s]" % self.eid,
+                                    "citations": [self.eid, self.eid]}]})
+        self.assertEqual(_render_model_json(raw, [self.record]).count("[%s]" % self.eid), 1)
+
+    def test_conditions_question_cannot_accept_privileges_only(self):
+        record = self.assessed_record()
+        question = self.cve + " 的利用条件和所需权限是什么？"
+        for text in ("所需权限：低。", "按 CVSS 向量解释，所需权限：低。"):
+            with self.subTest(text=text):
+                issues = required_fields(text, [record], question)
+                for label in ("攻击途径", "攻击复杂度", "用户交互"):
+                    self.assertTrue(any(label in issue for issue in issues))
+        raw = json.dumps({"claims": [{"text": "所需权限：低。", "citations": [self.eid]}]})
+        with patch("agents.qa_agent.search", return_value=[record]), patch("agents.qa_agent.configured", return_value=True), patch("agents.qa_agent.chat", return_value=raw):
+            result = run(question)
+        self.assertFalse(result["used_model"])
+        for expected in ("攻击途径：网络", "攻击复杂度：低", "所需权限：低", "用户交互：不需要", "按 CVSS 向量解释"):
+            self.assertIn(expected, result["answer"])
+
+    def test_conditions_accept_complete_paraphrase_and_limit_narrow_question(self):
+        record = self.assessed_record()
+        complete = "按 CVSS 向量解释：网络攻击、低复杂度、低权限，无需用户交互。"
+        self.assertFalse(required_fields(complete, [record], "利用条件和所需权限？"))
+        self.assertFalse(required_fields("按 CVSS 向量解释，所需权限：低。", [record], "所需权限？"))
+        self.assertTrue(required_fields("网络攻击、低复杂度、低权限，无需用户交互。", [record], "利用条件？"))
+        record["item"]["raw_data"]["automatic_assessment"]["attack_conditions"][2].update(value="N", text="无")
+        self.assertTrue(required_fields("按 CVSS 向量解释，所需权限：低。", [record], "所需权限？"))
+        self.assertFalse(required_fields("按 CVSS 向量解释，无需权限。", [record], "所需权限？"))
+
+    def test_cvss4_conditions_retain_additional_attack_requirements(self):
+        record = self.assessed_record()
+        record["item"]["raw_data"]["automatic_assessment"]["attack_conditions"].append(
+            {"metric": "AT", "value": "P", "label": "附加攻击要求", "text": "存在"})
+        text = "按 CVSS 向量解释：网络攻击、低复杂度、低权限，无需用户交互。"
+        self.assertTrue(any("附加攻击要求" in issue for issue in required_fields(text, [record], "攻击条件？")))
+        self.assertFalse(required_fields(text + "附加攻击要求：存在。", [record], "攻击条件？"))
+
+    def test_fallback_only_shows_relevant_warning_and_requested_source_text(self):
+        record = self.assessed_record()
+        original = "Synthetic disclosure timeline."
+        record["evidence_chunks"].append({"citation_id": self.cve + "/ARTICLE", "text": original,
+            "relation_type": "direct_analysis", "topics": ["remediation"]})
+        metric_answer = _extractive([record], "CVSS 评分？", model_attempted=True)
+        self.assertNotIn("排除上界", metric_answer)
+        self.assertNotIn("资产匹配", metric_answer)
+        fix_answer = _extractive([record], "应该怎么修复？", model_attempted=True)
+        self.assertEqual(fix_answer.count("排除上界"), 1)
+        self.assertIn("本项目未测试修复效果", fix_answer)
+        self.assertNotIn(original, fix_answer)
+        self.assertIn(original, _extractive([record], "修复文章的原文？"))
+        record["item"]["raw_data"]["automatic_assessment"]["warnings"].append("最近一次 NVD 获取失败，沿用上次成功快照")
+        self.assertIn("最近一次 NVD 获取失败", _extractive([record], "CVSS 评分？"))
 
     def test_invented_missing_or_summary_citation_cannot_be_auto_attached(self):
         for citations in ([], ["unknown"], ["1"], [9]):

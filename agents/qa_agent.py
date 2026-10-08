@@ -41,8 +41,17 @@ def _assessment_lines(record, question):
         for row in report["poc_candidates"]:
             add("NVD 标为 Exploit 的候选参考：%s；本项目未运行复现，不能认定已验证可用。" % row["url"], row.get("evidence_ids", []))
     if lines:
-        lines.append("这是来源字段和评分向量的解释。此回答未进行资产匹配；登记资产的筛选结果请在资产影响页面查看。")
-        lines.extend(report["warnings"])
+        for warning in report["warnings"]:
+            # 修复版本的边界已在修复回答中带引用说明，不向每个问题重复追加。
+            if "受影响范围的排除上界" in warning:
+                continue
+            if "评分" in warning and "cvss" not in topics:
+                continue
+            if "配置" in warning and not topics & {"versions", "remediation"}:
+                continue
+            if "修复" in warning and "remediation" not in topics:
+                continue
+            lines.append(warning)
         known = {chunk["citation_id"] for chunk in record.get("evidence_chunks") or []}
         for chunk in report["evidence"]:
             if chunk["citation_id"] in ids and chunk["citation_id"] not in known:
@@ -129,6 +138,11 @@ def _extractive(records, question="", model_attempted=False):
             lines.extend(structured)
             topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
             extras = topics & {"ai_relevance", "conditions", "impact", "remediation"}
+            report = item.get("raw_data", {}).get("automatic_assessment") or {}
+            if not any(word in question for word in ("文章", "原文", "分析", "原理", "成因")):
+                for topic, key in (("conditions", "attack_conditions"), ("impact", "technical_impact"), ("remediation", "fix_records")):
+                    if report.get(key):
+                        extras.discard(topic)
             lines.extend("来源补充原文：%s [%s]" % (chunk["text"], chunk["citation_id"]) for chunk in record.get("evidence_chunks") or []
                          if chunk.get("relation_type") in ("direct_analysis", "poc_candidate") and extras & set(chunk.get("topics") or []))
             continue
@@ -201,6 +215,11 @@ def _render_model_json(raw, records):
             raise ValueError("模型事实文本无效")
         if not isinstance(citations, list) or not 1 <= len(citations) <= 6 or any(not isinstance(c, str) or c not in allowed for c in citations):
             raise ValueError("模型条目缺少有效引用")
+        # 有些模型同时在 text 和 citations 写入同一个引用，只渲染一次。
+        for citation in dict.fromkeys(citations):
+            text = text.replace("[%s]" % citation, "")
+        if not text.strip():
+            raise ValueError("模型事实文本只有引用")
         lines.append(text.strip() + " " + " ".join("[%s]" % c for c in dict.fromkeys(citations)))
     return "\n".join(lines)
 
@@ -272,7 +291,10 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
                 "每条事实后必须照抄给定引用，不能省略。优先使用‘已校验来源字段及向量解释’中的事实与引用。"
                 "NVD 是收录库，评分提供者请使用给定 source 字段，不能把 Secondary 评分说成 NVD 自评。"
                 "直接回答本轮问题，使用简短段落；不要重复整个证据，不输出 Markdown 表格。"
+                "询问利用条件时须覆盖给定的攻击途径、复杂度、附加攻击要求、权限和用户交互，并明确这是 CVSS 向量解释。"
+                "仅询问权限时回答权限即可。不要把评分向量解释说成已验证的具体部署条件。"
                 "输出 JSON 对象，唯一字段 claims 是数组。每项只有 text（中文事实句）和 citations（给定引用标识数组，不含方括号）。"
+                "text 中不再填写引用标识，引用只放在 citations 中。"
                 '结构为 {"claims":[{"text":"中文事实句","citations":["给定的具体片段标识"]}]}。存在片段时禁止使用整条记录的顺序编号。'
             ),
         },

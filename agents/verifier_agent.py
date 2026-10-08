@@ -5,6 +5,27 @@ SCORE = re.compile(r"CVSS(?!:[234]\.[01]/)(?:\s*v?[234]\.[01])?\s*(?:基础分(?
 CITATION = re.compile(r"\[([^\[\]\n]+)\]")
 
 
+def _condition_present(plain, row):
+    # 接受字段表述、评分向量代码，以及常见中文同义表达；仍不是语义审核。
+    label, text = re.escape(row["label"]), re.escape(row["text"])
+    if re.search(label + r"\s*[:：为是]?\s*" + text, plain):
+        return True
+    if re.search(r"\b" + row["metric"].lower() + ":" + row["value"].lower() + r"\b", plain):
+        return True
+    aliases = {
+        ("AV", "N"): r"网络(?:攻击|可达|访问)|(?:通过|经由)网络|远程攻击",
+        ("AC", "L"): r"低.{0,4}复杂度|复杂度.{0,4}低",
+        ("AC", "H"): r"高.{0,4}复杂度|复杂度.{0,4}高",
+        ("PR", "N"): r"(?:无需|不需要|不要求).{0,4}权限",
+        ("PR", "L"): r"低.{0,4}权限",
+        ("PR", "H"): r"高.{0,4}权限",
+        ("UI", "N"): r"(?:无需|不需要|不要求).{0,4}用户交互",
+        ("UI", "R"): r"(?<!不)(?:需要|要求).{0,4}用户交互",
+    }
+    pattern = aliases.get((row["metric"], row["value"]))
+    return bool(pattern and re.search(pattern, plain))
+
+
 def required_fields(answer, evidence, question):
     """校验可直接核对的必需字段；不能代替完整语义评审。"""
     plain = CITATION.sub("", answer or "").lower()
@@ -51,10 +72,18 @@ def required_fields(answer, evidence, question):
         if any(w in q for w in ("修复", "缓解", "升级", "补丁")) and report.get("fix_records"):
             if not any(row["url"].lower() in plain or (re.search(r"/pull/(\d+)", row["url"]) and re.search(r"/pull/(\d+)", row["url"]).group(1) in plain) for row in report["fix_records"]):
                 issues.append("遗漏了来源中的关联修复记录")
-        if any(w in q for w in ("所需权限", "需要权限", "利用条件", "攻击条件")):
-            privilege = next((r for r in report.get("attack_conditions", []) if r["metric"] == "PR"), None)
-            if privilege and privilege["value"] == "L" and not re.search(r"低.{0,6}权限|所需权限.{0,6}低", plain):
-                issues.append("没有保留评分向量中的低权限要求")
+        broad_conditions = any(w in q for w in ("利用条件", "攻击条件"))
+        wanted = {"AV", "AC", "AT", "PR", "UI"} if broad_conditions else set()
+        if any(w in q for w in ("所需权限", "需要权限")):
+            wanted.add("PR")
+        if "用户交互" in q:
+            wanted.add("UI")
+        conditions = [row for row in report.get("attack_conditions", []) if row["metric"] in wanted]
+        for row in conditions:
+            if not _condition_present(plain, row):
+                issues.append("没有完整保留评分向量中的%s" % row["label"])
+        if conditions and not any(w in plain for w in ("cvss", "评分向量")):
+            issues.append("没有说明这些条件来自评分向量解释")
     return list(dict.fromkeys(issues))
 
 
