@@ -5,6 +5,59 @@ SCORE = re.compile(r"CVSS(?!:[234]\.[01]/)(?:\s*v?[234]\.[01])?\s*(?:基础分(?
 CITATION = re.compile(r"\[([^\[\]\n]+)\]")
 
 
+def required_fields(answer, evidence, question):
+    """校验可直接核对的必需字段；不能代替完整语义评审。"""
+    plain = CITATION.sub("", answer or "").lower()
+    q = question.lower()
+    issues = []
+    for record in evidence:
+        report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
+        metric = report.get("cvss")
+        if not metric:
+            continue
+        if any(w in q for w in ("cvss", "评分", "分数", "严重等级", "向量")):
+            if str(metric["score"]) not in plain or metric["version"] not in plain:
+                issues.append("没有完整保留来源评分和 CVSS 版本")
+            provider = (metric.get("source") or "").lower()
+            provider_requested = any(w in q for w in ("提供者", "评分来源", "评分记录来源"))
+            if provider_requested and provider and provider not in plain:
+                if not (provider == "nvd@nist.gov" and "nvd" in plain):
+                    issues.append("评分提供者未与来源字段一致")
+            if provider and provider != "nvd@nist.gov" and re.search(r"(?:评分提供者|评分来源|由).{0,10}nvd|nvd.{0,8}(?:自评|评分|打分)", plain):
+                issues.append("将 NVD 收录的其他来源评分错误归属于 NVD")
+        if any(w in q for w in ("受影响版本", "版本范围", "影响哪个版本", "影响哪些版本")):
+            for row in report.get("affected_ranges", []):
+                values = [row[k] for k in ("versionStartIncluding", "versionStartExcluding", "versionEndIncluding", "versionEndExcluding") if row.get(k)]
+                if row.get("version") not in (None, "*", "-"):
+                    values.append(row["version"])
+                values += [v for v in row.get("qualifiers", {}).values() if v != "-"]
+                if any(v.lower() not in plain for v in values):
+                    issues.append("版本范围或预发布限定存在遗漏")
+                    break
+                boundaries = {"versionStartIncluding": (r">=|大于等于|不低于|至少", r"及以上"),
+                              "versionStartExcluding": (r">(?![=])|大于|高于|晚于", r"之后"),
+                              "versionEndIncluding": (r"<=|小于等于|不高于", r"及以下"),
+                              "versionEndExcluding": (r"<(?![=])|小于|低于|早于", r"之前|以前")}
+                for key, (before, after) in boundaries.items():
+                    if row.get(key):
+                        version = re.escape(row[key].lower())
+                        if not re.search(r"(?:%s)\s*v?%s|%s\s*(?:%s)" % (before, version, version, after), plain):
+                            issues.append("没有明确保留版本的包含/排除边界")
+                if "-" in row.get("qualifiers", {}).values() and not any(w in plain for w in ("不适用", "正式", "非预发布")):
+                    issues.append("没有保留 CPE 中不适用的版本限定")
+        if any(w in q for w in ("poc", "复现", "验证代码", "利用代码")) and report.get("poc_candidates"):
+            if not re.search(r"(?:未|没有|尚未).{0,8}(?:运行|验证|复现)|(?:不能|无法).{0,8}(?:确认|认定).{0,8}(?:验证|可用)", plain):
+                issues.append("没有保留 PoC 尚未由本项目验证的边界")
+        if any(w in q for w in ("修复", "缓解", "升级", "补丁")) and report.get("fix_records"):
+            if not any(row["url"].lower() in plain or (re.search(r"/pull/(\d+)", row["url"]) and re.search(r"/pull/(\d+)", row["url"]).group(1) in plain) for row in report["fix_records"]):
+                issues.append("遗漏了来源中的关联修复记录")
+        if any(w in q for w in ("所需权限", "需要权限", "利用条件", "攻击条件")):
+            privilege = next((r for r in report.get("attack_conditions", []) if r["metric"] == "PR"), None)
+            if privilege and privilege["value"] == "L" and not re.search(r"低.{0,6}权限|所需权限.{0,6}低", plain):
+                issues.append("没有保留评分向量中的低权限要求")
+    return list(dict.fromkeys(issues))
+
+
 def run(answer, evidence):
     known = []
     scores = []

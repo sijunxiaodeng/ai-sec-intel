@@ -211,6 +211,7 @@ def ask(body: AskBody):
         "context": result["context"],
         "history": result["history"],
         "used_model": result["used_model"],
+        "model_attempted": bool(result.get("model_attempted", result["used_model"])),
         "verdict": {
             "passed": result["verdict"]["passed"],
             "notes": result["verdict"]["notes"],

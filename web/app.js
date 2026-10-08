@@ -557,7 +557,8 @@ $("ask-form").addEventListener("submit", function (event) {
       }
     });
     $("question").value = "";
-    $("verdict").textContent = !data.evidence.length ? "证据不足" : (data.verdict.passed ? "引用、编号与分数检查通过" : "检查未通过");
+    var answerMode = data.used_model ? "模型回答" : (data.model_attempted ? "模型回退到证据摘录" : "规则回答");
+    $("verdict").textContent = !data.evidence.length ? "证据不足" : answerMode + " · " + (data.verdict.passed ? "引用、编号与分数检查通过" : "检查未通过");
     renderSteps($("ask-steps"), data.steps);
     var evidence = $("evidence");
     clear(evidence);

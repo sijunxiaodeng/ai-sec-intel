@@ -103,6 +103,7 @@ def run(db, dataset, mode):
     from api.app import app
     from agents.conversation import SessionStore
     from agents.orchestrator import run_answer
+    from config.llm import chat, configured
     manifest = source_manifest(db, dataset)
     rows = []
     with ExitStack() as stack:
@@ -115,9 +116,19 @@ def run(db, dataset, mode):
         if mode == "rules":
             stack.enter_context(patch("agents.qa_agent.configured", return_value=False))
         else:
-            from config.llm import configured
             if not configured():
                 raise ValueError("模型未配置，不能生成模型模式的评测结果")
+        drafts = []
+        def capture(messages, **kwargs):
+            draft = {"answer": None, "error": None}
+            drafts.append(draft)
+            try:
+                draft["answer"] = chat(messages, **kwargs)
+                return draft["answer"]
+            except Exception as exc:
+                draft["error"] = type(exc).__name__
+                raise
+        stack.enter_context(patch("agents.qa_agent.chat", side_effect=capture))
         client = TestClient(app)  # 不运行 startup 监测任务。
         for case in dataset["cases"]:
             sid = ""
@@ -125,6 +136,7 @@ def run(db, dataset, mode):
                 response = client.post("/api/ask", json={"question": previous, "session_id": sid})
                 response.raise_for_status()
                 sid = response.json()["session_id"]
+            drafts.clear()
             start = time.perf_counter()
             response = client.post("/api/ask", json={"question": case["question"], "session_id": sid})
             elapsed = time.perf_counter() - start
@@ -137,15 +149,26 @@ def run(db, dataset, mode):
                          "history": case.get("history", []), "seconds": round(elapsed, 4),
                          "automatic_passed": not failures, "failures": failures,
                          "manual_review": {"correct": None, "citations_supported": None, "notes": ""},
+                         "model_attempted": bool(drafts), "model_drafts": list(drafts),
                          "review_checklist": case["review_checklist"], "response": payload})
+            print("%s %s %.3fs %s" % (case["id"], "自动检查通过" if not failures else "需复核", elapsed,
+                                          "模型回答" if payload.get("used_model") else "规则或回退"), flush=True)
     times = sorted(r["seconds"] for r in rows)
+    from config.settings import public_settings
+    settings = public_settings()
     return {"schema_version": 1, "run_at": datetime.now(timezone.utc).isoformat(), "mode": mode,
+            "model": settings["model"] if mode == "model" else None,
+            "endpoint_type": ("local" if settings["base_url"].startswith("http://127.0.0.1:") else "configured") if mode == "model" else None,
             "dataset_sha256": hashlib.sha256(DATASET.read_bytes()).hexdigest(), "source_manifest": manifest,
             "summary": {"cases": len(rows), "automatic_passed": sum(r["automatic_passed"] for r in rows),
                         "used_model_cases": sum(bool(r["response"].get("used_model")) for r in rows),
+                        "accepted_model_automatic_passed": sum(r["automatic_passed"] and bool(r["response"].get("used_model")) for r in rows),
+                        "model_attempted_cases": sum(r["model_attempted"] for r in rows),
+                        "model_fallback_cases": sum(r["model_attempted"] and not r["response"].get("used_model") for r in rows),
                         "median_seconds": statistics.median(times), "p95_seconds": times[math.ceil(len(times)*.95)-1],
                         "max_seconds": max(times), "over_5_seconds": sum(t > 5 for t in times),
-                        "manual_accuracy": None, "manual_citation_support_rate": None},
+                        "manual_accuracy": None, "manual_citation_support_rate": None,
+                        "accepted_model_manual_accuracy": None},
             "limits": ["题单是公开的开发评测集，开发者已看过；不是独立盲测成绩。",
                        "自动规则检查关键词、范围和字段引用，不能代替语义质量评审。",
                        "耗时覆盖本机 TestClient 完整 HTTP 响应及检索/组织/核对，不包括浏览器、外网、并发和首次模型下载。",
@@ -158,6 +181,8 @@ def summarize_review(path):
     if any(not isinstance(r["manual_review"][key], bool) for r in rows for key in ("correct", "citations_supported")):
         raise ValueError("请先逐题填写全部人工复核字段 true/false；未复核项不能按通过计分")
     report["summary"]["manual_accuracy"] = sum(r["manual_review"]["correct"] for r in rows) / len(rows)
+    accepted = [r for r in rows if r["response"].get("used_model")]
+    report["summary"]["accepted_model_manual_accuracy"] = sum(r["manual_review"]["correct"] for r in accepted) / len(accepted) if accepted else None
     cited = [r for r in rows if r["response"].get("evidence")]
     report["summary"]["manual_citation_support_rate"] = sum(r["manual_review"]["citations_supported"] for r in cited) / len(cited) if cited else None
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

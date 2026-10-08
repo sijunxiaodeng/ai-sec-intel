@@ -11,7 +11,7 @@ def configured():
     return bool(data.get("api_key") and data.get("base_url") and data.get("model"))
 
 
-def chat(messages, timeout=60):
+def chat(messages, timeout=60, max_tokens=768, response_format=None):
     data = load_settings()
     if not data.get("api_key"):
         raise RuntimeError("还没有填写大模型 API Key")
@@ -19,8 +19,11 @@ def chat(messages, timeout=60):
     body = {
         "model": data["model"],
         "temperature": 0.1,
+        "max_tokens": max_tokens,
         "messages": messages,
     }
+    if response_format is not None:
+        body["response_format"] = response_format
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -36,4 +39,9 @@ def chat(messages, timeout=60):
     if not choices:
         raise RuntimeError("大模型没有返回内容")
     message = choices[0].get("message") or {}
-    return message.get("content") or ""
+    content = message.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("大模型返回了空回答")
+    if choices[0].get("finish_reason") == "length":
+        raise RuntimeError("大模型输出达到长度限制，回答可能不完整")
+    return content.strip()

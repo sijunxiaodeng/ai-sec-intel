@@ -84,6 +84,7 @@ def run_answer(question, cve_id="", *, cve_ids=None, db_path=None):
         "answer": answer,
         "evidence": answered["evidence"],
         "used_model": answered["used_model"],
+        "model_attempted": bool(answered.get("model_attempted", answered["used_model"])),
         "verdict": verdict,
         "steps": steps,
     }
