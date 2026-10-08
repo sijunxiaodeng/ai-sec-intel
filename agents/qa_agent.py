@@ -37,7 +37,7 @@ def _assessment_lines(record, question):
         for row in report["poc_candidates"]:
             add("NVD 标为 Exploit 的候选参考：%s；本项目未运行复现，不能认定已验证可用。" % row["url"], row.get("evidence_ids", []))
     if lines:
-        lines.append("这是来源字段和评分向量的解释。缺少资产与部署信息，具体资产影响未知。")
+        lines.append("这是来源字段和评分向量的解释。此回答未进行资产匹配；登记资产的筛选结果请在资产影响页面查看。")
         lines.extend(report["warnings"])
         known = {chunk["citation_id"] for chunk in record.get("evidence_chunks") or []}
         for chunk in report["evidence"]:
@@ -137,8 +137,9 @@ def _extractive(records, question=""):
 
 
 def run(question, top_k=4, cve_id=""):
-    if any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司", "资产清单", "哪些ip", "哪些 ip")):
-        return {"answer": "当前没有你的资产清单、实际版本和网络暴露信息，无法判断具体资产是否受影响。", "evidence": [], "used_model": False, "steps": []}
+    if any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司", "资产", "哪些ip", "哪些 ip")):
+        from enrichment.assets import answer_assets
+        return answer_assets(question, cve_id)
     records = search(question, top_k=top_k, cve_id=cve_id)
     for record in records:
         # 即使调用大模型，也显式提供结构化字段所需的证据。

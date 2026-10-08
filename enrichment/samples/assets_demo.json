@@ -1,0 +1,7 @@
+{
+  "assets": [
+    {"asset_id": "demo-ollama-old", "name": "演示：旧版推理服务", "vendor": "ollama", "product": "ollama", "version": "0.1.33", "exposure": "internet", "authentication": "unknown", "criticality": "high", "is_demo": true},
+    {"asset_id": "demo-ollama-boundary", "name": "演示：范围排除边界", "vendor": "ollama", "product": "ollama", "version": "0.1.34", "exposure": "internal", "is_demo": true},
+    {"asset_id": "demo-ollama-unknown", "name": "演示：版本待补充", "vendor": "ollama", "product": "ollama", "version": "", "exposure": "unknown", "is_demo": true}
+  ]
+}

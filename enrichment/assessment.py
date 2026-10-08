@@ -91,7 +91,7 @@ def _empty(cve_id, detail):
     return {"schema_version": 1, "cve_id": cve_id, "status": "insufficient_evidence",
             "detail": detail, "cvss": None, "cvss_candidates": [], "affected_ranges": [],
             "attack_conditions": [], "technical_impact": [], "poc_candidates": [], "fix_records": [],
-            "warnings": [], "evidence": [], "asset_impact": {"status": "unknown", "reason": "缺少资产清单、实际版本、部署权限和网络暴露信息"}}
+            "warnings": [], "evidence": [], "asset_impact": {"status": "unknown", "reason": "此技术报告未结合具体资产及部署信息；登记清单的匹配结果另行评估"}}
 
 
 def assess(cve_id, db_path=DEFAULT_DB):

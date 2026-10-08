@@ -10,6 +10,7 @@ from automation.schedule import countable_latency, start as start_schedule, stat
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
 from rag.retrieve import get_record, knowledge_records, search
+from enrichment.assets import AssetImport, AssetPreview, import_assets, load_assets, impact_report
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
@@ -120,6 +121,46 @@ def assessment(cve_id: str):
         raise HTTPException(status_code=404, detail="知识库里没有这条情报")
     from enrichment.assessment import assess
     return (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+
+
+def _asset_assessment(cve_id):
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="知识库里没有这条情报")
+    from enrichment.assessment import assess
+    return (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+
+
+@app.get("/api/assets")
+def assets():
+    rows = load_assets()
+    return {"items": rows, "count": len(rows), "demo_count": sum(bool(r.get("is_demo")) for r in rows)}
+
+
+@app.post("/api/assets/import")
+def assets_import(body: AssetImport):
+    try:
+        return import_assets(body.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/assets/demo")
+def assets_demo():
+    import json
+    with open(os.path.join(ROOT, "enrichment", "samples", "assets_demo.json"), encoding="utf-8") as stream:
+        return json.load(stream)
+
+
+@app.post("/api/assets/preview")
+def assets_preview(body: AssetPreview):
+    report = _asset_assessment(body.cve_id)
+    return impact_report(report, [dict(r.dict(), inventory_source="preview") for r in body.assets], preview=True)
+
+
+@app.get("/api/asset-impact/{cve_id}")
+def asset_impact(cve_id: str):
+    return impact_report(_asset_assessment(cve_id), load_assets())
 
 
 @app.post("/api/collect")

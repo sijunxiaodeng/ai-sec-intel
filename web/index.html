@@ -20,6 +20,7 @@
         <button type="button" data-view="overview" class="is-on">总览</button>
         <button type="button" data-view="monitor">情报监测</button>
         <button type="button" data-view="enrich">情报富化</button>
+        <button type="button" data-view="assets">资产影响</button>
         <button type="button" data-view="ask">情报问答</button>
         <button type="button" data-view="settings">模型设置</button>
       </nav>
@@ -88,6 +89,33 @@
             <p class="empty">从左侧选择一条情报，查看富化结果。</p>
           </article>
         </div>
+      </section>
+
+      <section id="assets" class="view" hidden>
+        <div class="panel asset-import">
+          <h2>登记 AI 组件</h2>
+          <p class="hint">每条资产填写编号、名称、确切厂商/产品标识及实际版本。先预览，再按需保存。资产留在本机，版本匹配不连接目标。</p>
+          <div class="toolbar">
+            <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
+            <label for="asset-file">读取 JSON 文件</label><input id="asset-file" type="file" accept=".json,application/json" />
+          </div>
+          <label for="asset-json">资产 JSON</label>
+          <textarea id="asset-json" rows="6" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
+          <div class="ask-row">
+            <label for="asset-cve">匹配这条情报</label><select id="asset-cve"></select>
+            <button type="button" class="primary" id="asset-preview">预览匹配</button>
+            <button type="button" class="ghost" id="asset-save">保存清单</button>
+          </div>
+          <p id="asset-message" class="hint">演示清单为虚构组件；填入或预览不会自动保存。</p>
+        </div>
+        <article class="panel asset-results">
+          <header class="panel-head"><h2>匹配结果</h2><button type="button" class="text-btn" id="asset-evaluate">评估已保存清单</button></header>
+          <div id="asset-impact"><p class="empty">选择一条情报，预览输入内容或评估已保存清单。</p></div>
+        </article>
+        <article class="panel asset-results">
+          <header class="panel-head"><h2>已保存资产</h2><span id="asset-count"></span></header>
+          <div id="asset-list"></div>
+        </article>
       </section>
 
       <section id="ask" class="view" hidden>

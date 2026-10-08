@@ -2,6 +2,7 @@ var titles = {
   overview: "总览",
   monitor: "情报监测",
   enrich: "情报富化",
+  assets: "资产影响",
   ask: "情报问答",
   settings: "模型设置"
 };
@@ -22,6 +23,7 @@ function api(path, options) {
     return response.json().then(function (data) {
       if (!response.ok) {
         var detail = data && data.detail ? data.detail : "请求失败";
+        if (Array.isArray(detail)) detail = "字段校验未通过：" + detail.slice(0, 3).map(function (row) { return (row.loc || []).slice(1).join(".") + "：" + row.msg; }).join("；");
         throw new Error(typeof detail === "string" ? detail : "请求失败");
       }
       return data;
@@ -127,6 +129,7 @@ function setView(name) {
   if (name === "overview") loadOverview();
   if (name === "monitor" || name === "enrich") loadItems(name);
   if (name === "ask") loadAsk();
+  if (name === "assets") loadAssets().catch(showError);
   if (name === "settings") loadSettings();
 }
 
@@ -217,7 +220,7 @@ function renderAssessment(panel, report) {
   (report.attack_conditions || []).concat(report.technical_impact || []).forEach(function (row) { fact("评分向量解释 · " + row.label + "：" + row.text, row.evidence_ids); });
   (report.fix_records || []).forEach(function (row) { fact("修复记录：" + row.title + "；修复效果尚未由本项目测试。", row.evidence_ids); });
   (report.poc_candidates || []).forEach(function (row) { fact("利用代码候选：" + row.url + "；本项目未运行复现。", row.evidence_ids); });
-  add(section, "p", "desc", "具体资产影响：未知。" + report.asset_impact.reason + "。");
+  add(section, "p", "desc", "此技术报告未进行资产匹配；登记清单后，在「资产影响」查看筛选结果。");
   (report.warnings || []).forEach(function (warning) { add(section, "p", "meta", warning); });
   if (report.source) add(section, "p", "meta", "报告依据获取于 " + dateText(report.source.retrieved_at) + " 的来源快照。");
 }
@@ -244,6 +247,12 @@ function renderDetail(item) {
     add(field, "b", "", pair[1]);
   });
   renderAssessment(panel, item.assessment);
+  var assetButton = add(panel, "button", "ghost", "查看登记资产影响");
+  assetButton.type = "button";
+  assetButton.addEventListener("click", function () {
+    setView("assets");
+    loadAssets(item.cve_id).then(function () { return evaluateSavedAssets(); }).catch(showError);
+  });
   var links = add(panel, "div", "links");
   (item.papers || []).forEach(function (paper) {
     var link = add(links, "a", "", "论文：" + (paper.title || paper.url));
@@ -297,6 +306,116 @@ function renderDetail(item) {
     }).catch(showError).then(function () { fetchButton.disabled = false; });
   });
 }
+
+var exposureLabels = {internet: "互联网可达", internal: "内网", isolated: "隔离", unknown: "暴露信息未知"};
+var authLabels = {required: "已登记需认证", none: "已登记无认证", unknown: "认证信息未知"};
+
+function inventorySummary(asset) {
+  return asset.vendor + "/" + asset.product + " · " + (asset.version || "版本未知") + " · " + exposureLabels[asset.exposure] + " · " + authLabels[asset.authentication];
+}
+
+function loadAssets(selected) {
+  return Promise.all([api("/api/assets"), api("/api/items")]).then(function (data) {
+    var inventory = data[0], select = $("asset-cve"), current = selected || select.value;
+    clear(select);
+    add(select, "option", "", "请选择 CVE").value = "";
+    (data[1].items || []).forEach(function (item) { add(select, "option", "", item.cve_id).value = item.cve_id; });
+    select.value = current;
+    $("asset-count").textContent = inventory.count + " 条，其中演示资产 " + inventory.demo_count + " 条";
+    clear($("asset-list"));
+    if (!inventory.count) add($("asset-list"), "p", "empty", "暂无已保存资产。可填入演示清单预览，或登记实际组件。");
+    (inventory.items || []).forEach(function (asset) {
+      var block = add($("asset-list"), "div", "asset-card");
+      add(block, "b", "", asset.name + (asset.is_demo ? "（演示资产）" : ""));
+      add(block, "p", "meta", asset.asset_id + " · " + inventorySummary(asset));
+      add(block, "p", "meta", "登记时间：" + dateText(asset.recorded_at));
+    });
+  }).catch(showError);
+}
+
+function assetPayload() {
+  var text = $("asset-json").value.trim();
+  if (!text) throw new Error("请先填写资产清单或填入演示内容。");
+  var payload;
+  try { payload = JSON.parse(text); } catch (error) { throw new Error("资产 JSON 格式不正确，请检查引号、逗号和括号。"); }
+  if (!payload || !Array.isArray(payload.assets)) throw new Error("请使用包含 assets 数组的 JSON 对象。");
+  return payload;
+}
+
+function selectedAssetCve() {
+  var cve = $("asset-cve").value;
+  if (!cve) throw new Error("请先选择用于匹配的 CVE 编号。");
+  return cve;
+}
+
+function renderAssetImpact(report) {
+  var target = $("asset-impact");
+  clear(target);
+  add(target, "p", "title", report.cve_id + " · " + (report.preview ? "输入内容预览，尚未保存" : "已保存清单评估"));
+  add(target, "p", "desc", "版本命中 " + report.counts.matched_version + " · 待确认 " + report.counts.unknown + " · 未命中当前范围 " + report.counts.not_matched + "；演示资产 " + report.demo_count + " 条");
+  if (!report.asset_count) add(target, "p", "empty", "尚未登记资产，无法评估具体组件。");
+  (report.results || []).forEach(function (result) {
+    var asset = result.asset, block = add(target, "div", "asset-card " + result.status);
+    add(block, "b", "", asset.name + " · " + result.label + (asset.is_demo ? "（演示资产）" : ""));
+    add(block, "p", "desc", asset.asset_id + " · " + inventorySummary(asset));
+    add(block, "p", "desc", result.reason + "；" + result.priority);
+    var activeChecks = (result.checks || []).filter(function (row) { return row.status === result.status; });
+    activeChecks.forEach(function (row) { add(block, "p", "meta", "来源范围：" + row.range + " · " + row.pointer); });
+    (result.evidence_ids || []).forEach(function (id) {
+      var evidence = (report.evidence || []).find(function (row) { return row.citation_id === id; });
+      if (!evidence) return;
+      var link = add(block, "a", "meta", "范围证据：" + id);
+      link.href = evidence.url; link.target = "_blank"; link.rel = "noopener";
+    });
+  });
+  (report.limitations || []).concat(report.warnings || []).forEach(function (text) { add(target, "p", "meta", text); });
+  if (report.source) add(target, "p", "meta", "漏洞范围快照获取于 " + dateText(report.source.retrieved_at));
+}
+
+function evaluateSavedAssets() {
+  try { return api("/api/asset-impact/" + encodeURIComponent(selectedAssetCve())).then(renderAssetImpact); }
+  catch (error) { showError(error); return Promise.resolve(); }
+}
+
+$("asset-demo").addEventListener("click", function () {
+  api("/api/assets/demo").then(function (data) {
+    $("asset-json").value = JSON.stringify(data, null, 2);
+    $("asset-message").textContent = "已填入 3 条虚构演示资产，尚未保存。选择 CVE-2024-37032 后可预览。";
+    $("asset-cve").value = "CVE-2024-37032";
+  }).catch(showError);
+});
+$("asset-file").addEventListener("change", function () {
+  var file = this.files[0];
+  if (!file) return;
+  if (file.size > 1024 * 1024) { showError(new Error("JSON 文件不能超过 1 MB。")); return; }
+  file.text().then(function (text) { $("asset-json").value = text.replace(/^\uFEFF/, ""); $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。"; }).catch(showError);
+});
+$("asset-preview").addEventListener("click", function () {
+  clearError();
+  var button = $("asset-preview");
+  try {
+    var payload = assetPayload();
+    payload.cve_id = selectedAssetCve();
+    button.disabled = true;
+    api("/api/assets/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(renderAssetImpact).catch(showError).then(function () { button.disabled = false; });
+  } catch (error) { showError(error); }
+});
+$("asset-save").addEventListener("click", function () {
+  clearError();
+  var button = $("asset-save");
+  try {
+    var payload = assetPayload();
+    button.disabled = true;
+    api("/api/assets/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (data) {
+      $("asset-message").textContent = "已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条；其他已登记资产保留。";
+      clear($("asset-impact"));
+      add($("asset-impact"), "p", "empty", "清单已更新，请重新评估已保存清单。");
+      return loadAssets();
+    }).catch(showError).then(function () { button.disabled = false; });
+  } catch (error) { showError(error); }
+});
+$("asset-evaluate").addEventListener("click", function () { clearError(); evaluateSavedAssets().catch(showError); });
+$("asset-cve").addEventListener("change", function () { clear($("asset-impact")); add($("asset-impact"), "p", "empty", "情报已切换，请重新预览或评估。"); });
 
 function fillFocus(items) {
   var select = $("focus");
@@ -420,7 +539,8 @@ $("ask-form").addEventListener("submit", function (event) {
       add(block, "div", "title", "[" + chunk.citation_id + "] " + chunk.title);
       add(block, "p", "desc", chunk.text);
       add(block, "div", "meta", "原文定位：" + chunk.locator);
-      add(block, "div", "meta", "获取日期：" + dateText(chunk.retrieved_at) + " · " + (chunk.text_kind === "reviewed_manual_summary" ? "人工核对摘要" : "自动提取原文"));
+      var kinds = {reviewed_manual_summary: "人工核对摘要", user_declared_inventory: "用户登记资产", automatic_structured_extract: "来源字段提取"};
+      add(block, "div", "meta", "获取/登记日期：" + dateText(chunk.retrieved_at) + " · " + (kinds[chunk.text_kind] || "自动提取原文"));
       var link = add(block, "a", "", "打开这段证据的来源");
       link.href = chunk.url;
       link.target = "_blank";
