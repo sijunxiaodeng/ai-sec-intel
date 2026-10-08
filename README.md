@@ -43,3 +43,9 @@ python collect_nvd.py
 - 各自从 `dev` 拉分支，例如 `feature/collector`、`feature/enrich`
 
 不要把密钥写进仓库。
+
+## 任务 C 的首日证据样例
+
+在仓库根目录运行 `python -m rag.demo`，可离线演示 CVE-2024-37032 的富化样例、证据入库、检索和带引用的抽取式问答。它使用 Python 标准库，无须大模型密钥；样例明确标注人工整理，PoC 尚未由本项目复现。
+
+运行和验收说明见 [rag/README.md](rag/README.md)。这是独立的任务 C 开发入口，尚未接入上面的 Web 页面。
