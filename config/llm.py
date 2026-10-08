@@ -2,6 +2,7 @@
 
 import json
 import urllib.request
+from urllib.parse import urlsplit
 
 from config.settings import load_settings
 
@@ -22,6 +23,12 @@ def chat(messages, timeout=60, max_tokens=768, response_format=None):
         "max_tokens": max_tokens,
         "messages": messages,
     }
+    # 当前官方 DeepSeek 默认启用思考；字段问答先采用非思考模式，
+    # 避免有限输出额度耗在推理而未生成完整 JSON。其他兼容服务不接收此参数。
+    if urlsplit(data["base_url"]).hostname == "api.deepseek.com" and data["model"] in (
+        "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"
+    ):
+        body["thinking"] = {"type": "disabled"}
     if response_format is not None:
         body["response_format"] = response_format
     request = urllib.request.Request(

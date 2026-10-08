@@ -46,6 +46,25 @@ class ModelTest(unittest.TestCase):
             self.assertEqual(chat([{"role": "user", "content": "fixture"}], response_format={"type": "json_object"}), "test")
         self.assertEqual(captured[0]["max_tokens"], 768)
         self.assertEqual(captured[0]["response_format"]["type"], "json_object")
+        self.assertNotIn("thinking", captured[0])
+
+    def test_thinking_toggle_only_sent_to_supported_official_deepseek_models(self):
+        result = {"choices": [{"message": {"content": "fixture"}, "finish_reason": "stop"}]}
+        for endpoint, model, expected in (
+            ("https://api.deepseek.com", "deepseek-flash", True),
+            ("https://api.deepseek.com/v1", "deepseek-v4-pro", True),
+            ("https://api.deepseek.com", "deepseek-v4-flash", True),
+            ("https://api.deepseek.com.example.org", "deepseek-flash", False),
+            ("https://example.org/v1", "deepseek-flash", False),
+            ("http://127.0.0.1:11434/v1", "fixture", False)):
+            captured = []
+            def response(request, **kwargs):
+                captured.append(json.loads(request.data))
+                return io.BytesIO(json.dumps(result).encode())
+            settings = dict(self.settings, base_url=endpoint, model=model)
+            with self.subTest(endpoint=endpoint, model=model), patch("config.llm.load_settings", return_value=settings), patch("config.llm.urllib.request.urlopen", side_effect=response):
+                self.assertEqual(chat([]), "fixture")
+            self.assertEqual(captured[0].get("thinking"), {"type": "disabled"} if expected else None)
 
     def test_empty_and_truncated_model_answers_rejected(self):
         for content, reason in (("", "stop"), ("partial", "length"), (None, "stop")):
