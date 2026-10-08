@@ -109,3 +109,7 @@ python -m unittest discover -s questions -p "test_*.py" -v
 可使用本机 Ollama 已安装的 Qwen，或自行配置国产云模型兼容接口。模型使用结构化回答和具体片段引用；空回答、截断、无效引用及关键字段问题会回退到证据摘录。网页明确区分模型回答、模型回退和规则回答。
 
 模型模式运行 `python -m questions.evaluate --mode model --output data/qa-evaluation-model-report.json`。报告保存原始模型输出、采用/回退数量及逐题复核项，不将规则兜底结果冒充模型准确率。本机配置、限制和人工辅助事项见 [模型接入说明.md](模型接入说明.md)。
+
+## 第八步：DeepSeek 对比与来源复核
+
+已完成 DeepSeek 与本机 Qwen 的同版本 36 题真实调用对比，以及引用候选、复杂输出预算和事实条目上限的定向修复。结果分开记录完整对比、9 题复测和后续单题重测；密钥与原始模型输出留在本机。统计、来源复核发现与剩余问题见 [模型对比评测.md](模型对比评测.md)。

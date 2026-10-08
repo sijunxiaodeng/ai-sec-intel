@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from config.llm import chat
-from agents.qa_agent import run, _render_model_json, _answer_format, _extractive
+from agents.qa_agent import run, _render_model_json, _answer_format, _extractive, _answer_tokens, _evidence_text
 from agents.verifier_agent import required_fields
 
 
@@ -80,6 +80,38 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(ids, [self.eid])
         with patch("config.settings.load_settings", return_value=dict(self.settings, base_url="https://example.org/v1")):
             self.assertEqual(_answer_format([self.record]), {"type": "json_object"})
+
+    def test_model_prompt_lists_only_allowed_citations_and_avoids_unrelated_metadata(self):
+        record = self.assessed_record()
+        self.assertNotIn("字段提取与评估边界", _evidence_text([record], "CVSS 评分？"))
+        self.assertNotIn("Fixture only", _evidence_text([record], "CVSS 评分？"))
+        captured = []
+        def respond(messages, **kwargs):
+            captured.append((messages, kwargs))
+            return json.dumps({"claims": [{"text": "CVSS 3.1 基础分为 8.8。", "citations": [self.eid]}]})
+        with patch("agents.qa_agent.search", return_value=[record]), patch("agents.qa_agent.configured", return_value=True), patch("agents.qa_agent.chat", side_effect=respond):
+            self.assertTrue(run(self.cve + " 的 CVSS 评分？")["used_model"])
+        suffix = captured[0][0][-1]["content"].split("允许的 citations 标识（只能照抄清单中的值）：", 1)[1]
+        self.assertEqual(json.loads(suffix), [self.eid])
+        self.assertEqual(captured[0][1]["max_tokens"], 768)
+
+    def test_complex_branch_output_budget_is_bounded(self):
+        record = self.assessed_record()
+        report = record["item"]["raw_data"]["automatic_assessment"]
+        report["affected_ranges"] = [dict(report["affected_ranges"][0], display="fixture：版本 = 1.0-rc%d" % i) for i in range(8)]
+        self.assertEqual(_answer_tokens([record], "受影响版本范围？"), 1536)
+        self.assertEqual(_answer_tokens([record], "CVSS 评分？"), 768)
+
+    def test_complete_multi_topic_answer_can_exceed_twelve_claims_but_is_bounded(self):
+        texts = ["来源版本分支为 1.0-rc%d。" % i for i in range(8)]
+        texts += ["按 CVSS 向量解释，%s。" % field for field in (
+            "易受攻击系统保密性影响无", "易受攻击系统完整性影响无", "易受攻击系统可用性影响高",
+            "后续系统保密性影响无", "后续系统完整性影响无", "后续系统可用性影响无")]
+        texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "PoC 尚未由本项目验证。"]
+        claims = [{"text": text, "citations": [self.eid]} for text in texts]
+        self.assertEqual(len(_render_model_json(json.dumps({"claims": claims}), [self.record]).splitlines()), 17)
+        with self.assertRaises(ValueError):
+            _render_model_json(json.dumps({"claims": claims + claims}), [self.record])
 
     def test_structured_answer_preserves_explicit_citation(self):
         raw = json.dumps({"claims": [{"text": "CVSS 为 8.8。", "citations": [self.eid]}]})
