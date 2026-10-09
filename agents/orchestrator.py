@@ -1,3 +1,8 @@
+# Ownership: A (integration / orchestration). C must not change step order
+# without an A-reviewed PR. Optional document ingest after collect/enrich is
+# controlled by AUTO_INGEST_ON_COLLECT (default "1" keeps prior behavior).
+import os
+
 from agents.enrichment_agent import run as enrich_run
 from agents.monitor_agent import run as monitor_run
 from agents.qa_agent import run as qa_run
@@ -9,7 +14,16 @@ from models import enriched_record
 from rag.ingest import ingest
 
 
+def _auto_ingest_enabled():
+    return os.environ.get("AUTO_INGEST_ON_COLLECT", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
 def _documents_step(records, limit=3):
+    if not _auto_ingest_enabled():
+        return [], [{"role": "编排", "action": "跳过自动抓取关联资料",
+                     "detail": "AUTO_INGEST_ON_COLLECT 已关闭；可在详情页或 /api/documents 单独处理。"}]
     results = [ingest(record, max_sources=4) for record in records[:limit]]
     return results, [{"role": "富化", "action": "抓取关联资料并更新证据索引",
                       "detail": "本次处理 %d 条情报，抓取成功 %d 个来源；失败状态已保留。其余情报可在详情中单独处理。" %
