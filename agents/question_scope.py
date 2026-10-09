@@ -5,7 +5,7 @@ from rag.answer import TOPIC_WORDS
 
 def positive_question(question):
     # 只处理句首/分句首明确的回答指令。保留“不要只…”和“不需要用户交互吗”等事实询问。
-    directive = (r"(?:不要(?!只|仅)|不用(?:说明|列出|讨论|比较|介绍)|"
+    directive = (r"(?:不要(?!只|仅|遗漏|漏掉|省略)|不用(?:说明|列出|讨论|比较|介绍)|"
                  r"不(?:比较|讨论|列出|解释|介绍|回答|提及|展示|补充|判断|问))")
     return re.sub(r"(?:^|(?<=[，,。；;]))\s*(?:请)?" + directive + r"[^，,。；;？?\n]*", "", question or "").strip()
 

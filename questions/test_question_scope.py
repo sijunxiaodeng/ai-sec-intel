@@ -58,12 +58,17 @@ class QuestionScopeTest(unittest.TestCase):
         self.assertNotIn("< 1.2.3", answer)
 
     def test_factual_negation_and_not_only_instruction_keep_required_fields(self):
-        for q in ("攻击条件：不需要用户交互吗？", "不要只列评分，还要版本范围"):
+        for q in ("攻击条件：不需要用户交互吗？", "不要只列评分，还要版本范围", "不要遗漏版本范围", "不要漏掉利用条件", "不要省略用户交互条件"):
             self.assertEqual(positive_question(q), q)
         self.assertEqual(topics("不要只列评分，还要版本范围"), {"cvss", "versions"})
         rows = self.records()
         self.assertFalse(required_fields("版本 < 1.2.3。", rows[:1], "版本范围，不要评分"))
         self.assertTrue(required_fields("未列条件。", rows[:1], "利用条件，不需要用户交互吗？"))
+
+    def test_do_not_omit_directive_keeps_version_field_and_validation(self):
+        answer = self.answer(f"比较 {A} 和 {B} 的评分，不要遗漏版本范围。")
+        self.assertIn("< 1.2.3", answer)
+        self.assertTrue(required_fields("CVSS 3.1 基础分为 8.8。", self.records()[:1], "评分，不要遗漏受影响版本范围"))
 
     def test_unknown_positive_comparison_scope_does_not_restore_excluded_topic(self):
         answer = self.answer(f"对比 {A} 和 {B}，不要评分和修复")
