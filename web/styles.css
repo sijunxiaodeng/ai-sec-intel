@@ -176,3 +176,36 @@ button.row {
   .main { padding: 20px 16px 40px; }
   .row { grid-template-columns: 1fr; }
 }
+/* 片段证据使用现有页面字号与颜色，允许长标识换行。 */
+.evidence-chunk { padding: 14px 0; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
+.evidence-chunk .title { overflow-wrap: anywhere; }
+.evidence-chunk a { display: inline-block; margin-top: 8px; }
+.assessment { margin-top: 20px; overflow-wrap: anywhere; }
+.assessment .field { margin-bottom: 10px; }
+.assessment .field p { margin: 0 0 6px; }
+.assessment a { color: var(--accent); display: block; }
+.guidance { margin-top: 24px; overflow-wrap: anywhere; }
+.guidance-fact { padding: 12px 14px; margin-bottom: 12px; border-left: 3px solid var(--accent); background: rgba(125, 140, 160, .07); }
+.guidance-fact p { margin: 8px 0; }
+.guidance-fact a { color: var(--accent); }
+.guidance-fact summary { cursor: pointer; }
+.library-ask { margin: 16px 0; }
+.library-ask textarea { margin: 8px 0; }
+.library-selection { display: block; margin: 10px 0; font-size: 13px; }
+.library-selection input { width: auto; }
+
+.relation-fact { margin: 9px 0; padding: 10px 12px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
+.relation-fact summary { cursor: pointer; font-weight: 600; }
+.relation-fact p { overflow-wrap: anywhere; }
+.asset-results { margin-top: 16px; }
+.asset-import textarea { margin-top: 6px; font-family: Consolas, monospace; }
+.asset-import select { max-width: 100%; }
+.asset-import .ask-row { flex-wrap: wrap; }
+.asset-card { border-left: 4px solid var(--line); padding: 12px; margin: 10px 0; background: #f6f3ed; border-radius: 8px; overflow-wrap: anywhere; }
+.asset-card.matched_version { border-color: var(--high); }
+.asset-card.unknown { border-color: var(--mid); }
+.asset-card a { display: block; color: var(--accent); }
+.conversation-turn { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.conversation-turn summary { cursor: pointer; font-weight: 600; white-space: normal; }
+.answer { overflow-wrap: anywhere; }
+.ask-box .ask-row { flex-wrap: wrap; }

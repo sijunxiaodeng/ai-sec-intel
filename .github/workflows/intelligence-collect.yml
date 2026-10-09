@@ -40,6 +40,8 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
+      # Keep the known automation bootstrap SHA as last-resort default so scheduled
+      # runs work before repository variables are configured.
       INTELLIGENCE_BOOTSTRAP_STATE_COMMIT: ${{ inputs.bootstrap_state_commit || vars.INTELLIGENCE_BOOTSTRAP_STATE_COMMIT || 'e00c1c8abf2c2ab360ca95204a483fbf83fd1063' }}
     steps:
       - name: Check out collector

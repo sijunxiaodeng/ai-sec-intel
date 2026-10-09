@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "topic": "model_supply_chain",
+  "label": "模型供应链",
+  "reviewed_at": "2026-10-09",
+  "review_kind": "developer_source_review",
+  "scope": "HF Pickle 加载风险与 NIST 第三方组件治理的限定对照；不是所有模型格式/框架的检测规则。",
+  "sources": {
+    "hf": {
+      "url": "https://huggingface.co/docs/hub/security-pickle",
+      "version": null,
+      "content_scope": "article_body",
+      "kind": "vendor_guidance"
+    },
+    "nist": {
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "kind": "voluntary_risk_framework"
+    }
+  },
+  "facts": [
+    {
+      "id": "H1",
+      "source": "hf",
+      "facet": "mechanism",
+      "predicate": "describes",
+      "label": "加载时的代码执行风险",
+      "text": "HF 文档描述，加载 Pickle 文件可能造成任意代码执行。",
+      "qualifier": "风险发生在加载/反序列化环节；不能据此认定所有模型文件有恶意代码。",
+      "authority": "source_description",
+      "evidence_text_sha256": "a2256aba85d083b45fada68fab90c8023120b21a181b2ac1b3a50cdb70f41cae",
+      "locator_prefix": "extracted_text"
+    },
+    {
+      "id": "H2",
+      "source": "hf",
+      "facet": "mitigation",
+      "predicate": "describes",
+      "label": "来源信任与签名边界",
+      "text": "HF 建议从可信用户或组织加载文件，并说明签名用于确认来源，不能保证文件安全。",
+      "qualifier": "可信来源和签名不是内容安全证明。",
+      "authority": "source_description",
+      "evidence_text_sha256": "9d3c596cb77911f2aabe125261f24d82311c89c654fefcbd46e229633407ede1",
+      "locator_prefix": "extracted_text"
+    },
+    {
+      "id": "H3",
+      "source": "hf",
+      "facet": "assessment",
+      "predicate": "describes",
+      "label": "静态导入扫描",
+      "text": "HF 描述 Pickle Import 扫描提取导入列表，借助 pickletools.genops 读取文件，无需执行其中代码。",
+      "qualifier": "本文档存档中的扫描机制描述，不是本项目已扫描模型文件。",
+      "authority": "source_recommendation",
+      "evidence_text_sha256": "e60c9bed90378b1f774d22ffbdf7c88b0567d8f515022aee52854a60bcc3de96",
+      "locator_prefix": "extracted_text"
+    },
+    {
+      "id": "H4",
+      "source": "hf",
+      "facet": "limitation",
+      "predicate": "describes",
+      "label": "扫描不是安全保证",
+      "text": "HF 明确说明该扫描不是百分之百可靠，也未主动审计 Python 包的安全性。",
+      "qualifier": "扫描未报错不能单独证明安全；页面未注明发行版本，按本机存档片段核对。",
+      "authority": "source_description",
+      "evidence_text_sha256": "e6d9cf790c5dc8507e68e1d63b4d32c7f8c955a732b2a8c068272ed9f202868f",
+      "locator_prefix": "extracted_text"
+    },
+    {
+      "id": "S1",
+      "source": "nist",
+      "facet": "mechanism",
+      "predicate": "describes",
+      "label": "第三方组件治理风险",
+      "text": "NIST 第 2.12 节将数据集、预训练模型和软件库列为第三方组件，并指出来源不当或审查不足可能降低下游透明度或问责能力。",
+      "qualifier": "这是一般组件治理风险说明；该段没有专门描述 Pickle 漏洞。",
+      "authority": "source_description",
+      "evidence_text_sha256": "a7ea0a166e565dca265be41df659bfb53281e323763029c1304a9b94b90f223a",
+      "locator_prefix": "PDF page 16"
+    },
+    {
+      "id": "S2",
+      "source": "nist",
+      "facet": "assessment",
+      "predicate": "describes",
+      "label": "供应商风险评估",
+      "text": "NIST 的 GV-6.1-005 建议按使用场景评估和监测供应商，包括内容来源标准与技术、异常和未授权变更检测等。",
+      "qualifier": "自愿风险框架的建议；不构成具体文件安全保证或中国法律强制要求。",
+      "authority": "source_recommendation",
+      "evidence_text_sha256": "726425d2c25884c5f4a373ab46886470c0a4c2e7d43a1b42f2417444060da351",
+      "locator_prefix": "PDF page 25"
+    },
+    {
+      "id": "S3",
+      "source": "nist",
+      "facet": "assessment",
+      "predicate": "describes",
+      "label": "漏洞情报与持续监测",
+      "text": "NIST 的 GV-6.1-009 建议更新采购尽调流程，纳入安全等风险、持续监测，并对照事件或漏洞数据库评估供应商、工具或服务。",
+      "qualifier": "建议需结合实际使用场景实施；本项目尚未完成实际供应商商评估。",
+      "authority": "source_recommendation",
+      "evidence_text_sha256": "a1f3f9d628a5a094a0f5ecf701116cf44d4c9c6716a18a7402ed2f7faa14c532",
+      "locator_prefix": "PDF page 25"
+    },
+    {
+      "id": "S4",
+      "source": "nist",
+      "facet": "limitation",
+      "predicate": "describes",
+      "label": "建议适用性需按场景确定",
+      "text": "NIST 说明，不是每项建议都适用于每个 AI 参与者，应根据组织情况和特定用途确定适用性。",
+      "qualifier": "不能把框架所有建议直接套用于任意应用。",
+      "authority": "source_description",
+      "evidence_text_sha256": "251e03c1c9c9c9ea0b778a29d31089a252ce36ccac14534c3f4e7406eea36701",
+      "locator_prefix": "PDF page 17"
+    }
+  ]
+}

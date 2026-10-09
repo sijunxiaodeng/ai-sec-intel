@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "provenance": "按三个公开来源人工整理的历史开发样例；不是实时采集，不代表系统已经实现自动富化。片段是中文摘要，不是完整原文。",
+  "item": {
+    "id": "CVE-2024-37032",
+    "cve_id": "CVE-2024-37032",
+    "title": "Ollama 路径遍历漏洞（历史人工样例）",
+    "description": "Ollama 0.1.34 之前的版本获取模型路径时没有充分校验 digest 格式。",
+    "source": "NVD（人工核对样例）",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+    "published_at": "2024-05-31T04:15:09.617Z",
+    "collected_at": "2026-10-08T05:34:53.770522+00:00",
+    "product": "Ollama",
+    "affected": [
+      "Ollama < 0.1.34"
+    ],
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+      "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+      "https://github.com/ollama/ollama/pull/4175",
+      "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032"
+    ],
+    "raw_data": {
+      "sample_mode": "historical_manual_sample",
+      "source_last_modified": "2026-06-17T07:37:38.427Z",
+      "cvss_score": 8.8,
+      "cvss_severity": "HIGH",
+      "cvss_version": "3.1",
+      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+      "cvss_source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+      "cvss_metric_type": "Secondary",
+      "exploit_refs": [
+        "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032"
+      ],
+      "poc_review": {
+        "status": "candidate_reference",
+        "validation": "not_run"
+      },
+      "reviewed_facts": {
+        "ai_relevance": {
+          "value": "AI 基础设施/推理服务风险",
+          "evidence_ids": [
+            "WIZ-01"
+          ]
+        },
+        "affected_versions": {
+          "value": {
+            "product": "Ollama",
+            "version_end_excluding": "0.1.34"
+          },
+          "evidence_ids": [
+            "NVD-01"
+          ]
+        },
+        "fixed_version": {
+          "value": "0.1.34",
+          "evidence_ids": [
+            "WIZ-04"
+          ]
+        },
+        "conditions": {
+          "value": "访问相关 API、处理恶意清单；部署权限和网络暴露影响后果",
+          "evidence_ids": [
+            "WIZ-03"
+          ]
+        },
+        "technical_impact": {
+          "value": "路径遍历、任意文件写入，可进一步导致远程代码执行",
+          "evidence_ids": [
+            "WIZ-02"
+          ]
+        },
+        "fix_record": {
+          "value": "https://github.com/ollama/ollama/pull/4175",
+          "evidence_ids": [
+            "FIX-01"
+          ]
+        },
+        "cvss": {
+          "value": {
+            "version": "3.1",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+            "baseScore": 8.8,
+            "baseSeverity": "HIGH",
+            "attackVector": "NETWORK",
+            "attackComplexity": "LOW",
+            "privilegesRequired": "LOW",
+            "userInteraction": "NONE",
+            "scope": "UNCHANGED",
+            "confidentialityImpact": "HIGH",
+            "integrityImpact": "HIGH",
+            "availabilityImpact": "HIGH"
+          },
+          "evidence_ids": [
+            "NVD-02"
+          ]
+        },
+        "poc_review": {
+          "value": {
+            "candidate_url": "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032",
+            "status": "candidate_reference",
+            "validation": "not_run"
+          },
+          "evidence_ids": [
+            "NVD-03"
+          ]
+        }
+      },
+      "related_documents": [
+        {
+          "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+          "relation_type": "vulnerability_record",
+          "source_id": "nvd"
+        },
+        {
+          "url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+          "relation_type": "direct_analysis",
+          "source_id": "wiz"
+        },
+        {
+          "url": "https://github.com/ollama/ollama/pull/4175",
+          "relation_type": "fix_record",
+          "source_id": "fix"
+        }
+      ],
+      "unqueried_dimensions": [
+        "epss",
+        "kev",
+        "papers",
+        "asset_inventory"
+      ]
+    }
+  },
+  "documents": [
+    {
+      "source_id": "nvd",
+      "title": "NVD：CVE-2024-37032",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+      "cve_id": "CVE-2024-37032",
+      "relation_type": "vulnerability_record",
+      "published_at": "2024-05-31T04:15:09.617Z",
+      "retrieved_at": "2026-10-08T05:34:53.770522+00:00",
+      "retrieval_url": "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2024-37032",
+      "source_response_sha256": "1297e5d2e5aa9341662a0a3039723a81fa0028fd7e620973d945496da07b5b7a",
+      "text_kind": "reviewed_manual_summary",
+      "chunks": [
+        {
+          "evidence_id": "NVD-01",
+          "text": "NVD 记录：CVE-2024-37032 影响 Ollama 0.1.34 之前的版本；获取模型路径时没有充分校验 digest 格式，存在路径遍历问题。",
+          "topics": [
+            "versions",
+            "conditions"
+          ],
+          "locator": "descriptions[lang=en]；configurations.nodes.cpeMatch.versionEndExcluding",
+          "text_sha256": "87c41d7e825d212da364b5532a2a611d9c9614797039fc51ec05d6f60d7c1138",
+          "excerpt": "Ollama before 0.1.34 does not validate the format of the digest"
+        },
+        {
+          "evidence_id": "NVD-02",
+          "text": "NVD 收录的 CVSS 3.1 基础分为 8.8，严重等级 HIGH；向量为 CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H。评分来源标识 134c704f-9b21-4f2e-91b3-4a467353bcc0，类型 Secondary；这是来源评分，不能直接代表某项实际资产的风险。",
+          "topics": [
+            "cvss"
+          ],
+          "locator": "metrics.cvssMetricV31[0]",
+          "text_sha256": "e6a498c8c304fe2c94dab9dbcdd58044a2e062147c067299537c81c39f4faa02",
+          "structured_value": {
+            "source": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "type": "Secondary",
+            "cvssData": {
+              "version": "3.1",
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+              "baseScore": 8.8,
+              "baseSeverity": "HIGH",
+              "attackVector": "NETWORK",
+              "attackComplexity": "LOW",
+              "privilegesRequired": "LOW",
+              "userInteraction": "NONE",
+              "scope": "UNCHANGED",
+              "confidentialityImpact": "HIGH",
+              "integrityImpact": "HIGH",
+              "availabilityImpact": "HIGH"
+            },
+            "exploitabilityScore": 2.8,
+            "impactScore": 5.9
+          }
+        },
+        {
+          "evidence_id": "NVD-03",
+          "text": "NVD 将一个参考链接标记为 Exploit。项目处理状态：仅保存候选链接，未下载验证代码、未运行复现，不能声称 PoC 已验证可用。",
+          "topics": [
+            "poc"
+          ],
+          "locator": "references[tags contains Exploit]；本项目 raw_data.poc_review 状态",
+          "text_sha256": "ca33e2311c5c0cc308a10fef6051b8ea9d18d34f9e8b56d4fd9915ba6b9a3c1c",
+          "candidate_url": "https://www.vicarius.io/vsociety/posts/probllama-in-ollama-a-tale-of-a-yet-another-rce-vulnerability-cve-2024-37032",
+          "claim_origin": "source_fact_and_project_status"
+        }
+      ]
+    },
+    {
+      "source_id": "wiz",
+      "title": "Wiz Research：Probllama 漏洞分析",
+      "url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+      "cve_id": "CVE-2024-37032",
+      "relation_type": "direct_analysis",
+      "published_at": "2024-06-24",
+      "retrieved_at": "2026-10-08T05:34:55.138023+00:00",
+      "retrieval_url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+      "source_response_sha256": "7142a1a38439c9b7459fcb23069ed6ddda49e9337be3532055d35621dc7846d5",
+      "text_kind": "reviewed_manual_summary",
+      "chunks": [
+        {
+          "evidence_id": "WIZ-01",
+          "text": "Ollama 用于运行 AI 模型，因此该漏洞属于 AI 基础设施风险。",
+          "topics": [
+            "ai_relevance"
+          ],
+          "locator": "Introduction & Overview",
+          "text_sha256": "33e7ba35eb45195175e3e73b0137241964f73119c400888d3628a0f253132aff"
+        },
+        {
+          "evidence_id": "WIZ-02",
+          "text": "研究展示路径遍历导致任意文件写入，并可进一步实现远程代码执行；后果取决于部署权限等条件。",
+          "topics": [
+            "impact"
+          ],
+          "locator": "Explanation and Technical Description；Finally, Remote Code Execution",
+          "text_sha256": "9059f0dedf3bb53678c52c0ef639b07e9f5b6a66a2cd3c1990ada9c662a30ac0"
+        },
+        {
+          "evidence_id": "WIZ-03",
+          "text": "利用需要访问相关 API 并触发恶意模型清单处理。文章讨论了服务暴露与运行权限对风险的影响；不能据此判断所有部署都可被远程利用。",
+          "topics": [
+            "conditions"
+          ],
+          "locator": "Mitigation & detection；The Vulnerability",
+          "text_sha256": "92298f840bac07db22ca25c0f8b41cb8080ac9dda9f601eabef3ffae20e5dfda"
+        },
+        {
+          "evidence_id": "WIZ-04",
+          "text": "研究建议升级到 0.1.34 或更新版本，并为对外开放的服务加上访问控制。该版本是此漏洞的修复基线，不是今天的最新版本。",
+          "topics": [
+            "remediation",
+            "versions"
+          ],
+          "locator": "Introduction & Overview；Conclusions",
+          "text_sha256": "bb153837d74bea9a0416bbcb03a2f3d3d72d92f53fa57fd24edda7a070d2c909",
+          "excerpt": "version 0.1.34 or newer"
+        }
+      ]
+    },
+    {
+      "source_id": "fix",
+      "title": "Ollama 修复 PR #4175",
+      "url": "https://github.com/ollama/ollama/pull/4175",
+      "cve_id": "CVE-2024-37032",
+      "relation_type": "fix_record",
+      "published_at": "2024-05-05T18:46:12Z",
+      "retrieved_at": "2026-10-08T05:34:56.078533+00:00",
+      "retrieval_url": "https://api.github.com/repos/ollama/ollama/pulls/4175",
+      "source_response_sha256": "33d1eea92cfce319ff3b4dc5bf3783babd88e4cf18951d76f83276dc9346e523",
+      "text_kind": "reviewed_manual_summary",
+      "chunks": [
+        {
+          "evidence_id": "FIX-01",
+          "text": "Ollama PR #4175 对获取模型路径时的 digest 格式增加校验，已于 2024-05-05 合并。NVD 将该 PR 列为此漏洞的参考记录。",
+          "topics": [
+            "remediation",
+            "conditions"
+          ],
+          "locator": "PR title；merged_at；NVD references",
+          "text_sha256": "5c2d37d0cec82ed1e3dfb15a642c2bd0641cb252832d05867bc53013c0c7322d",
+          "merge_commit_sha": "2a21363bb756a7341d3d577f098583865bd7603f"
+        }
+      ]
+    }
+  ]
+}

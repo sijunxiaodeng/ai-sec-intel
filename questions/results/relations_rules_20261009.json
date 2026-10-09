@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T04:53:07.399022+00:00",
+  "mode": "rules",
+  "purpose": "按原文另写的开发检查题；作者已知实现，不是独立盲测/准确率验收",
+  "source_manifest": {
+    "paper": {
+      "document_id": "DOC-d57ebd5fb555085a",
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "source_response_sha256": "efc0799ef830c9a0d5e149ee8871085d96c624193e316e476b1a632db3ef7efa",
+      "retrieved_at": "2026-10-09T04:09:34.011880+00:00"
+    },
+    "nist": {
+      "document_id": "DOC-b8df5c37607d20c3",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "source_response_sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a",
+      "retrieved_at": "2026-10-09T04:09:03.682428+00:00"
+    }
+  },
+  "rows": [
+    {
+      "case_id": "R01",
+      "question": "间接提示注入为什么会出现？请结合两份资料解释机制。",
+      "elapsed_http_seconds": 0.0793,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A1"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R02",
+      "question": "论文与 NIST 对直接和间接提示注入的区别如何描述？",
+      "elapsed_http_seconds": 0.062,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A1"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R03",
+      "question": "间接提示注入是否要求攻击者拥有直接接口？触发条件是什么？",
+      "elapsed_http_seconds": 0.0783,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A2"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-a98ce0d8e662",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-57e40af78859",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R04",
+      "question": "把间接提示注入的条件与可能影响连接起来说明。",
+      "elapsed_http_seconds": 0.0859,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A2"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-a98ce0d8e662",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-57e40af78859",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R05",
+      "question": "过滤检索输入能解决间接提示注入吗？有什么局限和评估方向？",
+      "elapsed_http_seconds": 0.0624,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A3"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-43cd965cb73d",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-5d4a751b13d8",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-4ef8d3080a68",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-e1b3ededaf47",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R06",
+      "question": "RLHF 能否完全消除间接提示注入？结合研究局限和框架建议说明。",
+      "elapsed_http_seconds": 0.0857,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A3"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-43cd965cb73d",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-5d4a751b13d8",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-4ef8d3080a68",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-e1b3ededaf47",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R07",
+      "question": "NIST 对间接提示注入的红队评估建议是否等于防护已经生效？",
+      "elapsed_http_seconds": 0.1032,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A3"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-43cd965cb73d",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-5d4a751b13d8",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-4ef8d3080a68",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-e1b3ededaf47",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R08",
+      "question": "NIST 与论文都谈到间接提示注入，能算两次独立复现吗？",
+      "elapsed_http_seconds": 0.1005,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A4"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R09",
+      "question": "比较论文和 NIST 对间接提示注入的机制解释、防护建议及局限。",
+      "elapsed_http_seconds": 0.0943,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [
+        "A1",
+        "A3"
+      ],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-43cd965cb73d",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-5d4a751b13d8",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-4ef8d3080a68",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-e1b3ededaf47",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d057e1699fcc"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R10",
+      "question": "模型供应链的反序列化风险如何防护？",
+      "elapsed_http_seconds": 0.0191,
+      "status": "unsupported_topic",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [],
+      "citation_ids": [],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R11",
+      "question": "过滤间接提示注入能修复 CVE-2024-37032 吗？",
+      "elapsed_http_seconds": 0.0148,
+      "status": "unsupported_question",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [],
+      "citation_ids": [],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R12",
+      "question": "哪些 Ollama 版本受间接提示注入影响？",
+      "elapsed_http_seconds": 0.0158,
+      "status": "unsupported_question",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [],
+      "citation_ids": [],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R13",
+      "question": "间接提示注入防护哪种更有效，成功率多少？",
+      "elapsed_http_seconds": 0.0156,
+      "status": "unsupported_question",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [],
+      "citation_ids": [],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "R14",
+      "question": "间接提示注入如何防护？",
+      "elapsed_http_seconds": 0.0417,
+      "status": "insufficient_evidence",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": false,
+      "used_model": false,
+      "analysis_ids": [],
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-0e81b9dad0cc",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-a98ce0d8e662",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-57e40af78859",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-43cd965cb73d",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-5d4a751b13d8",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-4ef8d3080a68"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    }
+  ],
+  "summary": {
+    "cases": 14,
+    "automatic_passed": 14,
+    "model_attempted": 0,
+    "model_accepted": 0,
+    "http_under_5s": 14,
+    "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null
+  },
+  "dataset_sha256": "ec2f459accb87cb49218c83b2c843cbe64889897e4dfec5566915a7e64723a4c"
+}

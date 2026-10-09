@@ -1,0 +1,114 @@
+{
+  "purpose": "首日样例的冒烟验收；不是独立竞赛评测集，不能用于宣称整体问答准确率。",
+  "cases": [
+    {
+      "id": "ai",
+      "question": "这个漏洞为什么与 AI 安全有关？",
+      "demo": true,
+      "status": "answered",
+      "must_contain": [
+        "AI 基础设施"
+      ],
+      "required_evidence": [
+        "WIZ-01"
+      ]
+    },
+    {
+      "id": "versions",
+      "question": "受影响版本和修复版本分别是什么？",
+      "demo": true,
+      "status": "answered",
+      "must_contain": [
+        "0.1.34"
+      ],
+      "required_evidence": [
+        "NVD-01",
+        "WIZ-04"
+      ]
+    },
+    {
+      "id": "conditions",
+      "question": "漏洞在什么条件下可能被利用？",
+      "demo": true,
+      "status": "answered",
+      "must_contain": [
+        "API"
+      ],
+      "required_evidence": [
+        "WIZ-03"
+      ]
+    },
+    {
+      "id": "poc",
+      "question": "有没有已经验证可用的 PoC？",
+      "demo": true,
+      "status": "answered",
+      "must_contain": [
+        "未运行复现",
+        "候选链接"
+      ],
+      "required_evidence": [
+        "NVD-03"
+      ]
+    },
+    {
+      "id": "cvss",
+      "question": "CVSS 评分和向量是什么？",
+      "demo": false,
+      "status": "answered",
+      "must_contain": [
+        "8.8",
+        "CVSS:3.1/",
+        "Secondary"
+      ],
+      "required_evidence": [
+        "NVD-02"
+      ]
+    },
+    {
+      "id": "multidoc",
+      "question": "受影响版本是什么，如何修复？有没有修复记录？",
+      "demo": false,
+      "status": "answered",
+      "must_contain": [
+        "0.1.34",
+        "PR #4175"
+      ],
+      "required_evidence": [
+        "NVD-01",
+        "WIZ-04",
+        "FIX-01"
+      ]
+    },
+    {
+      "id": "unknown",
+      "question": "CVE-2099-99999 的修复版本是什么？",
+      "demo": false,
+      "status": "insufficient_evidence",
+      "must_contain": [
+        "没有"
+      ],
+      "required_evidence": []
+    },
+    {
+      "id": "assets",
+      "question": "我们公司的 Ollama 资产是否受影响？",
+      "demo": false,
+      "status": "insufficient_evidence",
+      "must_contain": [
+        "无法判断"
+      ],
+      "required_evidence": []
+    },
+    {
+      "id": "offtopic",
+      "question": "明天北京天气如何？",
+      "demo": false,
+      "status": "insufficient_evidence",
+      "must_contain": [
+        "证据不足"
+      ],
+      "required_evidence": []
+    }
+  ]
+}

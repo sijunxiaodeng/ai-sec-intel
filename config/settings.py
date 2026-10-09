@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parent.parent
 LOCAL = ROOT / "config" / "local.json"
 
 DEFAULTS = {
-    "base_url": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
     "api_key": "",
 }
 

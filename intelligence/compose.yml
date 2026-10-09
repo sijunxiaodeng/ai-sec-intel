@@ -1,0 +1,41 @@
+services:
+  monitor:
+    build: .
+    image: ai-sec-intel-b:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MONITOR_INTERVAL_MINUTES: ${MONITOR_INTERVAL_MINUTES:-15}
+      MONITOR_WORKERS: ${MONITOR_WORKERS:-4}
+      SOURCE_TIMEOUT_SECONDS: ${SOURCE_TIMEOUT_SECONDS:-120}
+      AUTO_CLASSIFY_V5: ${AUTO_CLASSIFY_V5:-1}
+      CLASSIFY_V5_MAX_LLM_CALLS: ${CLASSIFY_V5_MAX_LLM_CALLS:-0}
+    volumes:
+      - intelligence-data:/app/data
+    command: ["python", "run_monitor.py"]
+
+  api:
+    build: .
+    image: ai-sec-intel-b:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - intelligence-data:/app/data
+    ports:
+      - "127.0.0.1:8765:8765"
+    command: ["python", "run_intelligence_api_v6.py", "--host", "0.0.0.0", "--port", "8765"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/intelligence/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  intelligence-data:

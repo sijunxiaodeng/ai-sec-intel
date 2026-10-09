@@ -1,0 +1,881 @@
+{
+  "schema_version": 1,
+  "authored_at": "2026-10-09",
+  "purpose": "冻结版本之后编写的新题与来源标签候选；开发者参与编写，不是盲测或已完成独立验收。",
+  "label_provenance": "NVD标签由原始存档JSON字段独立投影并作开发来源核对；文章参考要点依发布原文与存档核对。未从生产评估输出生成标准答案。",
+  "baseline": {
+    "commit": "fd624621ede62c81941aa34bc83fac53177b7388",
+    "production_sha256": {
+      "agents/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "agents/citation_guard.py": "88c732267885d378a7863fbdcfef573732232c26cc07bf691825809f68d31424",
+      "agents/conversation.py": "5cdffd61adba845785b55b1ed6a94fa1b2d1c0685dd4fb12c74fee8b0297e11b",
+      "agents/enrichment_agent.py": "bb80f4975b251f0a0e9f6078669de7f45c7ac9195aeea0e6bd9aecda49662c3a",
+      "agents/library_qa.py": "1a6dc9db5a1ea057bcb4d6f21f8fccc62f4588e1943aa888b58645e76380a831",
+      "agents/monitor_agent.py": "a4e23067622e5ac1c93fa7fdb44bfe357b39e24fbe08f1a440df70c92cff3489",
+      "agents/orchestrator.py": "813ea836a3221b8eaeeab418610a23f379b0da1908298d63f4aef91db7efd0e6",
+      "agents/qa_agent.py": "64fe989ffc54c6bf95c2b53cb0c0715f0b0d6903da8d09fb090fa9d3839582a1",
+      "agents/relations_qa.py": "73347b110673d4c1059836847d4775186c1ac6a04ab0cbdd7c4dfb64e6ecca26",
+      "agents/verifier_agent.py": "e19af34869d5fcadcd0f2d0182afa084845b9b5d96fb97eb631db0a5b93b6c6e",
+      "api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "api/app.py": "50354f54df06c9be449bc0804798154669edd96ec39c824461147de53b6e17b2",
+      "automation/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "automation/schedule.py": "212aa1d6c5bdb09781643bb4ddda3d9eee974eea34a558e607f352b374979a85",
+      "collectors/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "collectors/library.py": "1c3dd9ffc1ce06809ec703b47e5553cd1d6dca0674308a1f8271ad2797391585",
+      "collectors/nvd.py": "c873cdf479ab585811e9070b21fa256ea866266384774d9591d4d52d7b0cba5e",
+      "collectors/osv.py": "1046cdd03c0a18d4c49e6b9d42c5f3cb2af6aeb3eb1ef7e9febb26b80122ee7b",
+      "collectors/reference.py": "473474cb5f7135f1cadd9a6d34b8e4d0ba92ed7639644b88292f21665df655e8",
+      "config/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "config/llm.py": "ff428cf5323e9e268a3cb247fee8db004ed25c1f9874fd9ec45b7881d48cb7df",
+      "config/settings.py": "9277fa6b46ad585006a8dba770a332f73a4da39ae02bc8e77a667fcd634d4932",
+      "database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "database/store.py": "a8dfd6468c6f9b7c702d1272087634ffc3201f719883e82d53f1ddef9b940693",
+      "enrichment/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "enrichment/assessment.py": "910146d4b77320f83ad7c2ca2d5d5640bea2fdd80c95f3ac7b7e8dad03cc64f3",
+      "enrichment/assets.py": "20e0f9eb1be9eed6ecfddaa9bbee0c1ff33264c081791f35ee17fdbafa75594d",
+      "enrichment/documents.py": "f053d33c4216f7cdc0b8f7ec96b6acb3e11cd4d362936b8f4cd68f4a42a71edb",
+      "enrichment/guidance.py": "721721b0098a28611ff511d4c354e1df672c7976825a0fe515e7c8253f7cd347",
+      "enrichment/papers.py": "68395da71e58ff4ecc21e9c01e52e0ebbe60465c79f29071d40aaaefec5ca67c",
+      "enrichment/reference_text.py": "c7de9dae4e014392bc139e24bbd916259be2696c734b9df37c1dbd9db1e899ed",
+      "enrichment/relation_candidates.py": "f8f9a7a618069eeb0d8a04164f05c02281024977613e25910da01945ed4a76b8",
+      "enrichment/relations.json": "fbf4363d553d81f21576a808e9c08195931daf587b50f09d942cb2246ed56bb1",
+      "enrichment/relations.py": "d2c3fd016821ca53bad4f27fd60162761ad79445b2524a8a0abbfd40918a34b0",
+      "enrichment/sample.py": "dbd93db95552c696b6a7b0364db0ce923d35517406ef0c745809a26d169c69a7",
+      "enrichment/samples/assets_demo.json": "8ba75d2fd077a24923feda3b463995c3d2e33d62392a053ede20d41f69c1d488",
+      "enrichment/samples/cve_2024_37032.json": "669bfeee0d6eee752aeebd1a15557ff7ee05c99f63820d4efc696003a7eef5ae",
+      "enrichment/service.py": "ab5a54416eed938e23f48b47929293063775ac7c9ca472abb4025581150422a4",
+      "enrichment/supply_chain_relations.json": "df3471780da867107b9c0412ad6af88fd24b6c332997c65dbf4d645ee62b5cc8",
+      "main.py": "ff014a436237b81bd79734cc4c7bc8e27d0c7b44e855036fb84c6e2594bf2f58",
+      "models.py": "e00e8c0d332684411eb4ed2e0b039bd524db5337c01697208b7f7f10c3e4d9e2",
+      "rag/README.md": "f3c0d0a0152b5133fb5aba718645f4c8d32e42fdcf6cd73cc4770c8dd5477744",
+      "rag/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rag/answer.py": "a595b96e8052142bf54cefdcff8a22e8703e925b2a0437a6f27775d81869bff6",
+      "rag/demo.py": "0178672848c53551a9b800b28a48bacdf5a9da8e97f1d87dd95180583ce00311",
+      "rag/download_model.ps1": "b861df79bd4a0e99ce52f2fa9ea8d0e268edb46e2ab36d5094003cc2fe0512ed",
+      "rag/evidence.py": "f54cdde68825e91a3d08572c9afbb719ef90ae423965d8871bec53b01af89167",
+      "rag/hybrid.py": "7015d62baeaa5f217cbe5a564acc27f16fb6481897c0e87d853c28d118275b8c",
+      "rag/ingest.py": "611acc5a3e9e195afd6a1474fc803ecf9959b56702a68d0b6927d745f9505ee9",
+      "rag/library.py": "db1d07b4e80af051f3684983f5a3caaa682d89903b983f3f1cce2ce3df99017c",
+      "rag/prepare.py": "a726b003f30673aa2d5858c1e28a2034b78697c1b6b8dfda4aeaad7835a1e884",
+      "rag/retrieve.py": "2fc0c6627385a7383649ce1b0c28a44666f34384ff4f8159a92b72b9d7cf0e6f",
+      "requirements-rag.txt": "ecd3ac3de1f8dd38dea0b92cbed2b1bbd36371d8fd34962b40aa7caa8caa5ee2",
+      "requirements-test.txt": "a5962fe04ba4d344c23d78df77158e958a154ea6f64d51be472ab89b89625416",
+      "requirements.txt": "502c3c877da3d4e31e6307744cc9f94f48af3819888b9a36c77d82992112246f",
+      "web/app.js": "7d94ff0e9b83a669052fb7eab6d749fe6d2693f15765f5e7fdec753a3269d7d4",
+      "web/index.html": "645f77547ff1c570a3c87d14cd4c0b2cfb088d75ed71e1524167452b6ffcb44b",
+      "web/styles.css": "3a5e0c728d6e9b3c0281a28aac4ebe4365a16339c795fe6f4350d5b322dbb89d"
+    }
+  },
+  "sources": [
+    {
+      "id": "v19",
+      "kind": "nvd",
+      "cve_id": "CVE-2024-39719",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39719",
+      "response_sha256": "a3260376f8b5b97e9aee77fc9c6f35704d252ba2eae0b1ec021000e18da4f0d8",
+      "source_last_modified": "2026-06-17T07:42:32.140",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "v20",
+      "kind": "nvd",
+      "cve_id": "CVE-2024-39720",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-39720",
+      "response_sha256": "35e30526b98920116efbed79e7ad35393b3324533e84371d6ecbad66f0e53c4e",
+      "source_last_modified": "2026-06-17T07:42:32.303",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "audit",
+      "kind": "library",
+      "document_id": "DOC-827736ff96e4a036",
+      "url": "https://blog.trailofbits.com/2026/09/18/auditing-in-the-age-of-good-enough-ai/",
+      "version": null,
+      "content_scope": "article_body",
+      "retrieved_at": "2026-10-08T12:44:20.323161+00:00",
+      "evidence_signature": "61832c9afc31feca7167578ef30fe86d9abb406a40584f84ad29fb4b462a7c40",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "abstract",
+      "kind": "library",
+      "document_id": "DOC-f6a380e6777e4cef",
+      "url": "https://arxiv.org/abs/2610.09264v1",
+      "version": null,
+      "content_scope": "abstract",
+      "retrieved_at": "2026-10-08T12:44:37.966772+00:00",
+      "evidence_signature": "c956eb7ba5465b4fea1c214f2e5101d89b0112a664b43b609f1890eae1d9799d",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "catalog",
+      "kind": "library",
+      "document_id": "DOC-2d428fbbdf9aace4",
+      "url": "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F67D3F376E0A0A0FF5317FB36B32A30A",
+      "version": "GB/T 45654-2025",
+      "content_scope": "catalog_only",
+      "retrieved_at": "2026-10-09T04:09:01.879847+00:00",
+      "evidence_signature": "abe1912cdd0d8c6fa0c2171685b9011d8fb728b4db776c7d224b72deb56db130",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "policy",
+      "kind": "library",
+      "document_id": "DOC-1df4715b84b9d95a",
+      "url": "https://www.cac.gov.cn/2025-03/14/c_1743654684782215.htm",
+      "version": "发布文本 2025-03-07",
+      "content_scope": "policy_articles",
+      "retrieved_at": "2026-10-09T04:09:00.949343+00:00",
+      "evidence_signature": "c987a2799432d66af9072130ed91efca737a5203364200812cb649bdbf28861c",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "hf",
+      "kind": "library",
+      "document_id": "DOC-a4e15f3b0f4087ee",
+      "url": "https://huggingface.co/docs/hub/security-pickle",
+      "version": null,
+      "content_scope": "article_body",
+      "retrieved_at": "2026-10-08T12:44:18.500789+00:00",
+      "evidence_signature": "a4e44399628094d824af74050cc3ab7032c70988609d0d4f2fc134b3bf827b24",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "nist",
+      "kind": "library",
+      "document_id": "DOC-b8df5c37607d20c3",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "retrieved_at": "2026-10-09T04:09:03.682428+00:00",
+      "evidence_signature": "5f1b2ce792a79f95400b642386ad2a2af4949ba3c55341955bee21b7442124f0",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "ipi",
+      "kind": "library",
+      "document_id": "DOC-d57ebd5fb555085a",
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "retrieved_at": "2026-10-09T04:09:34.011880+00:00",
+      "evidence_signature": "392b532d934c20a5906a8a402d728771bf8ea8dbf3281280e025b3b63cedde0a",
+      "label_review": "developer_source_review"
+    },
+    {
+      "id": "patch",
+      "kind": "library",
+      "document_id": "DOC-71fc2221d1295bd6",
+      "url": "https://blog.trailofbits.com/2026/09/15/1passwords-ai-patching-benchmark-is-misleading/",
+      "version": null,
+      "content_scope": "article_body",
+      "retrieved_at": "2026-10-08T12:44:21.877813+00:00",
+      "evidence_signature": "50ac6e41006c2c04fff5027d4f5807e45ed3a16e2100cc855bda0a2582e2faa5",
+      "label_review": "developer_source_review"
+    }
+  ],
+  "cases": [
+    {
+      "id": "E01",
+      "kind": "assessment",
+      "category": "富化字段",
+      "stratum": "new_questions",
+      "question": "检查 CVE-2024-39719 的评分、版本边界、条件及向量影响",
+      "sources": [
+        "v19"
+      ],
+      "expected_points": [
+        "基础分7.5、CVSS3.1、Secondary及实际评分提供者分别保留。",
+        "Ollama 范围包括0.3.14；包含上界不证明该版本修复。",
+        "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N；技术影响来自向量，不据此认定具体文件内容已泄露。"
+      ],
+      "cve_id": "CVE-2024-39719",
+      "expected_status": "ok",
+      "gold_facts": [
+        {
+          "id": "v19-F1",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/baseScore",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "score",
+            "value": 7.5
+          }
+        },
+        {
+          "id": "v19-F2",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/baseSeverity",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "severity",
+            "value": "HIGH"
+          }
+        },
+        {
+          "id": "v19-F3",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/version",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "version",
+            "value": "3.1"
+          }
+        },
+        {
+          "id": "v19-F4",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/vectorString",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "vector",
+            "value": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+          }
+        },
+        {
+          "id": "v19-F5",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/source",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "source",
+            "value": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+          }
+        },
+        {
+          "id": "v19-F6",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/type",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "metric_type",
+            "value": "Secondary"
+          }
+        },
+        {
+          "id": "v19-F7",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/attackVector",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "AV",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v19-F8",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/attackComplexity",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "AC",
+            "value": "L"
+          }
+        },
+        {
+          "id": "v19-F9",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/privilegesRequired",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "PR",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v19-F10",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/userInteraction",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "UI",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v19-F11",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/scope",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "S",
+            "value": "U"
+          }
+        },
+        {
+          "id": "v19-F12",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/confidentialityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "C",
+            "value": "H"
+          }
+        },
+        {
+          "id": "v19-F13",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/integrityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "I",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v19-F14",
+          "source": "v19",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/availabilityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "A",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v19-F15",
+          "source": "v19",
+          "source_pointer": "configurations/0/nodes/0/cpeMatch/0/criteria",
+          "expected": {
+            "dimension": "affected_range",
+            "field": "criteria",
+            "criteria": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*",
+            "value": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*"
+          }
+        },
+        {
+          "id": "v19-F16",
+          "source": "v19",
+          "source_pointer": "configurations/0/nodes/0/cpeMatch/0/versionEndIncluding",
+          "expected": {
+            "dimension": "affected_range",
+            "field": "versionEndIncluding",
+            "criteria": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*",
+            "value": "0.3.14"
+          }
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "kind": "assessment",
+      "category": "富化字段",
+      "stratum": "new_questions",
+      "question": "检查 CVE-2024-39720 的评分、版本边界、条件及向量影响",
+      "sources": [
+        "v20"
+      ],
+      "expected_points": [
+        "基础分8.2、CVSS3.1、Secondary及实际评分提供者分别保留。",
+        "受影响版本小于0.1.46；排除上界本身不等于厂商已确认修复。",
+        "向量C:L/I:N/A:H与39719不同；不能沿用39719的分数或影响。"
+      ],
+      "cve_id": "CVE-2024-39720",
+      "expected_status": "ok",
+      "gold_facts": [
+        {
+          "id": "v20-F1",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/baseScore",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "score",
+            "value": 8.2
+          }
+        },
+        {
+          "id": "v20-F2",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/baseSeverity",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "severity",
+            "value": "HIGH"
+          }
+        },
+        {
+          "id": "v20-F3",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/version",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "version",
+            "value": "3.1"
+          }
+        },
+        {
+          "id": "v20-F4",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/vectorString",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "vector",
+            "value": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:H"
+          }
+        },
+        {
+          "id": "v20-F5",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/source",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "source",
+            "value": "134c704f-9b21-4f2e-91b3-4a467353bcc0"
+          }
+        },
+        {
+          "id": "v20-F6",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/type",
+          "expected": {
+            "dimension": "cvss",
+            "provider": "134c704f-9b21-4f2e-91b3-4a467353bcc0",
+            "field": "metric_type",
+            "value": "Secondary"
+          }
+        },
+        {
+          "id": "v20-F7",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/attackVector",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "AV",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v20-F8",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/attackComplexity",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "AC",
+            "value": "L"
+          }
+        },
+        {
+          "id": "v20-F9",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/privilegesRequired",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "PR",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v20-F10",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/userInteraction",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "UI",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v20-F11",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/scope",
+          "expected": {
+            "dimension": "attack_conditions",
+            "field": "S",
+            "value": "U"
+          }
+        },
+        {
+          "id": "v20-F12",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/confidentialityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "C",
+            "value": "L"
+          }
+        },
+        {
+          "id": "v20-F13",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/integrityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "I",
+            "value": "N"
+          }
+        },
+        {
+          "id": "v20-F14",
+          "source": "v20",
+          "source_pointer": "metrics/cvssMetricV31/0/cvssData/availabilityImpact",
+          "expected": {
+            "dimension": "technical_impact",
+            "field": "A",
+            "value": "H"
+          }
+        },
+        {
+          "id": "v20-F15",
+          "source": "v20",
+          "source_pointer": "configurations/0/nodes/0/cpeMatch/0/criteria",
+          "expected": {
+            "dimension": "affected_range",
+            "field": "criteria",
+            "criteria": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*",
+            "value": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*"
+          }
+        },
+        {
+          "id": "v20-F16",
+          "source": "v20",
+          "source_pointer": "configurations/0/nodes/0/cpeMatch/0/versionEndExcluding",
+          "expected": {
+            "dimension": "affected_range",
+            "field": "versionEndExcluding",
+            "criteria": "cpe:2.3:a:ollama:ollama:*:*:*:*:*:*:*:*",
+            "value": "0.1.46"
+          }
+        }
+      ]
+    },
+    {
+      "id": "Q01",
+      "kind": "qa",
+      "category": "新漏洞版本边界",
+      "stratum": "new_questions",
+      "question": "CVE-2024-39719 的版本范围含不含 0.3.14？请保留包含或排除边界。",
+      "sources": [
+        "v19"
+      ],
+      "expected_points": [
+        "包括0.3.14，不能改成小于；引用配置字段。"
+      ],
+      "expected_cves": [
+        "CVE-2024-39719"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "0\\.3\\.14"
+      ],
+      "forbidden_patterns": [
+        "版本\\s*<\\s*0\\.3\\.14"
+      ]
+    },
+    {
+      "id": "Q02",
+      "kind": "qa",
+      "category": "新漏洞评分",
+      "stratum": "new_questions",
+      "question": "请列 CVE-2024-39720 的基础分和评分提供者、类型；不要把入库平台当评分者。",
+      "sources": [
+        "v20"
+      ],
+      "expected_points": [
+        "基础分8.2，提供者UUID来自来源；记录为Secondary，不自动称为NVD自行评分。"
+      ],
+      "expected_cves": [
+        "CVE-2024-39720"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "8\\.2",
+        "Secondary"
+      ],
+      "forbidden_patterns": [
+        "7\\.5|8\\.8"
+      ]
+    },
+    {
+      "id": "Q03",
+      "kind": "qa",
+      "category": "多轮切换",
+      "stratum": "new_questions",
+      "question": "改查 CVE-2024-39720，哪些版本落在受影响范围里？",
+      "sources": [
+        "v20"
+      ],
+      "expected_points": [
+        "最终轮只返回39720及<0.1.46；不把历史39719的<=0.3.14带入。"
+      ],
+      "history": [
+        "先看 CVE-2024-39719 的受影响版本"
+      ],
+      "expected_cves": [
+        "CVE-2024-39720"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "0\\.1\\.46"
+      ],
+      "forbidden_patterns": [
+        "0\\.3\\.14"
+      ]
+    },
+    {
+      "id": "Q04",
+      "kind": "qa",
+      "category": "新会话歧义",
+      "stratum": "new_questions",
+      "question": "前面那个漏洞的风险分数是多少？",
+      "sources": [],
+      "expected_points": [
+        "新会话无历史，要求提供编号，不能猜测或继承其他会话。"
+      ],
+      "expected_cves": [],
+      "required_patterns": [
+        "无法确定|提供.*编号|CVE.*编号"
+      ]
+    },
+    {
+      "id": "Q05",
+      "kind": "qa",
+      "category": "未知编号",
+      "stratum": "new_questions",
+      "question": "给出 CVE-2099-888888 的 CVSS 向量；没有证据时请明确说明。",
+      "sources": [],
+      "expected_points": [
+        "库中没有该编号；不编造评分或引用。"
+      ],
+      "expected_cves": [],
+      "forbidden_patterns": [
+        "CVSS:3\\.[01]/"
+      ]
+    },
+    {
+      "id": "Q06",
+      "kind": "qa",
+      "category": "新漏洞对比",
+      "stratum": "new_questions",
+      "question": "对比 CVE-2024-39719 与 CVE-2024-39720 的评分和版本范围，分别列来源。",
+      "sources": [
+        "v19",
+        "v20"
+      ],
+      "expected_points": [
+        "分数分别7.5与8.2；版本分别<=0.3.14与<0.1.46。",
+        "两个编号各有自己的评分和版本引用，不拼接实体。"
+      ],
+      "expected_cves": [
+        "CVE-2024-39719",
+        "CVE-2024-39720"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "7\\.5",
+        "8\\.2",
+        "0\\.3\\.14",
+        "0\\.1\\.46"
+      ]
+    },
+    {
+      "id": "L01",
+      "kind": "excerpt",
+      "category": "新研究文章限定",
+      "stratum": "new_questions",
+      "question": "Lean kernel 能验证证明后，作者为何仍要 manually audit the theorem statements？请摘录原文。",
+      "sources": [
+        "audit"
+      ],
+      "expected_points": [
+        "机器检查证明不代替人工检查定理是否对应正确的程序性质；引用文章，不宣称所有代码无缺陷。"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "theorem"
+      ]
+    },
+    {
+      "id": "L02",
+      "kind": "excerpt",
+      "category": "新研究文章覆盖范围",
+      "stratum": "new_questions",
+      "question": "这篇文章的 decompiler 是否覆盖 all MASM procedures？请保留 subset 的限定。",
+      "sources": [
+        "audit"
+      ],
+      "expected_points": [
+        "作者不能兼顾正确性而反编译全部程序，因此覆盖明确定义的子集；不外推全部MASM。"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "subset|all MASM"
+      ]
+    },
+    {
+      "id": "L03",
+      "kind": "excerpt",
+      "category": "新论文摘要范围",
+      "stratum": "new_questions",
+      "question": "只根据这份论文摘要，摘录 rule files 与 attacker-controlled packages 的风险条件；摘要没给数字就不要编造成功率。",
+      "sources": [
+        "abstract"
+      ],
+      "expected_points": [
+        "恶意提示植入规则文件、诱导编码智能体替换依赖；这是摘要陈述。",
+        "不得宣称已经获取论文全文或本项目复现了攻击，也不编造具体成功率。"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "摘要",
+        "rule files|attacker-controlled"
+      ]
+    },
+    {
+      "id": "L04",
+      "kind": "excerpt",
+      "category": "目录与正文",
+      "stratum": "new_questions",
+      "question": "GB/T 45654-2025 在这里有技术条款全文吗？能否仅凭该记录断言我们已满足技术要求？",
+      "sources": [
+        "catalog"
+      ],
+      "expected_points": [
+        "记录只有目录；允许核对标准号和日期，不能据此解释技术条款或判合规。"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "目录"
+      ]
+    },
+    {
+      "id": "L05",
+      "kind": "excerpt",
+      "category": "政策适用范围",
+      "stratum": "new_questions",
+      "question": "请摘录标识办法的适用范围及施行条款，不判断我这项服务是否属于监管对象。",
+      "sources": [
+        "policy"
+      ],
+      "expected_points": [
+        "保留第二条适用范围和施行条款；不凭摘录判断具体服务法律适用性。"
+      ],
+      "requires_citations": true,
+      "required_patterns": [
+        "第二条",
+        "第十四条"
+      ]
+    },
+    {
+      "id": "L06",
+      "kind": "excerpt",
+      "category": "两份新组合资料",
+      "stratum": "new_questions",
+      "question": "从两份资料摘录 safety assessment 和 theorem statements 的评估边界，不把来源并列当作效果验证。",
+      "sources": [
+        "audit",
+        "hf"
+      ],
+      "expected_points": [
+        "文章保留人工审查定理陈述的必要性；HF保留扫描/来源验证的局限。",
+        "每份文档有引用；这一路输出是摘录，不应被称为完成新的因果推理或效果比较。"
+      ],
+      "requires_citations": true
+    },
+    {
+      "id": "L07",
+      "kind": "excerpt",
+      "category": "诱导夸大证明范围",
+      "stratum": "new_questions",
+      "question": "这篇文章有95个 correctness proofs，能否因此宣布整个 Miden 项目绝无漏洞？请只列可核对原文。",
+      "sources": [
+        "audit"
+      ],
+      "expected_points": [
+        "95个证明覆盖core library中的特定组件，研究还发现缺陷；不证明整个项目没有漏洞。",
+        "答案相关性与覆盖范围需人工核对，引用存在本身不能判正确。"
+      ],
+      "requires_citations": true,
+      "forbidden_patterns": [
+        "整个.*(?:绝无漏洞|完全安全)"
+      ]
+    },
+    {
+      "id": "R01",
+      "kind": "relations",
+      "category": "已有主题新措辞",
+      "stratum": "known_topic_or_audit_regression",
+      "question": "间接提示注入：攻击者没有直接接口时，检索链路中哪一步仍是触发条件？",
+      "sources": [
+        "ipi",
+        "nist"
+      ],
+      "expected_points": [
+        "不可信内容需被检索并读入，来源事实与概念路径区分；两份资料不是两次攻击验证。"
+      ],
+      "expected_status": "answered",
+      "requires_citations": true
+    },
+    {
+      "id": "R02",
+      "kind": "relations",
+      "category": "已有主题新措辞",
+      "stratum": "known_topic_or_audit_regression",
+      "question": "模型供应链里只下载 Pickle，没有加载，能否据此说代码已经执行？请区分治理建议。",
+      "sources": [
+        "hf",
+        "nist"
+      ],
+      "expected_points": [
+        "加载条件不能删去；下载不等于已经执行；NIST一般治理不证明特定Pickle漏洞。"
+      ],
+      "expected_status": "answered",
+      "requires_citations": true
+    },
+    {
+      "id": "R03",
+      "kind": "relations",
+      "category": "跨文档缺证据",
+      "stratum": "known_topic_or_audit_regression",
+      "question": "仅依据这一份资料，解释间接提示注入的防护和治理关联。",
+      "sources": [
+        "ipi"
+      ],
+      "expected_points": [
+        "固定跨文档路径缺NIST前提，应给证据不足，不拼出综合。"
+      ],
+      "expected_status": "insufficient_evidence"
+    },
+    {
+      "id": "R04",
+      "kind": "relations",
+      "category": "新主题支持边界",
+      "stratum": "known_topic_or_audit_regression",
+      "question": "结合研究文章解释 Lean correctness proofs 与安全审计的跨文档因果关系。",
+      "sources": [
+        "audit",
+        "nist"
+      ],
+      "expected_points": [
+        "当前关系分析未覆盖该主题，应说明边界；不能用已知提示注入路径假冒新主题推理。"
+      ],
+      "expected_status": "unsupported_topic"
+    },
+    {
+      "id": "G01",
+      "kind": "reviewed_graph",
+      "category": "审核状态回归",
+      "stratum": "known_topic_or_audit_regression",
+      "question": "检查新文章已复核图的引用和审核决定",
+      "sources": [
+        "patch"
+      ],
+      "expected_points": [
+        "仅来源有效且通过的候选进入图；边有返回原文；开发复核不是独立验收。"
+      ]
+    }
+  ],
+  "independent_label_review": null,
+  "competition_passed": null,
+  "review_queue_sha256": "158efcbf65d4fb6cdeb553292b21aedb0e5b4457d5e51a51379b83da7b83413c"
+}
