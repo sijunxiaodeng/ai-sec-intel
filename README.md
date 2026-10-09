@@ -49,7 +49,7 @@ python collect_nvd.py
 - `dev`：三人往这里合
 - 各自从 `dev` 拉分支，例如 `feature/collector`、`feature/enrich`
 
-不要把密钥写进仓库。
+三人整合启动顺序、文件冻结与 `AUTO_INGEST_ON_COLLECT`（默认 **`1`**）见 [INTEGRATION.md](INTEGRATION.md)。不要把密钥写进仓库。
 
 ## 任务 C 的首日证据样例
 
