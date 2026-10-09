@@ -676,9 +676,10 @@ $("test-llm").addEventListener("click", function () {
   });
 });
 
-var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文摘要", standard: "技术标准", policy: "政策法规"};
-var libraryScopes = {abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段"};
-var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施"};
+var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
+var libraryScopes = {abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
+var librarySelectedDocs = [];
 
 function libraryLink(parent, url, text) {
   var link = add(parent, "a", "", text);
@@ -701,14 +702,14 @@ function renderLibraryEvidence(data) {
     (row.associations || []).forEach(function (relation) {
       add(block, "p", "meta", relation.entity_id + " · " + relation.reason);
     });
-    libraryLink(block, row.url, "打开原始来源");
+    libraryLink(block, row.url + (row.locator.indexOf("PDF page ") === 0 ? "#page=" + row.locator.match(/^PDF page (\d+)/)[1] : ""), "打开原始来源");
   });
 }
 
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
     var counts = data.overview.types;
-    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段原文；标准 " + counts.standard + "、政策法规 " + counts.policy + "。";
+    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段原文；标准 / 风险框架 " + counts.standard + "、政策法规 " + counts.policy + "。";
     var sources = $("library-sources"); clear(sources);
     (data.overview.sources || []).forEach(function (source) {
       add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
@@ -728,14 +729,52 @@ function loadLibrary() {
         api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
       });
       add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-      add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段" + (doc.discovery === "historical_seed" ? " · 历史起始资料" : " · 订阅发现") + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
+      var discoveryLabels = {historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+      add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
+      if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
+      if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
+      if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
+      var selection = add(block, "label", "library-selection");
+      var check = add(selection, "input", ""); check.type = "checkbox"; check.checked = librarySelectedDocs.indexOf(doc.document_id) >= 0;
+      selection.appendChild(document.createTextNode(" 用于资料问答"));
+      check.addEventListener("change", function () {
+        if (check.checked && librarySelectedDocs.length >= 4) { check.checked = false; showError(new Error("最多选择 4 份资料")); return; }
+        librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
+        if (check.checked) librarySelectedDocs.push(doc.document_id);
+      });
+      if (doc.content_scope === "abstract") {
+        var fullLabel = data.items.some(function (r) { return r.parent_document_id === doc.document_id; }) ? "刷新论文全文" : "获取论文全文";
+        var fullButton = add(block, "button", "ghost", fullLabel);
+        fullButton.type = "button";
+        fullButton.addEventListener("click", function () {
+          fullButton.disabled = true; fullButton.textContent = "正在获取官方全文…";
+          api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
+            if (result.status !== "ok") throw new Error("全文未获取成功，保留摘要：" + (result.error || "来源暂时不可用"));
+            librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
+            $("library-answer").textContent = "全文已更新，请重新选择资料并提问。";
+            return loadLibrary();
+          }).catch(showError).then(function () { fullButton.disabled = false; fullButton.textContent = fullLabel; });
+        });
+      }
       add(block, "p", "meta", "主题：" + (doc.topic_tags || []).map(function (tag) { return libraryTopics[tag] || tag; }).join("、"));
       libraryLink(block, doc.url, "打开来源");
     });
   }).catch(showError);
 }
 
-$("library-type").addEventListener("change", function () { loadLibrary(); clear($("library-evidence")); });
+$("library-type").addEventListener("change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
+$("library-example").addEventListener("click", function () { $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; });
+$("library-ask-form").addEventListener("submit", function (event) {
+  event.preventDefault(); clearError();
+  var button = $("library-ask"); button.disabled = true; button.textContent = "正在检索原文…";
+  $("library-answer").textContent = "正在检索所选资料的原文…"; clear($("library-evidence"));
+  var requestBody = JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value});
+  api("/api/library/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: requestBody}).then(function (result) {
+    if (requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
+    $("library-answer").textContent = result.answer;
+    renderLibraryEvidence({evidence: result.evidence, notice: result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
+  }).catch(showError).then(function () { button.disabled = false; button.textContent = "按证据回答"; });
+});
 $("library-search-form").addEventListener("submit", function (event) {
   event.preventDefault(); clearError();
   api("/api/library/search?q=" + encodeURIComponent($("library-query").value.trim()) + "&document_type=" + encodeURIComponent($("library-type").value)).then(renderLibraryEvidence).catch(showError);
@@ -745,6 +784,7 @@ $("library-sync").addEventListener("click", function () {
   api("/api/library/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({per_source: 3, include_seeds: true})}).then(function (data) {
     button.textContent = "本轮入库成功 " + data.ok + "/" + data.attempted + " 份";
     clear($("library-evidence"));
+    $("library-answer").textContent = "资料已更新，请重新提问。";
     add($("library-evidence"), "p", "hint", "资料已更新，请重新选择资料或检索。");
     return loadLibrary();
   }).catch(showError).then(function () { button.disabled = false; });

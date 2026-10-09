@@ -189,6 +189,10 @@ button.row {
 .guidance-fact p { margin: 8px 0; }
 .guidance-fact a { color: var(--accent); }
 .guidance-fact summary { cursor: pointer; }
+.library-ask { margin: 16px 0; }
+.library-ask textarea { margin: 8px 0; }
+.library-selection { display: block; margin: 10px 0; font-size: 13px; }
+.library-selection input { width: auto; }
 .asset-results { margin-top: 16px; }
 .asset-import textarea { margin-top: 6px; font-family: Consolas, monospace; }
 .asset-import select { max-width: 100%; }

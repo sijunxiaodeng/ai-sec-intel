@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-10-09T04:30:22.508766+00:00",
+  "purpose": "Development source/excerpt checks; not independent competition accuracy",
+  "new_sources": [
+    {
+      "document_id": "DOC-2d428fbbdf9aace4",
+      "document_type": "standard",
+      "source_category": "standard",
+      "publisher": "国家标准全文公开系统",
+      "title": "GB/T 45654-2025 网络安全技术 生成式人工智能服务安全基本要求",
+      "url": "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F67D3F376E0A0A0FF5317FB36B32A30A",
+      "fetch_url": "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=F67D3F376E0A0A0FF5317FB36B32A30A",
+      "published_at": "2025-04-25",
+      "published_at_basis": "document_metadata",
+      "effective_at": "2025-11-01",
+      "version": "GB/T 45654-2025",
+      "content_scope": "catalog_only",
+      "reference_kind": "recommended_national_standard",
+      "chunk_count": 6,
+      "retrieved_at": "2026-10-09T04:09:01.879847+00:00",
+      "source_response_sha256": "e50c812921f2e1ee660311c1955e383b04f1eeab0a6d4e5fbcc8c81b16661be4",
+      "text_sha256": "b3370cdd0988659c5f53b24ea52cb0dbd142227c3f3d4b4c03a81e8017fd6ce1",
+      "extraction_notice": "仅官方目录字段；未获取标准全文，不能据此解释技术条款。状态为抓取时目录标记。"
+    },
+    {
+      "document_id": "DOC-1df4715b84b9d95a",
+      "document_type": "policy",
+      "source_category": "policy",
+      "publisher": "国家互联网信息办公室",
+      "title": "人工智能生成合成内容标识办法",
+      "url": "https://www.cac.gov.cn/2025-03/14/c_1743654684782215.htm",
+      "fetch_url": "https://www.cac.gov.cn/2025-03/14/c_1743654684782215.htm",
+      "published_at": "2025-03-14",
+      "published_at_basis": "document_metadata",
+      "issued_at": "2025-03-07",
+      "effective_at": "2025-09-01",
+      "version": "发布文本 2025-03-07",
+      "article_count": 14,
+      "content_scope": "policy_articles",
+      "reference_kind": "published_policy_text",
+      "chunk_count": 15,
+      "retrieved_at": "2026-10-09T04:09:00.949343+00:00",
+      "source_response_sha256": "3686321b6f2fca2e245e210209dff4af75b5adc3be36d912695d28b5a681f642",
+      "text_sha256": "e1f266c0939fbda43fe9c3684bea24f36bc30547c32a17216f50f89a101287c2",
+      "document_status": "正式发布正文；本库未自动核对是否已修改、废止或存在配套规定"
+    },
+    {
+      "document_id": "DOC-b8df5c37607d20c3",
+      "document_type": "standard",
+      "source_category": "standard",
+      "publisher": "NIST",
+      "title": "NIST AI 600-1 (2024)",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "fetch_url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "published_at": "2024-07-26",
+      "published_at_basis": "official_publication_metadata",
+      "version": "NIST AI 600-1 (2024)",
+      "page_count": 64,
+      "content_scope": "full_text_pdf",
+      "reference_kind": "voluntary_risk_framework",
+      "chunk_count": 195,
+      "retrieved_at": "2026-10-09T04:09:03.682428+00:00",
+      "source_response_sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a",
+      "text_sha256": "052d646229d2127077104acd7ca6d32ee7045bf5774a3f6937baf97ad8215952",
+      "extraction_notice": "PDF 各页的可提取文字；页码为文件物理页码。未识别图片、公式或表格布局。"
+    },
+    {
+      "document_id": "DOC-4d0c17a97aa7b944",
+      "document_type": "policy",
+      "source_category": "policy",
+      "publisher": "国家互联网信息办公室",
+      "title": "生成式人工智能服务管理暂行办法",
+      "url": "https://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm",
+      "fetch_url": "https://www.cac.gov.cn/2023-07/13/c_1690898327029107.htm",
+      "published_at": "2023-07-13",
+      "published_at_basis": "document_metadata",
+      "issued_at": "2023-07-10",
+      "effective_at": "2023-08-15",
+      "version": "发布文本 2023-07-10",
+      "article_count": 24,
+      "content_scope": "policy_articles",
+      "reference_kind": "published_policy_text",
+      "chunk_count": 25,
+      "retrieved_at": "2026-10-09T04:09:00.938080+00:00",
+      "source_response_sha256": "7fae988c064dde72c95e96e5727bf9abee4b3a5a1ea817606a9ca1f97ffac54b",
+      "text_sha256": "5c0e596c30a3d33f95fb7a222faa19204c27d5029dcd471f658e84c4124399e3",
+      "document_status": "正式发布正文；本库未自动核对是否已修改、废止或存在配套规定"
+    },
+    {
+      "document_id": "DOC-d57ebd5fb555085a",
+      "document_type": "academic_paper",
+      "source_category": "academic",
+      "publisher": "arXiv",
+      "title": "Not what you’ve signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection",
+      "url": "https://arxiv.org/html/2302.12173",
+      "fetch_url": "https://arxiv.org/html/2302.12173",
+      "published_at": null,
+      "published_at_basis": "unknown",
+      "version": "2302.12173v2",
+      "parent_document_id": "DOC-e8cc7f5045bc662c",
+      "content_scope": "full_text_html",
+      "chunk_count": 135,
+      "retrieved_at": "2026-10-09T04:09:34.011880+00:00",
+      "source_response_sha256": "efc0799ef830c9a0d5e149ee8871085d96c624193e316e476b1a632db3ef7efa",
+      "text_sha256": "661493696d0f9f63e7f32e88eb822698c18f076655625179f6b3eee27349d540",
+      "extraction_notice": "arXiv HTML 的可提取正文与附录；图像、公式排版及 HTML 转换遗漏未作完整核验。"
+    },
+    {
+      "document_id": "DOC-5b73b1f60738b2de",
+      "document_type": "academic_paper",
+      "source_category": "academic",
+      "publisher": "arXiv",
+      "title": "Universal and Transferable Adversarial Attacks on Aligned Language Models",
+      "url": "https://arxiv.org/html/2307.15043",
+      "fetch_url": "https://arxiv.org/html/2307.15043",
+      "published_at": null,
+      "published_at_basis": "unknown",
+      "version": "2307.15043v2",
+      "parent_document_id": "DOC-302c069146f3f6f2",
+      "content_scope": "full_text_html",
+      "chunk_count": 99,
+      "retrieved_at": "2026-10-09T04:09:24.836306+00:00",
+      "source_response_sha256": "e23a7634528ac985d54de9e96cd72fccc2f9cd26392f9d6f5db6bb083ff19302",
+      "text_sha256": "726e2b2211ea52a9667064cbaba85d4d5105c494a5e6ae2cafce95809bc090aa",
+      "extraction_notice": "arXiv HTML 的可提取正文与附录；图像、公式排版及 HTML 转换遗漏未作完整核验。"
+    }
+  ],
+  "library_snapshot": {
+    "documents": 17,
+    "chunks": 589,
+    "types": {
+      "academic_paper": 6,
+      "policy": 2,
+      "research_article": 3,
+      "standard": 2,
+      "vendor_advisory": 3,
+      "vendor_guidance": 1
+    },
+    "scope_counts": {
+      "abstract": 4,
+      "advisory_fields": 3,
+      "article_body": 4,
+      "catalog_only": 1,
+      "full_text_html": 2,
+      "full_text_pdf": 1,
+      "policy_articles": 2
+    },
+    "source_categories": [
+      "academic",
+      "policy",
+      "research",
+      "standard",
+      "vendor"
+    ]
+  },
+  "fixed_source_checks": [
+    {
+      "source_id": "cac_content_labels",
+      "name": "国家互联网信息办公室",
+      "status": "ok",
+      "checked_at": "2026-10-09T04:08:57.866559+00:00",
+      "discovered": 1,
+      "coverage": "已配置官方原文更新检查；不自动发现新法规/标准",
+      "response_sha256": "3686321b6f2fca2e245e210209dff4af75b5adc3be36d912695d28b5a681f642"
+    },
+    {
+      "source_id": "cac_generative_interim",
+      "name": "国家互联网信息办公室",
+      "status": "ok",
+      "checked_at": "2026-10-09T04:08:57.691063+00:00",
+      "discovered": 1,
+      "coverage": "已配置官方原文更新检查；不自动发现新法规/标准",
+      "response_sha256": "7fae988c064dde72c95e96e5727bf9abee4b3a5a1ea817606a9ca1f97ffac54b"
+    },
+    {
+      "source_id": "gbt_45654_catalog",
+      "name": "国家标准全文公开系统",
+      "status": "ok",
+      "checked_at": "2026-10-09T04:09:00.336525+00:00",
+      "discovered": 1,
+      "coverage": "已配置官方原文更新检查；不自动发现新法规/标准",
+      "response_sha256": "e50c812921f2e1ee660311c1955e383b04f1eeab0a6d4e5fbcc8c81b16661be4"
+    },
+    {
+      "source_id": "nist_genai_profile",
+      "name": "NIST",
+      "status": "ok",
+      "checked_at": "2026-10-09T04:08:58.038788+00:00",
+      "discovered": 1,
+      "coverage": "已配置官方原文更新检查；不自动发现新法规/标准",
+      "response_sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a"
+    }
+  ],
+  "python_qa_checks": [
+    {
+      "question": "管理暂行办法对训练数据有什么规定？适用范围是什么？",
+      "document_ids": [
+        "DOC-4d0c17a97aa7b944"
+      ],
+      "elapsed_seconds": 2.677,
+      "model_attempted": true,
+      "used_model": true,
+      "evidence_count": 5,
+      "verdict": {
+        "passed": true,
+        "scope": "citation_and_exact_quote",
+        "note": "只核对原文与引用，不作为语义正确率测量"
+      },
+      "note": "模型挑选原文，程序已核对引用及连续摘录；没有生成自由结论。",
+      "citation_ids": [
+        "DOC-4d0c17a97aa7b944/LIB-4d0c17a97aa7b944-88cd1c1a79f0",
+        "DOC-4d0c17a97aa7b944/LIB-4d0c17a97aa7b944-5faac1a96d80",
+        "DOC-4d0c17a97aa7b944/LIB-4d0c17a97aa7b944-f771e05804e7",
+        "DOC-4d0c17a97aa7b944/LIB-4d0c17a97aa7b944-6eac3f8a2c9a",
+        "DOC-4d0c17a97aa7b944/LIB-4d0c17a97aa7b944-76603ce7ca78"
+      ]
+    },
+    {
+      "question": "比较论文和 NIST 框架中关于间接提示注入的风险描述。",
+      "document_ids": [
+        "DOC-d57ebd5fb555085a",
+        "DOC-b8df5c37607d20c3"
+      ],
+      "elapsed_seconds": 1.494,
+      "model_attempted": true,
+      "used_model": true,
+      "evidence_count": 3,
+      "verdict": {
+        "passed": true,
+        "scope": "citation_and_exact_quote",
+        "note": "只核对原文与引用，不作为语义正确率测量"
+      },
+      "note": "模型挑选原文，程序已核对引用及连续摘录；没有生成自由结论。",
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-67871edae3d2",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-57e40af78859",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-9eacb0867feb"
+      ],
+      "source_review": "Initial NIST excerpt was generic risk rather than prompt injection; prompted retrieval correction"
+    },
+    {
+      "question": "GB/T 45654-2025 的发布日期和实施日期是什么？",
+      "document_ids": [
+        "DOC-2d428fbbdf9aace4"
+      ],
+      "elapsed_seconds": 0.097,
+      "model_attempted": false,
+      "used_model": false,
+      "evidence_count": 6,
+      "verdict": {
+        "passed": true,
+        "scope": "citation_and_exact_quote",
+        "note": "只核对原文与引用，不作为语义正确率测量"
+      },
+      "note": "使用本机检索片段。",
+      "citation_ids": [
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-3fc46f204839",
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-b6671db66e56",
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-1e8d0943caeb",
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-3cd4c065e656",
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-a5f887a9efb9",
+        "DOC-2d428fbbdf9aace4/LIB-2d428fbbdf9aace4-aedb6d5f5104"
+      ]
+    },
+    {
+      "question": "比较论文和 NIST 框架中关于间接提示注入的风险描述。",
+      "document_ids": [
+        "DOC-d57ebd5fb555085a",
+        "DOC-b8df5c37607d20c3"
+      ],
+      "stage": "after_specific_topic_filter",
+      "elapsed_seconds": 3.457,
+      "model_attempted": true,
+      "used_model": false,
+      "evidence_count": 4,
+      "verdict": {
+        "passed": true,
+        "scope": "citation_and_exact_quote",
+        "note": "只核对原文与引用，不作为语义正确率测量"
+      },
+      "note": "模型摘录未采用，回退完整检索片段。原因：摘录不是引用片段中的连续原文",
+      "citation_ids": [
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-67871edae3d2",
+        "DOC-d57ebd5fb555085a/LIB-d57ebd5fb555085a-329896209dc8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-11b4a55070b8",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-4bf42d7ff0f0"
+      ],
+      "source_review": "Both documents now provide explicit prompt injection excerpts; development review, not independent accuracy"
+    }
+  ],
+  "python_batch_model_calls": {
+    "attempted": 3,
+    "accepted": 2,
+    "fallback": 1,
+    "rules_only": 1,
+    "timing_scope": "Python function; excludes full HTTP/browser chain"
+  },
+  "browser_checks": [
+    {
+      "check": "Type filter and catalog dates; catalog_only limitation visible",
+      "passed": true,
+      "model_attempted": false,
+      "final_ui_retest": true
+    },
+    {
+      "check": "PDF evidence link contains physical page anchor",
+      "passed": true,
+      "observed_url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf#page=13"
+    },
+    {
+      "check": "Interim policy example: train data, complete article 2 and effective article 24",
+      "passed": true,
+      "model_attempted": true,
+      "used_model": true,
+      "evidence_count": 5,
+      "latency_measured": false
+    }
+  ],
+  "total_actual_model_calls": {
+    "attempted": 4,
+    "accepted": 3,
+    "fallback": 1
+  },
+  "validation": {
+    "unit_and_api_tests": 165,
+    "tests_passed": true,
+    "javascript_syntax_check": true,
+    "pdf_visual_review": [
+      "NIST cover physical page 1",
+      "NIST physical page 15, printed page 11"
+    ],
+    "independent_qa_accuracy": null,
+    "enrichment_precision": null,
+    "enrichment_recall": null,
+    "full_http_latency_pass_rate": null
+  },
+  "limitations": [
+    "GB/T source is catalog only; no technical standard full text",
+    "No legal applicability or automatic repeal/amendment completeness check",
+    "Cross-document output is organized original excerpts, not free reasoning",
+    "HTML/PDF diagrams, formula layout and OCR unsupported",
+    "Fixed references monitor known text, not discovery of all new standards or policies",
+    "Security-topic filter can miss implicit wording; first generic-risk retrieval was corrected after development review"
+  ],
+  "code_sha256": {
+    "collectors/reference.py": "473474cb5f7135f1cadd9a6d34b8e4d0ba92ed7639644b88292f21665df655e8",
+    "collectors/library.py": "1c3dd9ffc1ce06809ec703b47e5553cd1d6dca0674308a1f8271ad2797391585",
+    "enrichment/reference_text.py": "c7de9dae4e014392bc139e24bbd916259be2696c734b9df37c1dbd9db1e899ed",
+    "enrichment/documents.py": "f053d33c4216f7cdc0b8f7ec96b6acb3e11cd4d362936b8f4cd68f4a42a71edb",
+    "agents/library_qa.py": "1a6dc9db5a1ea057bcb4d6f21f8fccc62f4588e1943aa888b58645e76380a831",
+    "rag/library.py": "24e2d9114087c789bd710dc701712bb69e29ff9b2a6c0504fa64da5b93dd4fe8",
+    "api/app.py": "f7e75ad3572e3e666097726df5e5f4d7aa7e9d2a820d1ebb29f5df8b133c20e4",
+    "web/app.js": "28ea09cbbbd3841a62925f3e40c2b4ca34dff02102d2e021b89d9cbafca3f60a",
+    "web/index.html": "ee3607ce578210a9fcf0fc3719cbd2f5e9f5585ebe6b19dc2ad1d4af9fc6389d",
+    "web/styles.css": "6109e62a2b4db853e3794425ef2350084445d8a43e59fb9573c70117c7b45dc0",
+    "requirements.txt": "8a696d0a35a957c590548be011d30259fc652fd8da55148c27bab50ae66fbd5a"
+  },
+  "code_hash_basis": "SHA256 of local working-tree file bytes; Git may normalize line endings"
+}

@@ -7,6 +7,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 
 from enrichment.documents import canonical, fetch
+from collectors.reference import REFERENCE_SOURCES
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 AI = re.compile(r"\b(?:ai|llms?|vllm|ollama|agents?|hugging\s*face|machine learning|language models?)\b|prompt injection|模型|智能体", re.I)
@@ -27,6 +28,7 @@ SOURCES = (
          "sortBy": "submittedDate", "sortOrder": "descending"}),
      "parser": "atom", "prefix": "https://arxiv.org/abs/"},
 )
+SOURCES = SOURCES + REFERENCE_SOURCES
 # 明确标注历史起始资料，不能把它们计为实时发现的新情报。
 SEEDS = (
     {"url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
@@ -59,6 +61,9 @@ def _allowed_url(url, source):
 def parse_feed(source, response, limit=3):
     """只读公开 published 数据；限定官方前缀，按发布顺序选择有界窗口。"""
     body = response["body"]
+    if source["parser"] == "fixed":
+        return [dict(source, source_id=source["id"], source_name=source["name"],
+                     document_type=source["category"], discovery="fixed_reference_monitor")]
     rows = []
     if source["parser"] == "github":
         data = json.loads(body)

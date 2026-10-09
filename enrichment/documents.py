@@ -57,12 +57,12 @@ class PublicRedirect(urllib.request.HTTPRedirectHandler):
 def fetch(url):
     public_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "ai-sec-intel-student/0.3",
-                                                  "Accept": "application/json,text/html,text/plain,application/atom+xml,application/xml"})
+                                                  "Accept": "application/json,text/html,text/plain,application/atom+xml,application/xml,application/pdf"})
     opener = urllib.request.build_opener(PublicRedirect())
     with opener.open(request, timeout=15) as response:
         content_type = response.headers.get_content_type()
         if content_type not in ("application/json", "text/html", "text/plain", "application/xhtml+xml",
-                                "application/atom+xml", "application/xml", "text/xml", "application/rss+xml"):
+                                "application/atom+xml", "application/xml", "text/xml", "application/rss+xml", "application/pdf"):
             raise ValueError("暂不支持此文档类型：" + content_type)
         body = response.read(MAX_BYTES + 1)
         if len(body) > MAX_BYTES:

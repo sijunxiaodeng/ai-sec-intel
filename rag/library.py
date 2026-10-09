@@ -15,6 +15,7 @@ from collectors.library import SEEDS, SOURCES, discover, relevant
 from enrichment.documents import canonical, digest, extract_document, fetch, fetch_url, make_chunks, now
 from rag.evidence import CVE, DEFAULT_DB, _connection, rank_bm25
 from rag.hybrid import _dense, config_path, fuse, update_index
+from enrichment.reference_text import ARXIV_ID, catalog_document, paper_html, pdf_document, policy_document, reference_source
 
 LIBRARY_DB = DEFAULT_DB.with_name("library.sqlite3")
 DOCUMENT_TYPES = {"vendor_advisory", "vendor_guidance", "research_article", "academic_paper", "standard", "policy"}
@@ -25,7 +26,11 @@ TOPICS = {
     "model_supply_chain": (r"pickle|deserializ|supply.chain|malicious model|供应链|反序列化", "模型供应链 恶意模型 反序列化"),
     "agent_security": (r"\bagents?\b|tool.call|智能体|工具调用", "智能体安全 工具调用"),
     "ai_infrastructure": (r"vllm|ollama|torchserve|inference server|推理服务", "AI基础设施 推理服务"),
+    "ai_governance": (r"governance|risk management|risk framework|治理|管理暂行办法|服务管理|安全评估|算法备案", "AI风险管理 治理 适用范围 安全评估 算法备案"),
+    "content_labeling": (r"watermark|content.*label|生成合成内容|显式标识|隐式标识|文件元数据", "生成合成内容标识 显式标识 隐式标识"),
 }
+QUERY_ALIASES = {"prompt_injection": "prompt injection indirect", "jailbreak": "jailbreak adversarial",
+                 "model_supply_chain": "model supply chain pickle deserialization", "agent_security": "agent tool call"}
 _SYNC_LOCK = threading.Lock()
 
 
@@ -69,8 +74,15 @@ def _extract(candidate, response):
         raise ValueError("不支持的资料类型")
     if kind == "academic_paper":
         if urllib.parse.urlsplit(url).hostname != "arxiv.org":
-            raise ValueError("本步论文解析仅支持 arXiv 摘要页")
-        doc = _paper(response, url)
+            raise ValueError("论文解析仅支持官方 arXiv 页面")
+        doc = paper_html(response, url) if urllib.parse.urlsplit(url).path.startswith("/html/") else _paper(response, url)
+        if candidate.get("parent_document_id"):
+            doc["parent_document_id"] = candidate["parent_document_id"]
+    elif kind in ("standard", "policy"):
+        source = reference_source(url, kind)
+        if canonical(response["url"]) != canonical(url):
+            raise ValueError("官方资料返回其他地址")
+        doc = policy_document(response, source) if kind == "policy" else pdf_document(response, source) if source.get("reference_format") == "pdf" else catalog_document(response, source)
     elif kind == "vendor_advisory":
         data = json.loads(response["body"])
         if data.get("state") not in (None, "published") or data.get("withdrawn_at"):
@@ -102,7 +114,7 @@ def _extract(candidate, response):
         doc["published_at"] = candidate.get("published_at")
         doc["published_at_basis"] = "subscription_metadata" if candidate.get("published_at") else "unknown"
     else:
-        doc["published_at_basis"] = "document_metadata"
+        doc.setdefault("published_at_basis", "document_metadata")
     text = "\n".join(value for _, value in doc["parts"])
     mentions = sorted({v.upper() for v in CVE.findall(text)})
     declared = set(doc.get("declared_cve_ids", []))
@@ -135,7 +147,7 @@ def ingest_document(candidate, db_path=LIBRARY_DB, fetcher=fetch):
     candidate = dict(candidate, url=canonical(candidate["url"]))
     doc_id = _id(candidate["url"])
     try:
-        response = fetcher(fetch_url(candidate["url"]))
+        response = candidate.get("_prefetched_response") or fetcher(fetch_url(candidate["url"]))
         doc, chunks = _extract(candidate, response)
         with _connection(path) as conn:
             _schema(conn)
@@ -247,7 +259,8 @@ def detail(document_id, db_path=LIBRARY_DB):
     rows = _valid_evidence(db_path)
     chunks = sorted([r for r in rows if r["document_id"] == document_id], key=lambda r: r["evidence_id"])
     complete = len(chunks) == doc["chunk_count"]
-    return dict(doc, evidence=chunks, integrity_status="ok" if complete else "incomplete_or_invalid",
+    full_text = [r for r in documents(db_path) if r.get("parent_document_id") == document_id]
+    return dict(doc, evidence=chunks, full_text_documents=full_text, integrity_status="ok" if complete else "incomplete_or_invalid",
                 notice="引用对应已存档的提取内容；字符定位不是网页行号。" if complete else "部分证据完整性校验未通过，异常片段不展示。")
 
 
@@ -258,10 +271,11 @@ def overview(db_path=LIBRARY_DB):
             "source_categories": sorted({r["source_category"] for r in rows}),
             "sources": sorted(_read(db_path, "library_sources"), key=lambda r: r["source_id"]),
             "failed_documents": [r for r in _read(db_path, "library_attempts") if r["status"] == "error"],
-            "scope_notice": "统计为本机资料覆盖；不是赛题准确率、完整性或实时监测达标证明。论文目前收录题名/作者/摘要，不是全文。"}
+            "scope_counts": {scope: sum(r["content_scope"] == scope for r in rows) for scope in sorted({r["content_scope"] for r in rows})},
+            "scope_notice": "按每份资料区分摘要、HTML/PDF 文字、政策条文和仅目录；不能把目录或摘要称为全文。不是赛题准确率或时效达标证明。"}
 
 
-def search(query, top_k=8, *, document_type="", cve_id="", db_path=LIBRARY_DB):
+def search(query, top_k=8, *, document_type="", cve_id="", document_ids=None, db_path=LIBRARY_DB):
     if not isinstance(top_k, int) or not 1 <= top_k <= 20:
         raise ValueError("top_k 必须为 1 到 20")
     if document_type and document_type not in DOCUMENT_TYPES:
@@ -274,14 +288,37 @@ def search(query, top_k=8, *, document_type="", cve_id="", db_path=LIBRARY_DB):
         rows = [r for r in rows if requested & {a["entity_id"] for a in r["associations"]}]
     if document_type:
         rows = [r for r in rows if r["document_type"] == document_type]
+    if document_ids is not None:
+        rows = [r for r in rows if r["document_id"] in set(document_ids)]
+    wanted = {tag for tag in QUERY_ALIASES if re.search(TOPICS[tag][0], query, re.I | re.S)}
+    if wanted:
+        # 具体安全主题不能由“AI 风险”这类泛化段落替代；标签按片段原文重新判断。
+        rows = [r for r in rows if r["content_scope"] in ("catalog_only", "policy_articles") or
+                any(re.search(TOPICS[tag][0], r["text"] + " " + r["locator"], re.I | re.S) for tag in wanted)]
     if not query.strip() or not rows:
         return {"evidence": [], "mode": "bm25", "notice": "没有匹配的资料证据"}
-    lexical = rank_bm25(query, rows)
+    expanded_query = query + " " + " ".join(QUERY_ALIASES[tag] for tag in sorted(wanted))
+    lexical = rank_bm25(expanded_query, rows)
     try:
-        dense = _dense(query, rows, db_path)
+        dense = _dense(expanded_query, rows, db_path)
         return {"evidence": fuse(lexical[:30], dense[:30], top_k), "mode": "hybrid", "notice": "BM25 + 本地 BGE + RRF；关联标签不代表漏洞事实已验证"}
     except Exception:
         return {"evidence": lexical[:top_k], "mode": "bm25", "notice": "使用 BM25 原文检索；本机向量索引未就绪"}
+
+
+def full_text(document_id, db_path=LIBRARY_DB, fetcher=fetch):
+    """显式获取论文 HTML 全文，另存文档；失败不删除已成功的摘要或全文。"""
+    doc = detail(document_id, db_path)
+    if not doc or doc["document_type"] != "academic_paper" or doc["content_scope"] != "abstract":
+        raise ValueError("请选择已经入库的 arXiv 论文摘要")
+    match = re.fullmatch(r"/abs/(%s)/?" % ARXIV_ID, urllib.parse.urlsplit(doc["url"]).path)
+    if urllib.parse.urlsplit(doc["url"]).hostname != "arxiv.org" or not match or doc["integrity_status"] != "ok":
+        raise ValueError("摘要地址或存档证据未通过检查")
+    url = "https://arxiv.org/html/" + match.group(1)
+    candidate = {"url": url, "source_name": "arXiv", "source_id": "arxiv_full_text", "document_type": "academic_paper",
+                 "parent_document_id": document_id, "discovery": "explicit_full_text"}
+    result = ingest_document(candidate, db_path, fetcher)
+    return dict(result, parent_document_id=document_id, index=update_index(db_path))
 
 
 def _record_source(source, result, response, db_path):
@@ -315,8 +352,8 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
             result = {"source_id": source["id"], "name": source["name"], "url": source["url"], "category": source["category"], "checked_at": now()}
             try:
                 found, response = discover(source, per_source, fetcher)
-                candidates.extend(dict(row, discovered_at=discovered_at) for row in found)
-                result.update(status="ok", discovered=len(found), coverage="有界最新窗口；不是历史全量采集")
+                candidates.extend(dict(row, discovered_at=discovered_at, **({"_prefetched_response": response} if source["parser"] == "fixed" else {})) for row in found)
+                result.update(status="ok", discovered=len(found), coverage="已配置官方原文更新检查；不自动发现新法规/标准" if source["parser"] == "fixed" else "有界最新窗口；不是历史全量采集")
             except Exception as exc:
                 result.update(status="error", discovered=0, error=str(exc)[:240])
             _record_source(source, result, response, path)
@@ -332,6 +369,15 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
             if fetcher is fetch:
                 time.sleep(3)
             results.append(ingest_document(row, path, fetcher))
+        for previous in documents(path):
+            if previous["content_scope"] == "full_text_html":
+                # 已由用户明确获取的全文参与后续刷新，不自动为所有新论文抓取全文。
+                if fetcher is fetch:
+                    time.sleep(3)
+                candidate = {"url": previous["url"], "source_id": "arxiv_full_text", "source_name": "arXiv",
+                             "document_type": "academic_paper", "discovery": "explicit_full_text",
+                             "parent_document_id": previous.get("parent_document_id")}
+                results.append(ingest_document(candidate, path, fetcher))
         # 只复用已经准备的模型配置，不触发下载。
         if not config_path(path).exists() and config_path(DEFAULT_DB).exists():
             config_path(path).write_text(config_path(DEFAULT_DB).read_text(encoding="utf-8"), encoding="utf-8")

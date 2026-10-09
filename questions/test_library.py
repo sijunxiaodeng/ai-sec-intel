@@ -104,6 +104,16 @@ class LibraryTest(unittest.TestCase):
             self.assertFalse(search("CVE-2025-0312 提示注入", db_path=self.db)["evidence"])
             self.assertFalse(search("提示注入", document_type="academic_paper", db_path=self.db)["evidence"])
 
+    def test_specific_security_topic_does_not_return_generic_ai_risk_paragraph(self):
+        self.body = b"LLM security risk management framework describes general governance risks. " * 4
+        self.ingest()
+        with patch("rag.library._dense", return_value=[]):
+            self.assertFalse(search("间接提示注入", db_path=self.db)["evidence"])
+        self.body = b"LLM security framework describes indirect prompt\ninjection in retrieved content. " * 4
+        self.ingest()
+        with patch("rag.library._dense", return_value=[]):
+            self.assertTrue(search("间接提示注入", db_path=self.db)["evidence"])
+
     def test_hybrid_uses_same_candidate_filters_and_ids(self):
         self.ingest()
         row = detail(documents(self.db)[0]["document_id"], self.db)["evidence"][0]

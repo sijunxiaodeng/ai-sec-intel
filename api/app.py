@@ -49,6 +49,13 @@ class LibrarySyncBody(BaseModel):
     include_seeds: bool = True
 
 
+class LibraryAskBody(BaseModel):
+    question: str = Field(..., min_length=1, max_length=4000)
+    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    document_type: str = ""
+    use_model: bool = True
+
+
 def _summary(record):
     item = record.get("item") or {}
     cvss = record.get("cvss") or {}
@@ -257,6 +264,24 @@ def library_detail(document_id: str):
     if not result:
         raise HTTPException(status_code=404, detail="资料库里没有这份资料")
     return result
+
+
+@app.post("/api/library/{document_id}/full-text")
+def library_full_text(document_id: str):
+    from rag.library import full_text
+    try:
+        return full_text(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/library/ask")
+def library_ask(body: LibraryAskBody):
+    from agents.library_qa import run
+    try:
+        return run(body.question, document_ids=body.document_ids, document_type=body.document_type, use_model=body.use_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/ask")
