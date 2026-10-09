@@ -1,3 +1,4 @@
+from collectors.intelligence import IntelligenceCollector
 from collectors.nvd import NVDCollector
 from collectors.osv import OSVCollector
 
@@ -22,7 +23,11 @@ def run(keyword="ollama"):
     keyword = keyword or "ollama"
     nvd_items, nvd_step = _safe("NVD", lambda: NVDCollector(keyword=keyword).collect())
     osv_items, osv_step = _safe("OSV", lambda: OSVCollector(keyword=keyword).collect())
+    team_items, team_step = _safe(
+        "团队情报服务",
+        lambda: IntelligenceCollector(keyword=keyword).collect(),
+    )
     return {
-        "items": nvd_items + osv_items,
-        "steps": [nvd_step, osv_step],
+        "items": nvd_items + osv_items + team_items,
+        "steps": [nvd_step, osv_step, team_step],
     }
