@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source": {
+    "title": "中国电子杯第三届高校 ICT 产教融合创新大赛赛题九",
+    "basis": "用户提供的四页赛题 PDF，不以团队开发计划替代评分标准",
+    "pages": [2, 3, 4]
+  },
+  "metrics": [
+    {"id": "preliminary_source_categories", "stage": "preliminary", "page": 2, "metric": "来源类别数", "unit": "categories", "tiers": {"qualified": 3, "good": 5, "excellent": 7}, "additional_condition": "优秀还含实时监测；类别不是链接或接口数量"},
+    {"id": "preliminary_enrichment_dimensions", "stage": "preliminary", "page": 2, "metric": "富化维度数", "unit": "dimensions", "tiers": {"qualified": 3, "good": 5}, "additional_condition": "优秀要求信息准确且含自动关联推理，原文无数值阈值"},
+    {"id": "preliminary_latency", "stage": "preliminary", "page": 3, "metric": "发布到采集延迟", "unit": "hours", "direction": "maximum", "tiers": {"qualified": 24, "good": 12, "excellent": 6}, "additional_condition": "历史样例、定时任务间隔不是实际发布到采集的延迟"},
+    {"id": "preliminary_enrichment_accuracy", "stage": "preliminary", "page": 3, "metric": "富化准确率", "unit": "fraction", "direction": "minimum", "tiers": {"qualified": 0.70, "good": 0.85, "excellent": 0.95}},
+    {"id": "preliminary_qa", "stage": "preliminary", "page": 3, "metric": "问答深度与准确率", "qualified_basic_accuracy": 0.70, "good_condition": "深度问答含推理链", "excellent_multihop_accuracy": 0.85},
+    {"id": "final_latency", "stage": "final", "page": 4, "metric": "发现到采集延迟与稳定性", "unit": "hours", "direction": "maximum", "tiers": {"qualified": 24, "good": 12, "excellent": 6}},
+    {"id": "final_enrichment", "stage": "final", "page": 4, "metric": "富化准确率与召回率", "tiers": {"qualified": {"accuracy": 0.80, "recall": 0.70}, "good": {"accuracy": 0.90, "recall": 0.90}, "excellent": {"accuracy": 0.95, "recall": 0.95}}},
+    {"id": "final_qa", "stage": "final", "page": 4, "metric": "问答质量", "tiers": {"qualified": {"accuracy": 0.75, "max_response_seconds": 5}, "good": {"accuracy": 0.90, "condition": "支持多跳推理"}, "excellent": {"accuracy": 0.95, "condition": "推理链可解释"}}}
+  ],
+  "evaluation_policy": {
+    "independent_semantic_accuracy": null,
+    "competition_passed": null,
+    "rule_test_pass_rate_is_competition_accuracy": false,
+    "note": "阈值仅用于建立验收目标；独立标签、样本范围和测量口径确认后再计算，不自动由代码检查判定竞赛得分"
+  }
+}

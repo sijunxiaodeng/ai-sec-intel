@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "run_at": "2026-10-08T11:06:08.378525+00:00",
+  "mode": "model",
+  "model": "ai-security-qwen:1.5b",
+  "endpoint_type": "local",
+  "dataset_sha256": "a31de624aadb7103df6e448984c49df311ca6b1ad0a448f79f450787ddf9af39",
+  "source_manifest": [
+    {
+      "cve_id": "CVE-2024-37032",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-37032",
+      "response_sha256": "ad4850df5aca8c9f9d430af3c694867bbd17f67637cfbd22428d12e1f1033269",
+      "last_modified": "2026-06-17T07:37:38.427"
+    },
+    {
+      "cve_id": "CVE-2025-0312",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-0312",
+      "response_sha256": "8740f42096b5d3e9425b4ac082e7a2c3746222d38ce9a8e44c7b6e7c6e6688da",
+      "last_modified": "2026-06-17T08:26:15.890"
+    },
+    {
+      "cve_id": "CVE-2025-15514",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-15514",
+      "response_sha256": "a499728d44215217fddd7277f7b3872b65df88cd25170e3695dfc35e12754a09",
+      "last_modified": "2026-08-17T19:16:23.087"
+    },
+    {
+      "cve_id": "CVE-2024-37032",
+      "url": "https://github.com/ollama/ollama/pull/4175",
+      "response_sha256": "24340f0dc6e0ffa544a809b58ca89fc0ef0dde371db2024ce5be90bb5f8d33eb",
+      "retrieved_at": "2026-10-08T10:22:36.859888+00:00"
+    }
+  ],
+  "summary": {
+    "cases": 36,
+    "automatic_passed": 24,
+    "used_model_cases": 14,
+    "model_attempted_cases": 27,
+    "model_fallback_cases": 13,
+    "median_seconds": 0.66065,
+    "p95_seconds": 2.1195,
+    "max_seconds": 2.4264,
+    "over_5_seconds": 0,
+    "manual_accuracy": null,
+    "manual_citation_support_rate": null,
+    "accepted_model_automatic_passed": 2,
+    "accepted_model_manual_accuracy": null
+  },
+  "limits": [
+    "题单是公开的开发评测集，开发者已看过；不是独立盲测成绩。",
+    "自动规则检查关键词、范围和字段引用，不能代替语义质量评审。",
+    "耗时覆盖本机 TestClient 完整 HTTP 响应及检索/组织/核对，不包括浏览器、外网、并发和首次模型下载。",
+    "模型模式的比较及资产拒答仍可使用规则；每题分别记录 used_model。",
+    "自动规则有固定预期表达，正确的同义改写也可能被判未通过；这些数字不是语义准确率。",
+    "主要保留已配置模型的运行结果，需配合原始输出、回退比例和人工复核解释。",
+    "早先一次完整运行有一道题耗时12.0461秒；本次全部低于5秒不能代表稳定达标。"
+  ],
+  "case_status": [
+    {
+      "id": "Q01",
+      "category": "评分",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 1.403
+    },
+    {
+      "id": "Q02",
+      "category": "版本",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.6537
+    },
+    {
+      "id": "Q03",
+      "category": "条件",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.6676
+    },
+    {
+      "id": "Q04",
+      "category": "影响",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.5711
+    },
+    {
+      "id": "Q05",
+      "category": "PoC",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.7472
+    },
+    {
+      "id": "Q06",
+      "category": "修复",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.8354
+    },
+    {
+      "id": "Q07",
+      "category": "综合",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 2.1195
+    },
+    {
+      "id": "Q08",
+      "category": "边界",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.609
+    },
+    {
+      "id": "Q09",
+      "category": "评分",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 2.4264
+    },
+    {
+      "id": "Q10",
+      "category": "版本",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.6059
+    },
+    {
+      "id": "Q11",
+      "category": "条件",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.5084
+    },
+    {
+      "id": "Q12",
+      "category": "影响",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.7383
+    },
+    {
+      "id": "Q13",
+      "category": "PoC",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.5282
+    },
+    {
+      "id": "Q14",
+      "category": "修复",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.7112
+    },
+    {
+      "id": "Q15",
+      "category": "综合",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 1.6445
+    },
+    {
+      "id": "Q16",
+      "category": "边界",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.7184
+    },
+    {
+      "id": "Q17",
+      "category": "评分",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 1.0597
+    },
+    {
+      "id": "Q18",
+      "category": "版本",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.8783
+    },
+    {
+      "id": "Q19",
+      "category": "条件",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.6308
+    },
+    {
+      "id": "Q20",
+      "category": "影响",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.6774
+    },
+    {
+      "id": "Q21",
+      "category": "PoC",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.5293
+    },
+    {
+      "id": "Q22",
+      "category": "修复",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.9741
+    },
+    {
+      "id": "Q23",
+      "category": "综合",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.1919
+    },
+    {
+      "id": "Q24",
+      "category": "边界",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 1.0961
+    },
+    {
+      "id": "Q25",
+      "category": "多轮",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.7118
+    },
+    {
+      "id": "Q26",
+      "category": "多轮",
+      "automatic_passed": true,
+      "model_attempted": true,
+      "used_model": false,
+      "seconds": 0.6872
+    },
+    {
+      "id": "Q27",
+      "category": "切换",
+      "automatic_passed": false,
+      "model_attempted": true,
+      "used_model": true,
+      "seconds": 0.7344
+    },
+    {
+      "id": "Q28",
+      "category": "拒答",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0062
+    },
+    {
+      "id": "Q29",
+      "category": "多轮比较",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0408
+    },
+    {
+      "id": "Q30",
+      "category": "资产不足",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0071
+    },
+    {
+      "id": "Q31",
+      "category": "比较",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0544
+    },
+    {
+      "id": "Q32",
+      "category": "比较",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0383
+    },
+    {
+      "id": "Q33",
+      "category": "拒答",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0311
+    },
+    {
+      "id": "Q34",
+      "category": "拒答",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0159
+    },
+    {
+      "id": "Q35",
+      "category": "拒答",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0055
+    },
+    {
+      "id": "Q36",
+      "category": "数量限制",
+      "automatic_passed": true,
+      "model_attempted": false,
+      "used_model": false,
+      "seconds": 0.0049
+    }
+  ]
+}

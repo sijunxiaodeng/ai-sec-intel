@@ -1,0 +1,271 @@
+{
+  "recorded_at": "2026-10-08T12:57:15.231834+00:00",
+  "parent_revision": "cb2f3bdcbd9450bcba7e01feaef15f9f1985cd53",
+  "kind": "development_ingestion_and_retrieval_smoke",
+  "initial_sync": {
+    "per_source": 2,
+    "attempted": 11,
+    "ok": 10,
+    "sources": [
+      {
+        "source_id": "vllm_advisories",
+        "name": "vLLM 项目安全公告",
+        "url": "https://api.github.com/repos/vllm-project/vllm/security-advisories?state=published&sort=published&direction=desc&per_page=30",
+        "category": "vendor_advisory",
+        "checked_at": "2026-10-08T12:44:03.070489+00:00",
+        "status": "ok",
+        "discovered": 2,
+        "coverage": "有界最新窗口；不是历史全量采集",
+        "last_success_at": "2026-10-08T12:44:03.070489+00:00",
+        "response_sha256": "7b2fea4ac6c52fb8c5810ff6c943f697f6c1d63329b2894dd8036afbe259da00"
+      },
+      {
+        "source_id": "transformers_advisories",
+        "name": "Transformers 项目安全公告",
+        "url": "https://api.github.com/repos/huggingface/transformers/security-advisories?state=published&sort=published&direction=desc&per_page=30",
+        "category": "vendor_advisory",
+        "checked_at": "2026-10-08T12:44:05.101144+00:00",
+        "status": "ok",
+        "discovered": 0,
+        "coverage": "有界最新窗口；不是历史全量采集",
+        "last_success_at": "2026-10-08T12:44:05.101144+00:00",
+        "response_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      {
+        "source_id": "trailofbits_research",
+        "name": "Trail of Bits 研究博客",
+        "url": "https://blog.trailofbits.com/feed/",
+        "category": "research_article",
+        "checked_at": "2026-10-08T12:44:09.330824+00:00",
+        "status": "ok",
+        "discovered": 2,
+        "coverage": "有界最新窗口；不是历史全量采集",
+        "last_success_at": "2026-10-08T12:44:09.330824+00:00",
+        "response_sha256": "9498f6e8f05fe43de47111761f8b8952ff3d48a8d5ac35438750845a651c4a9b"
+      },
+      {
+        "source_id": "arxiv_security",
+        "name": "arXiv AI 安全论文",
+        "url": "https://export.arxiv.org/api/query?search_query=%28all%3A%22prompt+injection%22+OR+all%3A%22LLM+security%22+OR+all%3A%22model+supply+chain%22%29&start=0&max_results=8&sortBy=submittedDate&sortOrder=descending",
+        "category": "academic_paper",
+        "checked_at": "2026-10-08T12:44:13.811258+00:00",
+        "status": "ok",
+        "discovered": 2,
+        "coverage": "有界最新窗口；不是历史全量采集",
+        "last_success_at": "2026-10-08T12:44:13.811258+00:00",
+        "response_sha256": "e57b021a3fc0181a8a755ec2e974cdae61a57b75871c7bffad3291376e6b5372"
+      }
+    ],
+    "failures": [
+      {
+        "url": "https://docs.vllm.ai/en/latest/usage/security/",
+        "error": "HTTP Error 429: Too Many Requests"
+      }
+    ]
+  },
+  "current_documents": [
+    {
+      "document_id": "DOC-f6a380e6777e4cef",
+      "document_type": "academic_paper",
+      "publisher": "arXiv AI 安全论文",
+      "url": "https://arxiv.org/abs/2610.09264v1",
+      "content_scope": "abstract",
+      "published_at": "2026-10-07",
+      "discovery": "subscription",
+      "source_response_sha256": "84cc1e17f21406a2fcf7d29f6324c08534d5f14ac40047e2ff04d2c3b9d49528",
+      "text_sha256": "9bcb2207b5b8737da7a4d908569d90d3fd296af9ba33d19085304290e1a00fa6",
+      "chunk_count": 3
+    },
+    {
+      "document_id": "DOC-1251eec47eb14f29",
+      "document_type": "academic_paper",
+      "publisher": "arXiv AI 安全论文",
+      "url": "https://arxiv.org/abs/2610.09935v1",
+      "content_scope": "abstract",
+      "published_at": "2026-10-07",
+      "discovery": "subscription",
+      "source_response_sha256": "adffdee0fb54bdd9c0c379278d4ebc2ec0df2318edaba8bbd71e80aa4e50bb7d",
+      "text_sha256": "355ccc185599dfad3e7c43c2b56f889b5172707aa43fcb8ba1234cba6d35d850",
+      "chunk_count": 3
+    },
+    {
+      "document_id": "DOC-9274c968c716d9ac",
+      "document_type": "vendor_advisory",
+      "publisher": "vLLM 项目安全公告",
+      "url": "https://github.com/vllm-project/vllm/security/advisories/GHSA-6cxc-2vcg-w5qc",
+      "content_scope": "advisory_fields",
+      "published_at": "2026-10-06T20:45:08Z",
+      "discovery": "subscription",
+      "source_response_sha256": "f82f80c2eed5f70e86f9d815b1f0541bc6d3c2d3149af9edff43c936058c7af9",
+      "text_sha256": "691af47e08483e78a6ea897107ce3d2dc989c283b842d6f1440bc8f5e631c1bc",
+      "chunk_count": 10
+    },
+    {
+      "document_id": "DOC-766a21b63e73b284",
+      "document_type": "vendor_advisory",
+      "publisher": "vLLM 项目安全公告",
+      "url": "https://github.com/vllm-project/vllm/security/advisories/GHSA-p92p-rxj5-7p2x",
+      "content_scope": "advisory_fields",
+      "published_at": "2026-10-06T07:10:22Z",
+      "discovery": "subscription",
+      "source_response_sha256": "d54323d392a6298c12c53e0429bc972f699a739b410f74be36db52ec178b89c9",
+      "text_sha256": "7272d596b656ba01a2e6046cc5d93d050ebb0ee5c85da0e53ee38ebc0b0cfe25",
+      "chunk_count": 17
+    },
+    {
+      "document_id": "DOC-827736ff96e4a036",
+      "document_type": "research_article",
+      "publisher": "Trail of Bits 研究博客",
+      "url": "https://blog.trailofbits.com/2026/09/18/auditing-in-the-age-of-good-enough-ai/",
+      "content_scope": "article_body",
+      "published_at": "2026-09-18",
+      "discovery": "subscription",
+      "source_response_sha256": "a50948ddc1864ff0d650dfe7e074ba6175cc58eaa0a96d4c9494c25df8aa2dee",
+      "text_sha256": "064e98ab6295dfbc4f290d24d84fc0b3d2eb4500e5107bb4db80b0ed749db67f",
+      "chunk_count": 16
+    },
+    {
+      "document_id": "DOC-71fc2221d1295bd6",
+      "document_type": "research_article",
+      "publisher": "Trail of Bits 研究博客",
+      "url": "https://blog.trailofbits.com/2026/09/15/1passwords-ai-patching-benchmark-is-misleading/",
+      "content_scope": "article_body",
+      "published_at": "2026-09-15",
+      "discovery": "subscription",
+      "source_response_sha256": "c6fad127efa3af289ca1133b714133662930c7bc0a7c6cd55a7bddfb927e4719",
+      "text_sha256": "368b6940de4389a816c042d0250b4181b831b7ee737e8c5abae001ae7a8bb319",
+      "chunk_count": 19
+    },
+    {
+      "document_id": "DOC-67b1521db4fecbcb",
+      "document_type": "research_article",
+      "publisher": "Wiz Research",
+      "url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+      "content_scope": "article_body",
+      "published_at": "2024-06-24",
+      "discovery": "historical_seed",
+      "source_response_sha256": "0a3c0fa93de4a8c135f10028f601e96de5b3756e463966525f1892790e3baa9b",
+      "text_sha256": "b8309d4ec951ff67126f97fc6f596768f35e7631b1dd234fcdd9d3631f6e98db",
+      "chunk_count": 11
+    },
+    {
+      "document_id": "DOC-302c069146f3f6f2",
+      "document_type": "academic_paper",
+      "publisher": "arXiv",
+      "url": "https://arxiv.org/abs/2307.15043",
+      "content_scope": "abstract",
+      "published_at": "2023-07-27",
+      "discovery": "historical_seed",
+      "source_response_sha256": "b13cfe28a0b500fe5f2d227b6ca61d4b4d109bab1ddf4d3145f3721ac1b7ab7c",
+      "text_sha256": "1d1d73f43aa0bca579ffc73d7a6ca550f5eb77e295c0164ac5505def345f1b93",
+      "chunk_count": 3
+    },
+    {
+      "document_id": "DOC-e8cc7f5045bc662c",
+      "document_type": "academic_paper",
+      "publisher": "arXiv",
+      "url": "https://arxiv.org/abs/2302.12173",
+      "content_scope": "abstract",
+      "published_at": "2023-02-23",
+      "discovery": "historical_seed",
+      "source_response_sha256": "dbdf0bb45f06b2afe28c0eea8bae8ba3557df7171cb971749416baede9ab30d5",
+      "text_sha256": "45c56fa51221ecb24252972cc04d1f344ca3bf5904e44e9ab2feb5e5ac74d9d2",
+      "chunk_count": 3
+    },
+    {
+      "document_id": "DOC-a4e15f3b0f4087ee",
+      "document_type": "vendor_guidance",
+      "publisher": "Hugging Face 官方文档",
+      "url": "https://huggingface.co/docs/hub/security-pickle",
+      "content_scope": "article_body",
+      "published_at": null,
+      "discovery": "historical_seed",
+      "source_response_sha256": "37a177bfd38e0e131b04f6715b7754964679adc11491a1c3d31b4e341967538c",
+      "text_sha256": "33f51f3c25980ddfb1c2ad5638cd76f80d304a0e37394143044d6b2df610677c",
+      "chunk_count": 11
+    }
+  ],
+  "current_types": {
+    "academic_paper": 4,
+    "policy": 0,
+    "research_article": 3,
+    "standard": 0,
+    "vendor_advisory": 2,
+    "vendor_guidance": 1
+  },
+  "raw_snapshot_checks": {
+    "count": 10,
+    "passed": true
+  },
+  "queries": [
+    {
+      "query": "提示注入",
+      "document_type": "academic_paper",
+      "mode": "hybrid",
+      "chunks": 8,
+      "documents": [
+        "DOC-1251eec47eb14f29",
+        "DOC-302c069146f3f6f2",
+        "DOC-e8cc7f5045bc662c",
+        "DOC-f6a380e6777e4cef"
+      ]
+    },
+    {
+      "query": "模型供应链",
+      "document_type": "",
+      "mode": "hybrid",
+      "chunks": 8,
+      "documents": [
+        "DOC-827736ff96e4a036",
+        "DOC-a4e15f3b0f4087ee"
+      ]
+    },
+    {
+      "query": "vLLM",
+      "document_type": "vendor_advisory",
+      "mode": "hybrid",
+      "chunks": 8,
+      "documents": [
+        "DOC-766a21b63e73b284",
+        "DOC-9274c968c716d9ac"
+      ]
+    },
+    {
+      "query": "CVE-2024-37032",
+      "document_type": "",
+      "mode": "hybrid",
+      "chunks": 8,
+      "documents": [
+        "DOC-67b1521db4fecbcb"
+      ]
+    },
+    {
+      "query": "CVE-2025-0312 提示注入",
+      "document_type": "",
+      "mode": "bm25",
+      "chunks": 0,
+      "documents": []
+    }
+  ],
+  "tests": {
+    "total": 119,
+    "passed": 119
+  },
+  "code_sha256": {
+    "collectors/library.py": "a67a0d95e5bb1f46cd3e426c51e83c65447aa5a55513d5e50ea640a13e859075",
+    "rag/library.py": "c0208aa7a376b0b49ba90cd8f819472544c0bfdfe7ec36ba5f517cee89198a48",
+    "api/app.py": "c709dd41e1039f1b1e5d77e8ea896400941d0fc4a9ff8e64d7ea8d563cd3e8bf",
+    "automation/schedule.py": "0993f2a9e06275e8ce69b6d37073f75a7dc7d1fa85de400986f4d9091911cfcd",
+    "enrichment/documents.py": "80a56a2b5bbe5f9dc07879d4b574d9861a6f9b23098167cdbb2a26bc41c14246",
+    "web/app.js": "dc5e21c1bbb1ff40c1693d3c276fb602307d31ebda9013da9023b3203c803cdb",
+    "web/index.html": "cb4b64fe2f43c1e4f3ea6ecbe47751dceb1226ac19963313e9db9695dfdaf9d1",
+    "questions/test_library.py": "e74764fa6b44f911ff4ebef8a77a6e3403f08505b81e6fe0419c63028b2ee60b"
+  },
+  "limits": [
+    "Development checks, not independent competition accuracy or latency proof.",
+    "Papers contain metadata and abstracts, not full text.",
+    "Latest bounded discovery windows, not a complete historical or cursor-based monitor.",
+    "Standards and policies have reserved types but no configured collectors.",
+    "General library evidence is not yet used by the existing CVE QA generation endpoint."
+  ]
+}

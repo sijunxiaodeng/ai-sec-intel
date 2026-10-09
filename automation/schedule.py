@@ -86,7 +86,9 @@ def log_line(text):
 
 def run_once(keyword="ollama"):
     from agents.orchestrator import run_collect
-
+    from rag.library import sync as sync_library
+    # 两条采集路径分别执行，漏洞源故障不能阻止通用资料同步。
+    collect_error = None
     try:
         result = run_collect(keyword)
         data = ensure_state()
@@ -96,14 +98,31 @@ def run_once(keyword="ollama"):
         data["last_keyword"] = keyword
         _write_state(data)
         log_line("自动监测完成，关键词 %s，库内 %d 条" % (keyword, data["last_count"]))
-        return data
     except Exception as exc:
+        collect_error = exc
         data = ensure_state()
         data["last_run"] = _now()
         data["last_error"] = str(exc)
         _write_state(data)
         log_line("自动监测失败：%s" % exc)
-        raise
+    try:
+        library = sync_library(include_seeds=False)
+        data = ensure_state()
+        data["library_last_run"] = _now()
+        data["library_last_ok"] = library["ok"]
+        data["library_last_error"] = ""
+        data["library_source_errors"] = [r["source_id"] for r in library["sources"] if r["status"] == "error"]
+        _write_state(data)
+        log_line("资料同步完成：成功 %d/%d，来源失败 %d" % (library["ok"], library["attempted"], len(data["library_source_errors"])))
+    except Exception as exc:
+        data = ensure_state()
+        data["library_last_run"] = _now()
+        data["library_last_error"] = str(exc)
+        _write_state(data)
+        log_line("资料同步失败：%s" % exc)
+    if collect_error:
+        raise collect_error
+    return ensure_state()
 
 
 def _loop():

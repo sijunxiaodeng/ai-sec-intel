@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "purpose": "冻结版本的新题试跑与开发来源核对，不是盲测或独立语义验收",
+  "baseline_commit": "fd624621ede62c81941aa34bc83fac53177b7388",
+  "dataset_sha256": "3b66ea1e999ba938dca37c137a6b1aed89fa64c842003e32dd48160c25e310eb",
+  "source_count": 10,
+  "gold_fact_count": 32,
+  "gold_fact_source_rechecked": 32,
+  "model_run": {
+    "run_id": "cefa6dd1285945e0aedc2229618cca27",
+    "baseline_commit": "fd624621ede62c81941aa34bc83fac53177b7388",
+    "mode": "model",
+    "configured_model_name": "deepseek-flash",
+    "model_attempted_requests_including_history": 12,
+    "model_adopted_requests_including_history": 10,
+    "source_stable": true,
+    "planned_cases": 20,
+    "captured_cases": 20,
+    "skipped_cases": 0,
+    "errors": 0,
+    "automatic_checks_passed": 20,
+    "cases_needing_attention": [],
+    "timing_by_kind": {
+      "assessment": {
+        "captured": 2,
+        "errors": 0,
+        "p50_seconds": 0.08105000000000001,
+        "p95_seconds_nearest_rank": 0.0858,
+        "http_at_most_5s": 2,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "excerpt": {
+        "captured": 7,
+        "errors": 0,
+        "p50_seconds": 1.2683,
+        "p95_seconds_nearest_rank": 2.3136,
+        "http_at_most_5s": 7,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "qa": {
+        "captured": 6,
+        "errors": 0,
+        "p50_seconds": 0.5742,
+        "p95_seconds_nearest_rank": 1.2494,
+        "http_at_most_5s": 6,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "relations": {
+        "captured": 4,
+        "errors": 0,
+        "p50_seconds": 0.3103,
+        "p95_seconds_nearest_rank": 0.6923,
+        "http_at_most_5s": 4,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "reviewed_graph": {
+        "captured": 1,
+        "errors": 0,
+        "p50_seconds": 0.1064,
+        "p95_seconds_nearest_rank": 0.1064,
+        "http_at_most_5s": 1,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      }
+    },
+    "independent_qa_reviewed": 0,
+    "qa_executed_denominator": 17,
+    "independent_qa_accuracy": null,
+    "qa_by_stratum": {
+      "known_topic_or_audit_regression": {
+        "executed": 4,
+        "independent_accuracy": null
+      },
+      "new_questions": {
+        "executed": 13,
+        "independent_accuracy": null
+      }
+    },
+    "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+    "independent_enrichment_tp": null,
+    "independent_enrichment_fp": null,
+    "independent_enrichment_fn": null,
+    "independent_enrichment_precision": null,
+    "independent_enrichment_recall": null,
+    "competition_passed": null
+  },
+  "rules_run": {
+    "run_id": "90d0fdfce51741a7ad99b4499dcea582",
+    "baseline_commit": "fd624621ede62c81941aa34bc83fac53177b7388",
+    "mode": "rules",
+    "configured_model_name": "deepseek-flash",
+    "model_attempted_requests_including_history": 0,
+    "model_adopted_requests_including_history": 0,
+    "source_stable": true,
+    "planned_cases": 20,
+    "captured_cases": 14,
+    "skipped_cases": 6,
+    "errors": 0,
+    "automatic_checks_passed": 14,
+    "cases_needing_attention": [],
+    "timing_by_kind": {
+      "assessment": {
+        "captured": 2,
+        "errors": 0,
+        "p50_seconds": 0.08485000000000001,
+        "p95_seconds_nearest_rank": 0.0864,
+        "http_at_most_5s": 2,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "excerpt": {
+        "captured": 7,
+        "errors": 0,
+        "p50_seconds": 0.1493,
+        "p95_seconds_nearest_rank": 0.2304,
+        "http_at_most_5s": 7,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "qa": {
+        "captured": 0,
+        "errors": 0,
+        "p50_seconds": null,
+        "p95_seconds_nearest_rank": null,
+        "http_at_most_5s": 0,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "relations": {
+        "captured": 4,
+        "errors": 0,
+        "p50_seconds": 0.11385,
+        "p95_seconds_nearest_rank": 0.2294,
+        "http_at_most_5s": 4,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      },
+      "reviewed_graph": {
+        "captured": 1,
+        "errors": 0,
+        "p50_seconds": 0.1257,
+        "p95_seconds_nearest_rank": 0.1257,
+        "http_at_most_5s": 1,
+        "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+      }
+    },
+    "independent_qa_reviewed": 0,
+    "qa_executed_denominator": 11,
+    "independent_qa_accuracy": null,
+    "qa_by_stratum": {
+      "known_topic_or_audit_regression": {
+        "executed": 4,
+        "independent_accuracy": null
+      },
+      "new_questions": {
+        "executed": 7,
+        "independent_accuracy": null
+      }
+    },
+    "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+    "independent_enrichment_tp": null,
+    "independent_enrichment_fp": null,
+    "independent_enrichment_fn": null,
+    "independent_enrichment_precision": null,
+    "independent_enrichment_recall": null,
+    "competition_passed": null
+  },
+  "developer_reviewed_cases": 20,
+  "issues": [
+    {
+      "id": "D01",
+      "cases": [
+        "L03"
+      ],
+      "priority": "medium",
+      "finding": "模型重复/无效引用导致回退",
+      "next_action": "明确每个引用最多一项，并保存脱敏的校验失败类别；修复后针对性复测"
+    },
+    {
+      "id": "D02",
+      "cases": [
+        "L06"
+      ],
+      "priority": "medium",
+      "finding": "模型摘录不连续，回退后片段较长",
+      "next_action": "约束逐项摘录与多资料覆盖，避免拼接；核对限定条件再接受输出"
+    },
+    {
+      "id": "D03",
+      "cases": [
+        "L01"
+      ],
+      "priority": "medium",
+      "finding": "一句原文被拆成悬空引文",
+      "next_action": "保留可读的完整语句或明确关联相邻片段，不删除条件"
+    },
+    {
+      "id": "D04",
+      "cases": [
+        "Q06",
+        "L05"
+      ],
+      "priority": "low",
+      "finding": "回答附加未提问字段/条款",
+      "next_action": "依据问题筛选输出，保留强制的范围条款"
+    },
+    {
+      "id": "D05",
+      "cases": [
+        "R04"
+      ],
+      "priority": "scope_gap",
+      "finding": "新文章跨文档主题仍无法综合",
+      "next_action": "继续列为功能范围缺口，不能通过安全拒答认定通用推理完成"
+    }
+  ],
+  "raw_answers_evidence_and_credentials_exported": false,
+  "independent_qa_accuracy": null,
+  "independent_enrichment_precision": null,
+  "independent_enrichment_recall": null,
+  "competition_passed": null,
+  "source_archives": {
+    "model": {
+      "count": 10,
+      "raw_bytes": 1968700,
+      "timing": "verified_after_capture",
+      "manifest_sha256": "2de87bc890ee3b308f3e2f7f9145f7fdc719c0403ca402070ed3faa431f7b062"
+    },
+    "rules": {
+      "count": 10,
+      "raw_bytes": 1968700,
+      "timing": "verified_after_capture",
+      "manifest_sha256": "b3c2cb79eb55d75ebd657f6020c7ec81207c70b12dc81a5a69a60f21f26a261a"
+    }
+  }
+}

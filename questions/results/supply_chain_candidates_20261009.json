@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T05:23:29.319538+00:00",
+  "purpose": "第十四步开发验证；不计作独立人工/语义准确率验收",
+  "tests": {
+    "passed": 195,
+    "new_tests": 14,
+    "fixture_kind": "synthetic_binding_and_state_failures"
+  },
+  "source_review": {
+    "kind": "developer_source_review",
+    "pdf_physical_pages_visually_checked": [
+      16,
+      17,
+      25
+    ],
+    "independent_human_review": false
+  },
+  "curated_supply_graph": {
+    "facts": 8,
+    "nodes": 11,
+    "edges": 16,
+    "status": "ready",
+    "analysis_paths": 3
+  },
+  "candidate_model_check": {
+    "status": "ok",
+    "inserted": 7,
+    "selected": 8,
+    "model_attempted": true,
+    "used_model": true,
+    "elapsed_http_seconds": 1.0615
+  },
+  "candidate_queue": {
+    "states": {
+      "approved": 3,
+      "pending": 8,
+      "rejected": 4
+    },
+    "approved_review_kinds": {
+      "developer_source_review": 3
+    },
+    "reviewed_graph_facts": 3,
+    "pending_enters_synthesis": false,
+    "approved_automatically_enters_synthesis": false
+  },
+  "checks": {
+    "real_model_calls": 6,
+    "breakdown": {
+      "analysis_http_cases": 3,
+      "candidate_selection": 1,
+      "browser_analysis": 1,
+      "post_review_http_replay": 1
+    },
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null,
+    "browser_review_saved": true,
+    "browser_example_answered": true,
+    "rules": {
+      "cases": 23,
+      "automatic_passed": 23,
+      "model_accepted": 0,
+      "min_http_seconds": 0.0021,
+      "max_http_seconds": 0.2537
+    },
+    "model": {
+      "cases": 3,
+      "automatic_passed": 3,
+      "model_accepted": 3,
+      "min_http_seconds": 0.7103,
+      "max_http_seconds": 1.7336
+    },
+    "post_review": {
+      "cases": 1,
+      "automatic_passed": 1,
+      "model_accepted": 1,
+      "min_http_seconds": 0.9629,
+      "max_http_seconds": 0.9629
+    }
+  },
+  "candidate_quote_records": [
+    {
+      "id": "RC-2ce78d7315e78d0ebbe64745",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d1e2d54351e3",
+      "state": "approved",
+      "effective_state": "approved",
+      "generation_method": "model_candidate_selection",
+      "review_count": 1
+    },
+    {
+      "id": "RC-360a1ed3f0269a261e78d5bd",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-12e83279cf55",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "model_candidate_selection",
+      "review_count": 0
+    },
+    {
+      "id": "RC-42f0372590e9cd33f5ef32c1",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b83eaccd5e65",
+      "state": "approved",
+      "effective_state": "approved",
+      "generation_method": "model_candidate_selection",
+      "review_count": 1
+    },
+    {
+      "id": "RC-7ccd23b95536f812a2aa2c14",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-ac12f70a90c3",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "model_candidate_selection",
+      "review_count": 0
+    },
+    {
+      "id": "RC-894c2d19887860308d09b714",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-18789d32672e",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "model_candidate_selection",
+      "review_count": 0
+    },
+    {
+      "id": "RC-d470b3fcd29f9116182d542b",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-7adc10359570",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "model_candidate_selection",
+      "review_count": 0
+    },
+    {
+      "id": "RC-3c188e4f3e5723659ad3e233",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b7d5545b947c",
+      "state": "approved",
+      "effective_state": "approved",
+      "generation_method": "model_candidate_selection",
+      "review_count": 1
+    },
+    {
+      "id": "RC-1105c84b7c48728a389b6c67",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-0917d6f4e2bc",
+      "state": "rejected",
+      "effective_state": "rejected",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 1
+    },
+    {
+      "id": "RC-1d990158720ec1157c8058df",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-18789d32672e",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 0
+    },
+    {
+      "id": "RC-75becc9a3c1f7fbdbd1d0eff",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-18789d32672e",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 0
+    },
+    {
+      "id": "RC-8aa07c29f3e4d5174ca0dc9f",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-034cbcb3131a",
+      "state": "rejected",
+      "effective_state": "rejected",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 1
+    },
+    {
+      "id": "RC-a9b1ffb02f7537d81de4340b",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-043c52c3bd74",
+      "state": "rejected",
+      "effective_state": "rejected",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 1
+    },
+    {
+      "id": "RC-dd5d3176fbacda544840f8c6",
+      "citation_id": "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-043c52c3bd74",
+      "state": "rejected",
+      "effective_state": "rejected",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 1
+    },
+    {
+      "id": "RC-edcd315cb484ca25b54edf6f",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-046a306b898d",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 0
+    },
+    {
+      "id": "RC-3358e17e2d75e74702eae36d",
+      "citation_id": "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-046a306b898d",
+      "state": "pending",
+      "effective_state": "pending",
+      "generation_method": "automatic_sentence_rules",
+      "review_count": 0
+    }
+  ],
+  "code_sha256": {
+    "agents/relations_qa.py": "73347b110673d4c1059836847d4775186c1ac6a04ab0cbdd7c4dfb64e6ecca26",
+    "api/app.py": "79bf096bec0cc0265544ec8ea5295c4c2f43f5772194951942b42e730964d76f",
+    "enrichment/relations.py": "d2c3fd016821ca53bad4f27fd60162761ad79445b2524a8a0abbfd40918a34b0",
+    "enrichment/relation_candidates.py": "21e10adbac3f34d4f6ebb7c15a9b4679696d286de854f0f2cf312aa8aad476b5",
+    "enrichment/supply_chain_relations.json": "844172e1098a122549f015e2ad8cf8d37011c3265c5a4fa1a97a75ef548c912f",
+    "web/app.js": "5f0789674bf71e4bf3b632324cd2d213b7a0200fd65b6249063a8588237386f6",
+    "web/index.html": "81fb7dc63b923c1e312c29569ccacf804330bf19c91e2861e3a96c017cbac2d4",
+    "questions/relations_evaluation_v2.json": "8cc5de130cafff9b508f0c062b1ae81f29e608c159e936067aefdcd606a68344",
+    "questions/test_relation_candidates.py": "6306258347f34e68efc06f46e6eb2e84ce6c69dea6bbe7205b34d760bc9d09fb"
+  },
+  "hash_scope": "Working-tree bytes at final validation; original quotes, drafts, databases, keys and raw source files excluded"
+}

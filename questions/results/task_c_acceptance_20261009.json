@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T05:30:40.897695+00:00",
+  "cve_id": "CVE-2024-37032",
+  "purpose": "当前本机演示资料和接口绑定快照，不是独立语义验收或比赛评分",
+  "scope": {
+    "collection_triggered": false,
+    "asset_import_triggered": false,
+    "model_calls_requested": false,
+    "original_answers_or_asset_details_exported": false
+  },
+  "inventory": {
+    "overview": {
+      "stored_cve_records": 29,
+      "vulnerability_source_names": [
+        "OSV",
+        "NVD"
+      ],
+      "source_name_count_is_category_count": false,
+      "llm_configured": true,
+      "eligible_monitor_latency_samples": 0,
+      "interval_hours": 6
+    },
+    "library": {
+      "documents": 17,
+      "chunks": 589,
+      "types": {
+        "academic_paper": 6,
+        "policy": 2,
+        "research_article": 3,
+        "standard": 2,
+        "vendor_advisory": 3,
+        "vendor_guidance": 1
+      },
+      "source_categories": [
+        "academic",
+        "policy",
+        "research",
+        "standard",
+        "vendor"
+      ],
+      "scope_counts": {
+        "abstract": 4,
+        "advisory_fields": 3,
+        "article_body": 4,
+        "catalog_only": 1,
+        "full_text_html": 2,
+        "full_text_pdf": 1,
+        "policy_articles": 2
+      },
+      "failed_documents": 1
+    },
+    "assessment": {
+      "status": "ok",
+      "cvss_available": true,
+      "affected_ranges": 1,
+      "poc_candidate_links": 1,
+      "poc_validation_states": [
+        "not_run"
+      ],
+      "fix_records": 1,
+      "fix_validation_states": [
+        "not_tested"
+      ]
+    },
+    "assets": {
+      "registered": 0,
+      "demo": 0,
+      "internet_asset_discovery_tested": false
+    },
+    "retrieval": {
+      "mode": "hybrid",
+      "returned_chunks": 8
+    },
+    "indirect_prompt_injection_graph": {
+      "status": "ready",
+      "curated_facts": 11,
+      "unavailable_facts": 0,
+      "reviewed_quotes": 0
+    },
+    "indirect_prompt_injection_queue": {
+      "displayed_candidates": 0,
+      "effective_states": {
+        "pending": 0,
+        "approved": 0,
+        "rejected": 0,
+        "revoked": 0,
+        "stale": 0
+      }
+    },
+    "model_supply_chain_graph": {
+      "status": "ready",
+      "curated_facts": 8,
+      "unavailable_facts": 0,
+      "reviewed_quotes": 3
+    },
+    "model_supply_chain_queue": {
+      "displayed_candidates": 15,
+      "effective_states": {
+        "pending": 8,
+        "approved": 3,
+        "rejected": 4,
+        "revoked": 0,
+        "stale": 0
+      }
+    },
+    "indirect_prompt_injection_analysis": {
+      "status": "answered",
+      "analysis_paths": 2,
+      "model_attempted": false,
+      "used_model": false,
+      "citation_binding_passed": true
+    },
+    "model_supply_chain_analysis": {
+      "status": "answered",
+      "analysis_paths": 3,
+      "model_attempted": false,
+      "used_model": false,
+      "citation_binding_passed": true
+    }
+  },
+  "checks": [
+    {
+      "id": "overview",
+      "status": "pass",
+      "elapsed_http_seconds": 0.1008
+    },
+    {
+      "id": "library",
+      "status": "pass",
+      "elapsed_http_seconds": 0.037
+    },
+    {
+      "id": "assessment",
+      "status": "pass",
+      "elapsed_http_seconds": 0.099
+    },
+    {
+      "id": "assets",
+      "status": "observed",
+      "elapsed_http_seconds": 0.0401
+    },
+    {
+      "id": "retrieval",
+      "status": "pass",
+      "elapsed_http_seconds": 1.1385
+    },
+    {
+      "id": "indirect_prompt_injection_graph",
+      "status": "pass",
+      "elapsed_http_seconds": 0.1119
+    },
+    {
+      "id": "indirect_prompt_injection_queue",
+      "status": "observed",
+      "elapsed_http_seconds": 0.0522
+    },
+    {
+      "id": "model_supply_chain_graph",
+      "status": "pass",
+      "elapsed_http_seconds": 0.2501
+    },
+    {
+      "id": "model_supply_chain_queue",
+      "status": "observed",
+      "elapsed_http_seconds": 0.1134
+    },
+    {
+      "id": "indirect_prompt_injection_analysis",
+      "status": "pass",
+      "elapsed_http_seconds": 0.1417
+    },
+    {
+      "id": "model_supply_chain_analysis",
+      "status": "pass",
+      "elapsed_http_seconds": 0.24
+    }
+  ],
+  "summary": {
+    "checks": 11,
+    "errors": 0,
+    "needs_data_or_review": 0,
+    "independent_enrichment_accuracy": null,
+    "independent_enrichment_recall": null,
+    "independent_qa_accuracy": null,
+    "competition_passed": null
+  },
+  "validation": {
+    "tests_passed": 202,
+    "new_snapshot_tests": 7,
+    "backend_code_baseline_commit": "a398929d6da3cb9370de76cd924daccad47b5875",
+    "snapshot_program_sha256": "a23e7c62e0341180a7383fd63deda1681334688c45d1a648ab26b950c00a730f",
+    "criteria_sha256": "04c0d6aead078f0f7aa2c6016b19e56b59cc53e9d707e726a593b4b19f92959f",
+    "new_machine_deployment_tested": false,
+    "formal_submission_materials_generated": false
+  }
+}
