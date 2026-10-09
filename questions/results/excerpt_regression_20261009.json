@@ -242,6 +242,81 @@
       "source_archive_count": 5,
       "source_archive_timing": "before_capture",
       "exact_quote_and_all_citations_checked": 32
+    },
+    "20261009-merged-rules": {
+      "run_id": "9c3a2fa293304f42817dd2d96758c351",
+      "baseline_commit": "c2b2f4c59b5538cbef11a7b762fb7c9816cf654c",
+      "mode": "rules",
+      "configured_model_name": "deepseek-flash",
+      "model_attempted_requests_including_history": 0,
+      "model_adopted_requests_including_history": 0,
+      "source_stable": true,
+      "planned_cases": 7,
+      "captured_cases": 7,
+      "skipped_cases": 0,
+      "errors": 0,
+      "automatic_checks_passed": 7,
+      "cases_needing_attention": [],
+      "timing_by_kind": {
+        "assessment": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "excerpt": {
+          "captured": 7,
+          "errors": 0,
+          "p50_seconds": 0.1517,
+          "p95_seconds_nearest_rank": 1.118,
+          "http_at_most_5s": 7,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "qa": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "relations": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "reviewed_graph": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        }
+      },
+      "independent_qa_reviewed": 0,
+      "qa_executed_denominator": 7,
+      "independent_qa_accuracy": null,
+      "qa_by_stratum": {
+        "known_topic_or_audit_regression": {
+          "executed": 7,
+          "independent_accuracy": null
+        }
+      },
+      "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+      "independent_enrichment_tp": null,
+      "independent_enrichment_fp": null,
+      "independent_enrichment_fn": null,
+      "independent_enrichment_precision": null,
+      "independent_enrichment_recall": null,
+      "competition_passed": null,
+      "dataset_sha256": "f8506539f2b21aef7d14e4c629222fd9d9a4cbd913f275c00b9b620ec23e3bd5",
+      "scope": "主服务摘录规则回归；独立团队情报服务不在题单范围"
     }
   },
   "extra_format_diagnostic": {
@@ -262,5 +337,15 @@
       "status": "scope_gap",
       "note": "通用新文章跨文档推理仍未实现"
     }
-  ]
+  ],
+  "team_merge_checks": {
+    "merged_remote_commit": "d5b0b4c",
+    "merge_commit": "c2b2f4c59b5538cbef11a7b762fb7c9816cf654c",
+    "task_c_unit_tests_passed": 239,
+    "team_adapter_tests_passed": 3,
+    "offline_workflow_tests_passed": 1,
+    "dependency_added_to_local_venv": "python-dotenv==1.2.4",
+    "initial_offline_failure": "缺少 dotenv，补装后 Windows 子进程日志出现 GBK 解码错误，使用 PYTHONUTF8=1 重跑通过",
+    "scope": "临时合成数据、离线规则和本机 HTTP，不是全队独立验收或真实联网采集"
+  }
 }
