@@ -1,4 +1,4 @@
-from collectors.intelligence import IntelligenceCollector
+from collectors.intelligence import IntelligenceCollector, team_base_url
 from collectors.nvd import NVDCollector
 from collectors.osv import OSVCollector
 
@@ -25,7 +25,7 @@ def run(keyword="ollama"):
     osv_items, osv_step = _safe("OSV", lambda: OSVCollector(keyword=keyword).collect())
     team_items, team_step = _safe(
         "团队情报服务",
-        lambda: IntelligenceCollector(keyword=keyword).collect(),
+        lambda: IntelligenceCollector(keyword=keyword, base_url=team_base_url()).collect(),
     )
     return {
         "items": nvd_items + osv_items + team_items,

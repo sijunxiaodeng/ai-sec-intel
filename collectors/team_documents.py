@@ -1,11 +1,15 @@
 """Read B's document API as stored summary fields, never as original full text."""
 import ipaddress
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
 
 from enrichment.documents import canonical, digest, now
+
+# Local demo / compose hosts only (never arbitrary remote).
+_ALLOWED_TEAM_HOSTS = frozenset({"127.0.0.1", "localhost", "b-api"})
 
 TEAM_MEDIA = "application/vnd.ai-sec-intel.team-document+json"
 TYPE_MAP = {"security_blog": "research_article", "security_community": "research_article",
@@ -62,13 +66,24 @@ def extract_summary(response):
 
 
 class TeamDocumentCollector:
-    def __init__(self, base_url="http://127.0.0.1:8765", timeout=10, max_documents=30):
+    def __init__(self, base_url=None, timeout=10, max_documents=30):
         if type(max_documents) is not int or not 1 <= max_documents <= 200:
             raise ValueError("每轮团队资料数量必须为 1 到 200")
+        base_url = (base_url or os.environ.get("TEAM_INTEL_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
         parsed = urllib.parse.urlsplit(base_url)
-        if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.username or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
-            raise ValueError("团队资料 API 使用本机 127.0.0.1 的 HTTP 服务")
-        self.base_url, self.timeout, self.max_documents = base_url.rstrip("/"), timeout, max_documents
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname not in _ALLOWED_TEAM_HOSTS
+            or parsed.username
+            or parsed.password
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("团队资料 API 仅允许本机或 compose 服务名 b-api 的 HTTP 地址")
+        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in (None, 8765):
+            raise ValueError("团队资料 API 本机端口必须为 8765")
+        self.base_url, self.timeout, self.max_documents = base_url, timeout, max_documents
 
     def get(self, path):
         class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -1,0 +1,88 @@
+# Unified demo: B API :8765 + main app :8023 on a shared network.
+# One-click: ./scripts/demo-up.sh
+# Smoke:     ./scripts/demo-smoke.sh
+#
+# Host ports are fixed (127.0.0.1 only). Do not change casually.
+
+name: ai-sec-intel-demo
+
+services:
+  b-seed:
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile
+    image: ai-sec-intel-b:demo
+    user: "10001:10001"
+    volumes:
+      - b-data:/app/data
+    command: ["python", "seed_demo_db.py", "--force"]
+    restart: "no"
+
+  b-api:
+    image: ai-sec-intel-b:demo
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      b-seed:
+        condition: service_completed_successfully
+    environment:
+      INTELLIGENCE_DB_PATH: /app/data/intelligence.db
+      PYTHONUTF8: "1"
+    volumes:
+      - b-data:/app/data
+    ports:
+      - "127.0.0.1:8765:8765"
+    command: ["python", "run_intelligence_api_v6.py", "--host", "0.0.0.0", "--port", "8765"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,json; r=urllib.request.urlopen('http://127.0.0.1:8765/api/intelligence/health', timeout=5); assert json.load(r).get('database_available') is True",
+        ]
+      interval: 15s
+      timeout: 8s
+      start_period: 20s
+      retries: 5
+
+  main-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-sec-intel-main:demo
+    restart: unless-stopped
+    init: true
+    depends_on:
+      b-api:
+        condition: service_healthy
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8023"
+      TEAM_INTEL_BASE_URL: http://b-api:8765
+      # Stable demo default: skip long network ingest on every collect.
+      AUTO_INGEST_ON_COLLECT: ${AUTO_INGEST_ON_COLLECT:-0}
+      PYTHONUTF8: "1"
+    volumes:
+      - main-data:/app/data
+    ports:
+      - "127.0.0.1:8023:8023"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8023/api/overview', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 8s
+      start_period: 25s
+      retries: 5
+
+volumes:
+  b-data:
+  main-data:

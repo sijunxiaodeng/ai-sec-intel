@@ -4,18 +4,25 @@ A can register this alongside NVD/OSV without importing B's overlapping package
 names or accessing its SQLite internals. No orchestrator changes are made here.
 """
 import json
+import os
 import urllib.parse
 import urllib.request
 
 from models import intelligence_item
 
+DEFAULT_TEAM_BASE_URL = "http://127.0.0.1:8765"
+
+
+def team_base_url(override=""):
+    return (override or os.environ.get("TEAM_INTEL_BASE_URL") or DEFAULT_TEAM_BASE_URL).rstrip("/")
+
 
 class IntelligenceCollector:
-    def __init__(self, keyword="", base_url="http://127.0.0.1:8765", timeout=30, max_pages=100):
+    def __init__(self, keyword="", base_url=None, timeout=30, max_pages=100):
         if max_pages <= 0:
             raise ValueError("max_pages must be positive")
         self.keyword = keyword
-        self.base_url = base_url.rstrip("/")
+        self.base_url = team_base_url(base_url or "")
         self.timeout = timeout
         self.max_pages = max_pages
 
