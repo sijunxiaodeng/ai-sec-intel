@@ -122,7 +122,25 @@ def item_detail(cve_id: str):
     payload["documents"] = document_status(cve_id.upper())
     from enrichment.assessment import assess
     payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+    payload["related_guidance"] = (record["item"].get("raw_data") or {}).get("related_guidance")
     return payload
+
+
+@app.get("/api/guidance/{cve_id}")
+def related_guidance(cve_id: str):
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="请先收录这条漏洞")
+    return record["item"].get("raw_data", {}).get("related_guidance") or {"status": "empty", "facets": {}, "evidence": []}
+
+
+@app.post("/api/guidance/{cve_id}/refresh")
+def refresh_guidance(cve_id: str):
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="请先收录这条漏洞")
+    from enrichment.guidance import refresh
+    return refresh(record)
 
 
 @app.get("/api/assessment/{cve_id}")

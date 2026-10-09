@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-10-09T03:53:54.935099+00:00",
+  "purpose": "Development checks only; not independent competition accuracy",
+  "source_reports": [
+    {
+      "cve_id": "CVE-2024-37032",
+      "product": "ollama",
+      "status": "ok",
+      "sources": [
+        {
+          "document_id": "DOC-67b1521db4fecbcb",
+          "title": "Probllama: Ollama Remote Code Execution Vulnerability (CVE-2024-37032) – Overview and Mitigations | Wiz Blog",
+          "url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+          "publisher": "Wiz Research",
+          "published_at": "2024-06-24",
+          "retrieved_at": "2026-10-08T12:44:18.356818+00:00",
+          "source_response_sha256": "0a3c0fa93de4a8c135f10028f601e96de5b3756e463966525f1892790e3baa9b",
+          "relation": "identifier_mention",
+          "eligible": true,
+          "reason": "题名指向目标 CVE、正文未出现其他 CVE；仅提取包含目标产品的完整句子，作为研究方描述/建议",
+          "retained_previous": false
+        }
+      ],
+      "vendor_patched_ranges": [],
+      "facet_counts": {
+        "versions": 0,
+        "remediation": 4,
+        "conditions": 3
+      },
+      "structured_facts": [
+        {
+          "text": "研究方升级建议（Wiz Research）：ollama 版本 >=0.1.34。",
+          "citation_ids": [
+            "CVE-2024-37032/LINK-701c622fe41cac07f203"
+          ]
+        }
+      ],
+      "limitations": [
+        "来源声明不等于本项目验证；研究建议不能转称厂商确认。",
+        "正文按规则抽取，有遗漏与语义误判可能；未完成全部自由文本语义审核。"
+      ]
+    },
+    {
+      "cve_id": "CVE-2026-105753",
+      "product": "vllm",
+      "status": "ok",
+      "sources": [
+        {
+          "document_id": "DOC-16ca6749d94cc1a1",
+          "title": "Mirrored multimodal IPC caches desync after a rejected request — a later request reusing the same media hash trips a receiver assertion in the engine core",
+          "url": "https://github.com/vllm-project/vllm/security/advisories/GHSA-ph3r-5jfg-f84f",
+          "publisher": "vLLM 项目安全公告",
+          "published_at": "2026-09-28T07:37:56Z",
+          "retrieved_at": "2026-10-09T03:45:02.492666+00:00",
+          "source_response_sha256": "e7ff6da5c079a3dca6f061b767e8960d2c4525a809daf3bc21af5dbcd8c787a4",
+          "relation": "publisher_declared_identifier",
+          "eligible": true,
+          "reason": "受信项目公告的标识字段明确归属唯一 CVE；版本逐条匹配包名",
+          "retained_previous": false
+        }
+      ],
+      "vendor_patched_ranges": [
+        {
+          "package": {
+            "ecosystem": "pip",
+            "name": "vllm"
+          },
+          "range": ">= 0.28.0",
+          "url": "https://github.com/vllm-project/vllm/security/advisories/GHSA-ph3r-5jfg-f84f"
+        }
+      ],
+      "facet_counts": {
+        "versions": 1,
+        "remediation": 2,
+        "conditions": 1
+      },
+      "structured_facts": [
+        {
+          "text": "项目公告字段（vLLM 项目安全公告）：包 vllm；受影响版本范围：< 0.28.0。",
+          "citation_ids": [
+            "CVE-2026-105753/LINK-0dcfe1acef8c1c40406d"
+          ]
+        },
+        {
+          "text": "项目公告声明（vLLM 项目安全公告）：包 vllm；修复版本范围：>= 0.28.0。",
+          "citation_ids": [
+            "CVE-2026-105753/LINK-026d14023d6dc4feed17"
+          ]
+        }
+      ],
+      "limitations": [
+        "来源声明不等于本项目验证；研究建议不能转称厂商确认。",
+        "正文按规则抽取，有遗漏与语义误判可能；未完成全部自由文本语义审核。"
+      ]
+    }
+  ],
+  "library_documents": 11,
+  "unit_tests": {
+    "total": 141,
+    "new": 22,
+    "passed": 141
+  },
+  "frontend_syntax": "passed",
+  "live_model": {
+    "name": "deepseek-flash",
+    "attempted": 3,
+    "accepted": 2,
+    "fallback": 1,
+    "counted_latency_scope": "Python qa_agent.run only, not browser HTTP",
+    "checks": [
+      {
+        "question": "CVE-2024-37032 应该升级到哪个版本？有哪些缓解建议？",
+        "elapsed_seconds": 2.93,
+        "model_attempted": true,
+        "used_model": true,
+        "verifier_passed": true,
+        "required_fields_issues": [],
+        "citation_ids": [
+          "CVE-2024-37032/AUTO-389006d6608a6fde-676ef8e1de0b",
+          "CVE-2024-37032/AUTO-67b1521db4fecbcb-067079a32d33",
+          "CVE-2024-37032/AUTO-a1e925186f296c8d-92bc8b656d5d",
+          "CVE-2024-37032/AUTO-389006d6608a6fde-da71e3b1d05e",
+          "CVE-2024-37032/AUTO-a1e925186f296c8d-fe542fc055cb",
+          "CVE-2024-37032/LINK-701c622fe41cac07f203",
+          "CVE-2024-37032/LINK-1f4e38458bbe440b9220",
+          "CVE-2024-37032/LINK-d8a742f60288238eff33",
+          "CVE-2024-37032/LINK-08ae2cc55a81f1b38222"
+        ],
+        "steps": [
+          {
+            "role": "问答",
+            "action": "检索知识库",
+            "detail": "召回 1 条情报；BM25 + 本地中文嵌入 + RRF"
+          },
+          {
+            "role": "问答",
+            "action": "调用大模型",
+            "detail": "只允许使用上面召回的证据"
+          }
+        ]
+      },
+      {
+        "question": "CVE-2026-105753 项目公告中受影响版本和修复版本范围分别是什么？",
+        "elapsed_seconds": 0.987,
+        "model_attempted": true,
+        "used_model": false,
+        "verifier_passed": true,
+        "required_fields_issues": [],
+        "citation_ids": [
+          "CVE-2026-105753/AUTO-2e0a8c1cc1c19e60-9b6cf64ae191",
+          "CVE-2026-105753/AUTO-2e0a8c1cc1c19e60-54573c736b12",
+          "CVE-2026-105753/AUTO-2e0a8c1cc1c19e60-40d0ea53b422",
+          "CVE-2026-105753/LINK-0dcfe1acef8c1c40406d",
+          "CVE-2026-105753/LINK-026d14023d6dc4feed17",
+          "CVE-2026-105753/LINK-dd977035c60bc570b032"
+        ],
+        "steps": [
+          {
+            "role": "问答",
+            "action": "检索知识库",
+            "detail": "召回 1 条情报；BM25 + 本地中文嵌入 + RRF"
+          },
+          {
+            "role": "问答",
+            "action": "模型调用或输出处理失败",
+            "detail": "已改用原文摘录。关联来源事实须保留完整格式、来源归属和范围；改写未完成语义核验"
+          }
+        ]
+      },
+      {
+        "question": "CVE-2024-37032 所需权限是什么？",
+        "elapsed_seconds": 0.864,
+        "model_attempted": true,
+        "used_model": true,
+        "verifier_passed": true,
+        "required_fields_issues": [],
+        "citation_ids": [
+          "CVE-2024-37032/AUTO-389006d6608a6fde-aeb59bce1e0e",
+          "CVE-2024-37032/AUTO-67b1521db4fecbcb-067079a32d33",
+          "CVE-2024-37032/AUTO-389006d6608a6fde-43300e86bae8"
+        ],
+        "steps": [
+          {
+            "role": "问答",
+            "action": "检索知识库",
+            "detail": "召回 1 条情报；BM25 + 本地中文嵌入 + RRF"
+          },
+          {
+            "role": "问答",
+            "action": "调用大模型",
+            "detail": "只允许使用上面召回的证据"
+          }
+        ]
+      }
+    ]
+  },
+  "independent_accuracy": null,
+  "enrichment_precision": null,
+  "enrichment_recall": null,
+  "source_files_sha256": {
+    "enrichment/guidance.py": "721721b0098a28611ff511d4c354e1df672c7976825a0fe515e7c8253f7cd347",
+    "rag/library.py": "73de3e3b7784a4af8c1ec44a9fc3d99e3886d9fd8e74b54a52b122117f92bf03",
+    "rag/retrieve.py": "2fc0c6627385a7383649ce1b0c28a44666f34384ff4f8159a92b72b9d7cf0e6f",
+    "agents/qa_agent.py": "a01000c82ee6501c70742e8ab06fee153a958ed164ea022a05ff38d00212140e",
+    "agents/citation_guard.py": "88c732267885d378a7863fbdcfef573732232c26cc07bf691825809f68d31424",
+    "agents/verifier_agent.py": "4b425a7a70d42575c78fc7f256fa6380183d79d0fa3f056709bc60af583c1b9c",
+    "api/app.py": "522e55e7cbfbdc0a60fbee935b54c8b74fb04804cfdd79ff0502570907a60164",
+    "web/app.js": "26ce4496ea676e57593b3d2566ea0b32dc158bc366a41aad815e9a63b8af871f",
+    "questions/test_guidance.py": "0453477803e04151586eec96de700b42f8077e70192915fc533bd58c08e17deb"
+  },
+  "browser_checks": {
+    "checked_at": "2026-10-09T03:56:03.240244+00:00",
+    "ollama_research_attribution_and_expanded_original": "passed",
+    "vllm_advisory_ranges": "passed",
+    "vllm_explicit_refresh": "passed",
+    "api_read_checks": [
+      {
+        "cve_id": "CVE-2024-37032",
+        "http_status": 200,
+        "status": "ok",
+        "evidence_count": 7
+      },
+      {
+        "cve_id": "CVE-2026-105753",
+        "http_status": 200,
+        "status": "ok",
+        "evidence_count": 4
+      }
+    ]
+  }
+}

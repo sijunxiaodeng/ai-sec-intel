@@ -9,6 +9,7 @@ var titles = {
 };
 
 var prompts = [
+  "CVE-2024-37032 应该升级到哪个版本？有哪些缓解建议？",
   "CVE-2024-37032 的受影响版本是什么，如何修复？有没有修复记录？",
   "CVE-2025-0312 的风险有多高？影响哪个版本？",
   "ollama 相关漏洞里，哪些写了受影响版本？",
@@ -229,6 +230,45 @@ function renderAssessment(panel, report) {
   if (report.source) add(section, "p", "meta", "报告依据获取于 " + dateText(report.source.retrieved_at) + " 的来源快照。");
 }
 
+function renderGuidance(panel, report) {
+  var section = add(panel, "div", "guidance");
+  add(section, "h3", "", "关联公告与研究建议");
+  if (!report || report.status !== "ok") {
+    add(section, "p", "meta", "尚无满足关联规则的版本或建议。可点击下方「补充关联建议」读取已知参考来源。");
+    return;
+  }
+  var labels = {versions: "公告版本字段", remediation: "修复与缓解", conditions: "文章中的条件描述"};
+  Object.keys(labels).forEach(function (topic) {
+    var rows = (report.facets || {})[topic] || [];
+    if (!rows.length) return;
+    add(section, "h4", "", labels[topic]);
+    rows.forEach(function (row) {
+      var block = add(section, "div", "guidance-fact");
+      add(block, "span", "tag", row.authority === "vendor_statement" ? "项目方公告声明" : "研究方建议 / 描述");
+      add(block, "span", "meta", " · " + row.publisher);
+      var value = row.structured_value || {}, text = row.text;
+      if (value.vulnerable_version_range) text = value.package.name + " · 受影响版本范围：" + value.vulnerable_version_range;
+      if (value.patched_versions) text = value.package.name + " · 公告修复版本范围：" + value.patched_versions;
+      if (value.recommended_version_range) text = value.product + " · 研究方建议升级到：" + value.recommended_version_range;
+      add(block, "p", "desc", text);
+      var detail = add(block, "details", "");
+      add(detail, "summary", "meta", "查看原文与引用");
+      (row.evidence_ids || []).forEach(function (id) {
+        var chunk = (report.evidence || []).find(function (e) { return e.citation_id === id; });
+        if (!chunk) return;
+        add(detail, "p", "desc", chunk.text);
+        var link = add(detail, "a", "meta", id); link.href = chunk.url; link.target = "_blank"; link.rel = "noopener";
+        add(detail, "p", "meta", chunk.locator + " · 获取于 " + dateText(chunk.retrieved_at));
+      });
+    });
+  });
+  (report.sources || []).filter(function (r) { return r.retained_previous; }).forEach(function (r) {
+    add(section, "p", "meta", "来源本次更新失败，沿用获取于 " + dateText(r.retrieved_at) + " 的成功存档：" + r.publisher);
+  });
+  add(section, "p", "meta", "本项目未测试这些修复或缓解措施；文章描述中的部署条件需结合实际配置核对。");
+  (report.limitations || []).forEach(function (text) { add(section, "p", "meta", text); });
+}
+
 function renderDetail(item) {
   var panel = $("enrich-detail");
   clear(panel);
@@ -251,6 +291,19 @@ function renderDetail(item) {
     add(field, "b", "", pair[1]);
   });
   renderAssessment(panel, item.assessment);
+  renderGuidance(panel, item.related_guidance);
+  var guidanceButton = add(panel, "button", "ghost", "补充关联建议");
+  guidanceButton.type = "button";
+  guidanceButton.addEventListener("click", function () {
+    guidanceButton.disabled = true;
+    guidanceButton.textContent = "正在读取公告与研究来源…";
+    api("/api/guidance/" + encodeURIComponent(item.cve_id) + "/refresh", {method: "POST"}).then(function (data) {
+      var previous = panel.querySelector(".guidance");
+      renderGuidance(panel, data.guidance);
+      if (previous) previous.replaceWith(panel.lastElementChild);
+      guidanceButton.textContent = "本次成功 " + data.ok + "/" + data.attempted + " 个关联来源";
+    }).catch(showError).then(function () { guidanceButton.disabled = false; });
+  });
   var assetButton = add(panel, "button", "ghost", "查看登记资产影响");
   assetButton.type = "button";
   assetButton.addEventListener("click", function () {

@@ -1,6 +1,7 @@
 """保持整条情报返回格式，附加片段；样例库独立于监测库。"""
 
 import copy
+from enrichment.guidance import library_for, report as guidance_report
 from database.store import load_kb
 from rag.answer import TOPIC_WORDS
 from rag.evidence import CVE, DEFAULT_DB, _tokens, load_records
@@ -22,8 +23,16 @@ def knowledge_records(db_path=DEFAULT_DB):
     return enrich_view(records, db_path)
 
 
-def get_record(cve_id, db_path=DEFAULT_DB):
-    return next((row for row in knowledge_records(db_path) if row["item"]["cve_id"].upper() == cve_id.upper()), None)
+def _attach_guidance(record, db_path, library_db=None):
+    library = library_db if library_db is not None else library_for(db_path)
+    if library is not None:
+        record["item"].setdefault("raw_data", {})["related_guidance"] = guidance_report(record["item"]["cve_id"], record["item"].get("product", ""), library)
+    return record
+
+
+def get_record(cve_id, db_path=DEFAULT_DB, *, library_db=None):
+    record = next((row for row in knowledge_records(db_path) if row["item"]["cve_id"].upper() == cve_id.upper()), None)
+    return _attach_guidance(record, db_path, library_db) if record else None
 
 
 def _blob(record):
@@ -31,7 +40,7 @@ def _blob(record):
     return " ".join(str(item.get(key) or "") for key in ("cve_id", "title", "description", "product", "affected", "source"))
 
 
-def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB):
+def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB, library_db=None):
     if top_k <= 0:
         return []
     records = knowledge_records(db_path)
@@ -85,4 +94,4 @@ def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB):
             record["retrieval_notice"] = "；".join(sorted(notices))
             ranked.append((score, record))
     ranked.sort(key=lambda pair: (-pair[0], pair[1]["item"]["cve_id"]))
-    return [row for _, row in ranked[:top_k]]
+    return [_attach_guidance(row, db_path, library_db) for _, row in ranked[:top_k]]

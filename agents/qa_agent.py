@@ -14,6 +14,7 @@ def _local_notes(record, question):
     report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
     topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
     notes = []
+    guidance = record.get("item", {}).get("raw_data", {}).get("related_guidance") or {}
     if "poc" in topics and report.get("poc_candidates"):
         if all(row.get("validation") == "not_run" for row in report["poc_candidates"]):
             notes.append("系统记录：本项目未运行复现，不能认定已验证可用。")
@@ -21,17 +22,19 @@ def _local_notes(record, question):
         if report.get("fix_records"):
             if all(row.get("validation", "not_tested") == "not_tested" for row in report["fix_records"]):
                 notes.append("系统记录：本项目未测试修复效果。")
-        else:
+        elif not guidance.get("facets", {}).get("remediation"):
             notes.append("系统记录：当前知识库尚未收录可用的修复记录；不能据此断言厂商没有修复。")
         if report.get("affected_ranges"):
             notes.append("评估说明：受影响版本范围本身不能单独证明修复版本；修复版本需核对厂商公告。")
+    if "remediation" in topics and guidance.get("facets", {}).get("remediation") and "系统记录：本项目未测试修复效果。" not in notes:
+        notes.append("系统记录：本项目未测试上述修复或缓解措施的效果。")
     return notes
 
 
 def _assessment_lines(record, question):
     report = (record["item"].get("raw_data") or {}).get("automatic_assessment")
     if not report or report["status"] not in ("ok", "partial"):
-        return []
+        return _guidance_lines(record, question)
     topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
     lines, ids = [], set()
 
@@ -78,6 +81,23 @@ def _assessment_lines(record, question):
             if chunk["citation_id"] in ids and chunk["citation_id"] not in known:
                 record.setdefault("evidence_chunks", []).append(chunk)
                 known.add(chunk["citation_id"])
+    return lines + _guidance_lines(record, question)
+
+
+def _guidance_lines(record, question):
+    from enrichment.guidance import formatted_facts
+    guidance = (record["item"].get("raw_data") or {}).get("related_guidance") or {}
+    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    if "conditions" in topics and not any(word in question for word in ("利用条件", "攻击条件", "暴露", "部署", "成因", "原理")):
+        topics.discard("conditions")
+    lines = []
+    known = {row["citation_id"] for row in record.get("evidence_chunks", [])}
+    for fact in formatted_facts(guidance, topics):
+        lines.append(fact["text"] + " " + " ".join("[%s]" % eid for eid in fact["evidence_ids"]))
+        for chunk in fact["chunks"]:
+            if chunk["citation_id"] not in known:
+                record.setdefault("evidence_chunks", []).append(chunk)
+                known.add(chunk["citation_id"])
     return lines
 
 
@@ -109,7 +129,7 @@ def _evidence_text(records, question=""):
             blocks.append("[%s] %s | 来源 %s | 定位 %s | %s" % (
                 chunk["citation_id"], chunk["text"], chunk["url"], chunk["locator"], chunk["text_kind"]))
         report = (item.get("raw_data") or {}).get("automatic_assessment")
-        if report:
+        if report or item.get("raw_data", {}).get("related_guidance"):
             blocks.append("已校验来源字段及向量解释（照抄其引用标识）：\n" + "\n".join(_assessment_lines(record, question)))
             blocks.append("系统单独追加的状态说明（不是外部证据，不输出到 claims）：\n" + "\n".join(_local_notes(record, question)))
     return "\n".join(blocks)
@@ -163,7 +183,7 @@ def _extractive(records, question="", model_attempted=False):
             report = item.get("raw_data", {}).get("automatic_assessment") or {}
             if not any(word in question for word in ("文章", "原文", "分析", "原理", "成因")):
                 for topic, key in (("conditions", "attack_conditions"), ("impact", "technical_impact"), ("remediation", "fix_records")):
-                    if report.get(key):
+                    if report.get(key) or item.get("raw_data", {}).get("related_guidance", {}).get("facets", {}).get(topic):
                         extras.discard(topic)
             lines.extend("来源补充原文：%s [%s]" % (chunk["text"], chunk["citation_id"]) for chunk in record.get("evidence_chunks") or []
                          if chunk.get("relation_type") in ("direct_analysis", "poc_candidate") and extras & set(chunk.get("topics") or []))
@@ -256,7 +276,8 @@ def _render_model_json(raw, records):
     return "\n".join(lines)
 
 
-def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
+def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, library_db=None):
+    options = {"library_db": library_db} if library_db is not None else {}
     requested = list(dict.fromkeys(value.upper() for value in (cve_ids if cve_ids is not None else CVE.findall(question))))
     if not requested and cve_id:
         requested = [cve_id.upper()]
@@ -271,12 +292,12 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
         records = []
         query = CVE.sub("", question)
         for target in requested:
-            found = search(query + " " + target, top_k=1, cve_id=target, db_path=db_path)
+            found = search(query + " " + target, top_k=1, cve_id=target, db_path=db_path, **options)
             if not found:
                 return {"answer": "当前知识库缺少部分指定漏洞的对应情报，无法完成本轮回答，请先收录并补充资料。", "evidence": [], "used_model": False, "steps": []}
             records.extend(found)
     else:
-        records = search(question, top_k=top_k, db_path=db_path)
+        records = search(question, top_k=top_k, db_path=db_path, **options)
     if len(requested) > 1:
         # 比较逐条展示 CVSS、范围与修复证据，不让不同实体争抢同一个 top_k。
         detail_question = question + " CVSS 评分 受影响版本 修复 利用条件 技术影响"
@@ -325,6 +346,7 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB):
                 "直接回答本轮问题，使用简短段落；不要重复整个证据，不输出 Markdown 表格。"
                 "只回答本轮所问的内容，不补充未询问的 SSVC、修复时间线或资产说明；相同含义的提醒只说一次。"
                 "逐条选择真正支持本句的字段：SSVC 不能支持漏洞成因，版本配置不能支持评分或项目状态。"
+                "关联公告和研究建议必须照抄已格式化的事实行，不能省略来源归属、改写范围、翻译或升级为已验证结论；其余内容按既有规则回答。"
                 "项目执行状态、知识库缺失状态与修复版本边界由系统单独追加，不输出到 claims，也不要替这些说明附外部引用。"
                 "询问利用条件时须覆盖给定的攻击途径、复杂度、附加攻击要求、权限和用户交互，并明确这是 CVSS 向量解释。"
                 "仅询问权限时回答权限即可。不要把评分向量解释说成已验证的具体部署条件。"

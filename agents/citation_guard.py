@@ -53,6 +53,14 @@ def claim_issues(text, chunks):
     plain = CITATION.sub("", text)
     if LOCAL_STATE.search(plain):
         return ["项目执行或收录状态不能用外部文献引用证明，须由系统单独说明"]
+    linked = [chunk for chunk in chunks if chunk.get("relation_type") == "associated_guidance"]
+    if linked:
+        allowed = {CITATION.sub("", chunk.get("allowed_claim", "")).strip() for chunk in linked}
+        if allowed != {plain.strip()} or "" in allowed:
+            return ["关联来源事实须保留完整格式、来源归属和范围；改写未完成语义核验"]
+        if len(chunks) != len(linked):
+            return ["关联来源事实不能混用其他字段引用"]
+        return []
     # 链接路径里的 rce/digest 等词不是本句额外作出的成因断言。
     semantic_text = re.sub(r"https?://[^\s。；，<>]+", "", plain)
     categories = {kind for kind, pattern in PATTERNS.items() if re.search(pattern, semantic_text, re.I)}

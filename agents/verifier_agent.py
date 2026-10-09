@@ -33,6 +33,20 @@ def required_fields(answer, evidence, question):
     q = question.lower()
     issues = []
     for record in evidence:
+        from enrichment.guidance import formatted_facts
+        from rag.answer import TOPIC_WORDS
+        guidance = record.get("item", {}).get("raw_data", {}).get("related_guidance") or {}
+        topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in q for word in words)}
+        if "conditions" in topics and not any(w in q for w in ("利用条件", "攻击条件", "暴露", "部署", "成因", "原理")):
+            topics.discard("conditions")
+        facts = formatted_facts(guidance, topics)
+        for fact in facts:
+            if fact["chunks"][0].get("structured_value") and fact["text"].lower() not in plain:
+                issues.append("遗漏关联来源的版本字段或研究方升级建议")
+        for topic in topics & {"conditions", "remediation"}:
+            candidates = [f for f in facts if f["chunks"][0]["guidance_topic"] == topic]
+            if candidates and not any(f["text"].lower() in plain for f in candidates):
+                issues.append("遗漏关联来源的%s信息" % ("条件" if topic == "conditions" else "修复建议"))
         report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
         metric = report.get("cvss")
         if not metric:

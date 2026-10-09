@@ -1,6 +1,7 @@
 """通用 AI 安全资料库：公告/文章/论文独立于 CVE 卡片，原文仅保存在本机。"""
 
 import argparse
+from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -110,7 +111,7 @@ def _extract(candidate, response):
                             for cve in sorted(set(mentions) | declared)]
     doc["topic_tags"] = [tag for tag, (pattern, _) in TOPICS.items() if re.search(pattern, text, re.I)]
     doc.update({"schema_version": 1, "document_id": _id(url), "source_id": digest(url)[:16],
-                "url": url, "fetch_url": response["url"], "document_type": kind,
+                "url": url, "fetch_url": response["url"], "document_type": kind, "content_type": response.get("content_type", "text/html"),
                 "source_category": CATEGORY[kind], "publisher": candidate["source_name"],
                 "discovery_source_id": candidate["source_id"], "discovery": candidate.get("discovery", "historical_seed"),
                 "discovered_at": candidate.get("discovered_at") or now(), "retrieved_at": response.get("retrieved_at") or now(),
@@ -156,9 +157,13 @@ def ingest_document(candidate, db_path=LIBRARY_DB, fetcher=fetch):
     except Exception as exc:
         attempt = {"document_id": doc_id, "url": candidate["url"], "document_type": candidate["document_type"],
                    "publisher": candidate["source_name"], "retrieved_at": now(), "status": "error", "error": str(exc)[:240]}
+        attempt["invalidated_previous"] = str(exc) == "公告未公开或已经撤回"
         with _connection(path) as conn:
             _schema(conn)
             old = conn.execute("SELECT payload FROM library_documents WHERE document_id=?", (doc_id,)).fetchone()
+            last = conn.execute("SELECT payload FROM library_attempts WHERE document_id=?", (doc_id,)).fetchone()
+            if last and json.loads(last[0]).get("invalidated_previous"):
+                attempt["invalidated_previous"] = True  # 超时不能恢复已经确认撤回的旧公告。
             attempt["retained_previous"] = bool(old)
             conn.execute("INSERT OR REPLACE INTO library_attempts VALUES (?,?)", (doc_id, json.dumps(attempt, ensure_ascii=False)))
         return attempt
@@ -188,11 +193,51 @@ def _valid_evidence(db_path):
         return []
     with _connection(db_path) as conn:
         _schema(conn)
+        invalidated = {r["document_id"] for (payload,) in conn.execute("SELECT payload FROM library_attempts")
+                       if (r := json.loads(payload)).get("invalidated_previous")}
         good = {doc_id: sha for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")
-                if hashlib.sha256(body).hexdigest() == sha}
+                if doc_id not in invalidated and hashlib.sha256(body).hexdigest() == sha}
         rows = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM evidence")]
     return [row for row in rows if good.get(row["document_id"]) == row["source_response_sha256"]
             and digest(row["text"]) == row["text_sha256"]]
+
+
+@lru_cache(maxsize=24)
+def _reparse(url, kind, publisher, discovery_source_id, body, fetch_url_value, retrieved_at, content_type):
+    candidate = {"url": url, "document_type": kind, "source_name": publisher, "source_id": discovery_source_id}
+    response = {"body": body, "content_type": "application/json" if kind == "vendor_advisory" else content_type,
+                "url": fetch_url_value, "retrieved_at": retrieved_at}
+    return _extract(candidate, response)
+
+
+def verified_sources(db_path=LIBRARY_DB):
+    """重解析校验后的快照；关联报告不把可修改的索引标签当作原始事实。"""
+    if not Path(db_path).exists():
+        return []
+    with _connection(db_path) as conn:
+        _schema(conn)
+        docs = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM library_documents")]
+        snapshots = {doc_id: (sha, body) for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")}
+        attempts = {r["document_id"]: r for (payload,) in conn.execute("SELECT payload FROM library_attempts") if (r := json.loads(payload))}
+    results = []
+    for row in docs:
+        if row["document_type"] not in ("vendor_advisory", "research_article") or attempts.get(row["document_id"], {}).get("invalidated_previous"):
+            continue
+        snapshot = snapshots.get(row["document_id"])
+        if not snapshot or row["document_id"] != _id(row["url"]):
+            continue
+        sha, body = snapshot
+        if sha != row["source_response_sha256"] or hashlib.sha256(body).hexdigest() != sha:
+            continue
+        try:
+            doc, chunks = _reparse(row["url"], row["document_type"], row["publisher"], row["discovery_source_id"], body, row["fetch_url"], row["retrieved_at"], row.get("content_type", "text/html"))
+            import copy
+            results.append({"document": copy.deepcopy(doc), "chunks": copy.deepcopy(chunks), "body": body,
+                            "latest_attempt_status": attempts.get(row["document_id"], {}).get("status"),
+                            "retained_previous": attempts.get(row["document_id"], {}).get("status") == "error"})
+        except (ValueError, TypeError, KeyError):
+            continue
+    return results
 
 
 def detail(document_id, db_path=LIBRARY_DB):
