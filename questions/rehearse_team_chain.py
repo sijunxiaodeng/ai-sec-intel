@@ -61,8 +61,16 @@ def inspect_state():
     from rag.evidence import DEFAULT_DB, _all_evidence, _connection
     with _connection(DEFAULT_DB) as connection:
         snapshots = connection.execute("SELECT digest, body FROM source_snapshots").fetchall()
+    from rag.library import LIBRARY_DB
+    library_hashes_ok = False
+    if LIBRARY_DB.exists():
+        with _connection(LIBRARY_DB) as connection:
+            library_snapshots = connection.execute("SELECT digest,body FROM library_snapshots").fetchall()
+        library_hashes_ok = bool(library_snapshots) and all(
+            digest == hashlib.sha256(body).hexdigest() for digest, body in library_snapshots)
     return {"documents": document_status(CVE), "mode": search(CVE + " CVSS")[0]["retrieval_mode"],
             "ids": [row["evidence_id"] for row in _all_evidence(DEFAULT_DB)],
+            "library_hashes_ok": library_hashes_ok,
             "snapshots_match_hashes": bool(snapshots) and all(
                 digest == hashlib.sha256(body).hexdigest() for digest, body in snapshots)}
 
@@ -78,6 +86,19 @@ def seed_team(db):
         url=None, published_at="2026-10-08T01:00:00Z", modified_at="2026-10-08T02:00:00Z",
         severity=None, raw_data=fixture(),
     )])
+    from collectors.documents import KnowledgeDocument, make_document_id
+    from storage.document_store import SQLiteDocumentStore
+    store = SQLiteDocumentStore(db)
+    for category in ("security_blog", "academic_paper", "technical_standard", "policy_regulation"):
+        source = "SYNTHETIC_" + category.upper()
+        store.ingest(source, category, [KnowledgeDocument(
+            document_id=make_document_id(source, "offline-fixture"), source=source,
+            source_category=category, content_type=category,
+            title="SYNTHETIC OFFLINE LLM security " + category,
+            description="Synthetic prompt injection summary: LLM applications may read untrusted instructions in retrieved documents.",
+            url="https://example.org/offline-fixture/" + category,
+            published_at="2026-10-08", modified_at=None, raw_data={"synthetic_fixture": True},
+        )])
 
 
 def serve_fixture_app(team_url, port):
@@ -86,6 +107,7 @@ def serve_fixture_app(team_url, port):
     from agents import monitor_agent, orchestrator
     from collectors.intelligence import IntelligenceCollector
     from rag.ingest import ingest
+    from rag.library import sync_team
     from api.app import app
 
     original_open = urllib.request.urlopen
@@ -112,6 +134,7 @@ def serve_fixture_app(team_url, port):
             side_effect=lambda keyword: IntelligenceCollector(keyword, base_url=team_url, timeout=2)))
         stack.enter_context(patch.object(orchestrator, "ingest",
             side_effect=lambda record, **kwargs: ingest(record, fetcher=fetch_fixture, **kwargs)))
+        stack.enter_context(patch("rag.library.sync_team", side_effect=lambda **kwargs: sync_team(base_url=team_url, **kwargs)))
         stack.enter_context(patch.object(urllib.request, "urlopen", side_effect=localhost_only))
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
@@ -259,6 +282,32 @@ def rehearse(directory, team_python):
             require("bm25_without_vector_model", inspection["mode"] == "bm25")
             require("repeat_evidence_is_stable", bool(inspection["ids"]) and before["ids"] == inspection["ids"])
             require("source_snapshots_match_hashes", inspection["snapshots_match_hashes"])
+            imported = request("/api/library/team-sync", {"max_documents": 10})
+            require("four_non_cve_types_imported", imported["status"] == "ok" and imported["ok"] == 4)
+            listing = request("/api/library")
+            docs = listing["items"]
+            require("team_summaries_have_distinct_scope", len(docs) == 4 and all(
+                doc["content_scope"] == "team_summary" and doc["source_snapshot_kind"] == "team_api_record" for doc in docs))
+            library_answer = request("/api/library/ask", {"question": "prompt injection", "use_model": False,
+                                                          "document_ids": [doc["document_id"] for doc in docs]})
+            cited = set(re.findall(r"\[(DOC-[a-f0-9]{16}/[^\]\s]+)\]", library_answer["answer"]))
+            require("team_summary_qa_has_bound_citations", bool(cited) and cited <= {
+                row["citation_id"] for row in library_answer["evidence"]} and library_answer["verdict"]["passed"])
+            require("team_summary_qa_retains_scope_without_model", not library_answer["model_attempted"]
+                    and "接口字段摘录" in library_answer["answer"] and "非原始全文" in library_answer["answer"])
+            repeat_import = request("/api/library/team-sync", {"max_documents": 10})
+            require("repeat_team_document_import_is_stable", repeat_import["ok"] == 4 and repeat_import["changed"] == 0)
+            library_state = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
+            require("team_api_snapshots_match_hashes", library_state["library_hashes_ok"])
+            stop(team)
+            outage = request("/api/library/team-sync", {"max_documents": 10})
+            require("team_service_outage_retains_documents", outage["status"] == "error"
+                    and outage["overview"]["documents"] == 4)
+            after_outage = request("/api/library/ask", {"question": "prompt injection", "use_model": False,
+                                                        "document_ids": [doc["document_id"] for doc in docs]})
+            require("stored_summaries_remain_answerable", after_outage["answer"] == library_answer["answer"])
+            result["team_documents"] = {"types": sorted({doc["document_type"] for doc in docs}),
+                                        "count": 4, "scope": "team_summary", "outage_retained": True}
             # Stop only the processes created by this rehearsal, including on failure.
             for process in reversed(processes):
                 stop(process)
@@ -309,7 +358,7 @@ def main():
         "environment": {"os": platform.platform(), "python": platform.python_version(),
             "root_dependencies": json.loads(command([sys.executable, "-m", "pip", "list", "--format=json"], ROOT)),
             "team_dependencies": json.loads(command([team_python, "-m", "pip", "list", "--format=json"], ROOT))},
-        "scope": "same-machine isolated offline rehearsal with synthetic input; not independent quality or six-hour latency",
+        "scope": "same-machine isolated offline CVE and team summary HTTP rehearsal with synthetic input; not original document retrieval, independent quality or six-hour latency",
         "fixture_cve": CVE,
         "fixture_sha256": hashlib.sha256(json.dumps(fixture(), sort_keys=True).encode()).hexdigest(),
         "fresh_runs": [rehearse(output / ("run%d" % i), team_python) for i in range(1, 4)],

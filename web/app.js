@@ -677,7 +677,7 @@ $("test-llm").addEventListener("click", function () {
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
-var libraryScopes = {abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryScopes = {team_summary: "队友接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
 
@@ -818,7 +818,8 @@ function loadLibrary() {
     $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段原文；标准 / 风险框架 " + counts.standard + "、政策法规 " + counts.policy + "。";
     var sources = $("library-sources"); clear(sources);
     (data.overview.sources || []).forEach(function (source) {
-      add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
+      add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : source.status === "partial" ? "部分资料同步失败" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
+      if (typeof source.remaining === "number" && source.remaining) add(sources, "p", "hint", "本轮只处理最近更新的 " + source.discovered + " 份，还有 " + source.remaining + " 份不在本轮窗口内。");
     });
     (data.overview.failed_documents || []).forEach(function (row) {
       var block = add(sources, "div", "meta");
@@ -835,9 +836,10 @@ function loadLibrary() {
         api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
       });
       add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-      var discoveryLabels = {historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+      var discoveryLabels = {team_api: "队友接口存档", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
       add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
       if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
+      if (doc.team_document_id) add(block, "p", "meta", "队友记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
       if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
       if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
       var selection = add(block, "label", "library-selection");
@@ -848,7 +850,7 @@ function loadLibrary() {
         librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
         if (check.checked) librarySelectedDocs.push(doc.document_id);
       });
-      if (doc.content_scope === "abstract") {
+      if ((doc.content_scope === "abstract" || doc.content_scope === "team_summary") && doc.document_type === "academic_paper" && /^https:\/\/arxiv\.org\/abs\//.test(doc.url)) {
         var fullLabel = data.items.some(function (r) { return r.parent_document_id === doc.document_id; }) ? "刷新论文全文" : "获取论文全文";
         var fullButton = add(block, "button", "ghost", fullLabel);
         fullButton.type = "button";
@@ -909,6 +911,16 @@ $("library-sync").addEventListener("click", function () {
     clear($("library-relations"));
     $("library-answer").textContent = "资料已更新，请重新提问。";
     add($("library-evidence"), "p", "hint", "资料已更新，请重新选择资料或检索。");
+    return loadLibrary();
+  }).catch(showError).then(function () { button.disabled = false; });
+});
+
+$("library-team-sync").addEventListener("click", function () {
+  var button = $("library-team-sync"); button.disabled = true; button.textContent = "正在同步团队资料…"; clearError();
+  api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
+    button.textContent = "本轮团队资料入库 " + data.ok + "/" + data.attempted + " 份";
+    librarySelectedDocs = []; clear($("library-evidence")); clear($("library-relations"));
+    $("library-answer").textContent = data.status === "error" ? "队友资料服务未连通，已有资料可继续使用。" : "团队资料已同步，请重新选择资料并提问。";
     return loadLibrary();
   }).catch(showError).then(function () { button.disabled = false; });
 });

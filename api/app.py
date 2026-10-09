@@ -49,6 +49,10 @@ class LibrarySyncBody(BaseModel):
     include_seeds: bool = True
 
 
+class TeamLibrarySyncBody(BaseModel):
+    max_documents: int = Field(30, ge=1, le=200)
+
+
 class LibraryAskBody(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
     document_ids: list[str] = Field(default_factory=list, max_items=4)
@@ -267,6 +271,15 @@ def library_sync(body: LibrarySyncBody):
     from rag.library import sync
     try:
         return sync(per_source=body.per_source, include_seeds=body.include_seeds)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/api/library/team-sync")
+def library_team_sync(body: TeamLibrarySyncBody):
+    from rag.library import sync_team
+    try:
+        return sync_team(max_documents=body.max_documents)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 

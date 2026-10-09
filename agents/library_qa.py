@@ -11,7 +11,7 @@ from rag.library import LIBRARY_DB, detail, search
 
 KINDS = {"voluntary_risk_framework": "自愿风险管理框架", "recommended_national_standard": "推荐性国家标准（仅目录）",
          "published_policy_text": "政策发布正文"}
-SCOPES = {"abstract": "仅摘要", "full_text_html": "HTML 可提取全文", "full_text_pdf": "PDF 各页文字",
+SCOPES = {"team_summary": "队友接口的题名/描述字段，非原始全文", "abstract": "仅摘要", "full_text_html": "HTML 可提取全文", "full_text_pdf": "PDF 各页文字",
           "policy_articles": "政策条文", "catalog_only": "仅目录", "article_body": "文章正文", "advisory_fields": "公告字段"}
 
 
@@ -57,8 +57,9 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
     selected, attempted, used, note = fallback(rows, candidates), False, False, "使用本机原文段落；无段落候选时保留检索片段。"
     failure = None
     # 标准目录由程序列出字段；政策原文也只作摘录，不生成适用性判断。
-    candidates = [c for c in candidates if c["rows"][0]["content_scope"] != "catalog_only"]
-    required = {v for v in ids if docs[v]["content_scope"] != "catalog_only"}
+    non_model = {"catalog_only", "team_summary"}
+    candidates = [c for c in candidates if c["rows"][0]["content_scope"] not in non_model]
+    required = {v for v in ids if docs[v]["content_scope"] not in non_model}
     available = {c["rows"][0]["document_id"] for c in candidates}
     if use_model and not scope_only and configured() and candidates and required <= available:
         attempted = True
@@ -74,7 +75,7 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
                          "content_scope": c["rows"][0]["content_scope"], "locator": c["locator"], "text": c["quote"]} for c in candidates]}, ensure_ascii=False)}]
         try:
             selected = select(chat(messages, max_tokens=512, response_format={"type": "json_object"}), candidates, required)
-            selected += [entry(r) for r in rows if r["content_scope"] == "catalog_only"]
+            selected += [entry(r) for r in rows if r["content_scope"] in non_model]
             used, note = True, "模型选择存档原文段落编号，程序展示原文与引用；没有生成自由结论。"
         except Exception as exc:
             failure = exc.code if isinstance(exc, SelectionError) else "model_request_failed"
@@ -119,7 +120,7 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
             if doc.get("retained_previous"):
                 lines.append("本次更新失败，沿用获取于 %s 的存档。" % doc["retrieved_at"])
         citations = " ".join("[%s]" % r["citation_id"] for r in excerpt["rows"])
-        lines.append("原文摘录：%s %s" % (quote, citations))
+        lines.append(("接口字段摘录：%s %s" if row["content_scope"] == "team_summary" else "原文摘录：%s %s") % (quote, citations))
         for source_row in excerpt["rows"]:
             if source_row["citation_id"] not in evidence_seen:
                 evidence_seen.add(source_row["citation_id"]); evidence.append(source_row)

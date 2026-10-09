@@ -12,6 +12,21 @@ from questions.test_reference_text import html_paper, response
 
 
 class RelationsTest(unittest.TestCase):
+    def test_team_summaries_with_same_source_url_do_not_disable_original_bindings(self):
+        from questions.test_team_documents import FixtureCollector, record
+        from rag.library import sync_team
+        from enrichment.relation_candidates import source_documents
+        before = build_graph(db_path=self.db)
+        rows = [record("academic_paper", 1), record("technical_standard", 2)]
+        rows[0]["url"] = self.paper["url"]
+        rows[1]["url"] = self.registry["sources"]["nist"]["url"]
+        self.assertEqual(sync_team(self.db, collector=FixtureCollector(rows))["ok"], 2)
+        after = build_graph(db_path=self.db)
+        self.assertEqual(after["source_health"], before["source_health"])
+        self.assertEqual(after["facts"], before["facts"])
+        self.assertEqual({d["document_id"] for d in source_documents("indirect_prompt_injection", [], self.db)},
+                         {self.paper_id, self.nist_id})
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

@@ -12,6 +12,7 @@ import time
 import urllib.parse
 
 from collectors.library import SEEDS, SOURCES, discover, relevant
+from collectors.team_documents import TEAM_MEDIA, TeamDocumentCollector, extract_summary, team_id
 from enrichment.documents import canonical, digest, extract_document, fetch, fetch_url, make_chunks, now
 from rag.evidence import CVE, DEFAULT_DB, _connection, rank_bm25
 from rag.hybrid import _dense, config_path, fuse, update_index
@@ -72,7 +73,13 @@ def _extract(candidate, response):
     url, kind = candidate["url"], candidate["document_type"]
     if kind not in DOCUMENT_TYPES:
         raise ValueError("不支持的资料类型")
-    if kind == "academic_paper":
+    team = response.get("content_type") == TEAM_MEDIA
+    if team:
+        from collectors.team_documents import TYPE_MAP
+        doc, record = extract_summary(response)
+        if record["document_id"] != candidate.get("team_document_id") or canonical(record["url"]) != url or TYPE_MAP[record["source_category"]] != kind or record["source"] != candidate["source_name"]:
+            raise ValueError("团队快照与目标资料身份不一致")
+    elif kind == "academic_paper":
         if urllib.parse.urlsplit(url).hostname != "arxiv.org":
             raise ValueError("论文解析仅支持官方 arXiv 页面")
         doc = paper_html(response, url) if urllib.parse.urlsplit(url).path.startswith("/html/") else _paper(response, url)
@@ -122,7 +129,8 @@ def _extract(candidate, response):
                              "reason": "公告标识字段明确列出此编号" if cve in declared else "提取内容提到此编号；不代表整篇资料证明该漏洞的所有结论"}
                             for cve in sorted(set(mentions) | declared)]
     doc["topic_tags"] = [tag for tag, (pattern, _) in TOPICS.items() if re.search(pattern, text, re.I)]
-    doc.update({"schema_version": 1, "document_id": _id(url), "source_id": digest(url)[:16],
+    identity = team_id(record["document_id"]) if team else _id(url)
+    doc.update({"schema_version": 1, "document_id": identity, "source_id": digest(identity if team else url)[:16],
                 "url": url, "fetch_url": response["url"], "document_type": kind, "content_type": response.get("content_type", "text/html"),
                 "source_category": CATEGORY[kind], "publisher": candidate["source_name"],
                 "discovery_source_id": candidate["source_id"], "discovery": candidate.get("discovery", "historical_seed"),
@@ -145,7 +153,7 @@ def ingest_document(candidate, db_path=LIBRARY_DB, fetcher=fetch):
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     candidate = dict(candidate, url=canonical(candidate["url"]))
-    doc_id = _id(candidate["url"])
+    doc_id = team_id(candidate["team_document_id"]) if candidate.get("team_document_id") else _id(candidate["url"])
     try:
         response = candidate.get("_prefetched_response") or fetcher(fetch_url(candidate["url"]))
         doc, chunks = _extract(candidate, response)
@@ -210,14 +218,42 @@ def _valid_evidence(db_path):
         good = {doc_id: sha for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")
                 if doc_id not in invalidated and hashlib.sha256(body).hexdigest() == sha}
         rows = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM evidence")]
-    return [row for row in rows if good.get(row["document_id"]) == row["source_response_sha256"]
-            and digest(row["text"]) == row["text_sha256"]]
+        docs = {json.loads(payload)["document_id"]: json.loads(payload) for (payload,) in conn.execute("SELECT payload FROM library_documents")}
+        snapshots = {doc_id: body for doc_id, _, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")}
+    expected = {}
+    keys = ("document_id", "url", "document_type", "content_type", "content_scope", "publisher", "source_snapshot_kind",
+            "team_document_id", "team_source", "team_source_category", "team_content_updated_at", "text_sha256",
+            "source_response_sha256", "snapshot_url", "published_at", "source_last_modified", "team_first_seen_at")
+    for doc_id, doc in docs.items():
+        if (doc.get("content_type") != TEAM_MEDIA and doc_id == _id(doc["url"])) or doc_id not in good:
+            continue
+        try:
+            parsed, chunks = _reparse(doc["url"], doc["document_type"], doc["publisher"], doc["discovery_source_id"],
+                snapshots[doc_id], doc["fetch_url"], doc["retrieved_at"], TEAM_MEDIA)
+            if any(doc.get(key) != parsed.get(key) for key in keys):
+                good.pop(doc_id, None)
+            else:
+                expected[doc_id] = {chunk["evidence_id"]: dict(parsed, **chunk) for chunk in chunks}
+        except (ValueError, KeyError, TypeError):
+            good.pop(doc_id, None)
+    result = []
+    for row in rows:
+        if good.get(row["document_id"]) != row["source_response_sha256"] or digest(row["text"]) != row["text_sha256"]:
+            continue
+        if row["document_id"] in expected:
+            original = expected[row["document_id"]].get(row["evidence_id"], {})
+            if any(row.get(key) != original.get(key) for key in (*keys, "text", "locator", "citation_id")):
+                continue
+        result.append(row)
+    return result
 
 
 @lru_cache(maxsize=24)
 def _reparse(url, kind, publisher, discovery_source_id, body, fetch_url_value, retrieved_at, content_type):
     candidate = {"url": url, "document_type": kind, "source_name": publisher, "source_id": discovery_source_id}
-    response = {"body": body, "content_type": "application/json" if kind == "vendor_advisory" else content_type,
+    if content_type == TEAM_MEDIA:
+        candidate["team_document_id"] = json.loads(body)["document_id"]
+    response = {"body": body, "content_type": "application/json" if kind == "vendor_advisory" and content_type != TEAM_MEDIA else content_type,
                 "url": fetch_url_value, "retrieved_at": retrieved_at}
     return _extract(candidate, response)
 
@@ -233,6 +269,8 @@ def verified_sources(db_path=LIBRARY_DB):
         attempts = {r["document_id"]: r for (payload,) in conn.execute("SELECT payload FROM library_attempts") if (r := json.loads(payload))}
     results = []
     for row in docs:
+        if row.get("content_type") == TEAM_MEDIA:
+            continue  # 团队描述字段不作为原始公告/文章的漏洞修复事实。
         if row["document_type"] not in ("vendor_advisory", "research_article") or attempts.get(row["document_id"], {}).get("invalidated_previous"):
             continue
         snapshot = snapshots.get(row["document_id"])
@@ -309,7 +347,7 @@ def search(query, top_k=8, *, document_type="", cve_id="", document_ids=None, db
 def full_text(document_id, db_path=LIBRARY_DB, fetcher=fetch):
     """显式获取论文 HTML 全文，另存文档；失败不删除已成功的摘要或全文。"""
     doc = detail(document_id, db_path)
-    if not doc or doc["document_type"] != "academic_paper" or doc["content_scope"] != "abstract":
+    if not doc or doc["document_type"] != "academic_paper" or doc["content_scope"] not in ("abstract", "team_summary"):
         raise ValueError("请选择已经入库的 arXiv 论文摘要")
     match = re.fullmatch(r"/abs/(%s)/?" % ARXIV_ID, urllib.parse.urlsplit(doc["url"]).path)
     if urllib.parse.urlsplit(doc["url"]).hostname != "arxiv.org" or not match or doc["integrity_status"] != "ok":
@@ -389,6 +427,41 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
         _SYNC_LOCK.release()
 
 
+def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url="http://127.0.0.1:8765", collector=None):
+    collector = collector or TeamDocumentCollector(base_url, max_documents=max_documents)
+    if not _SYNC_LOCK.acquire(blocking=False):
+        raise ValueError("资料同步正在运行，请等待本轮完成")
+    try:
+        path = Path(db_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        source = {"id": "team_documents", "name": "队友情报服务资料", "url": base_url + "/api/documents"}
+        status = {"source_id": source["id"], "name": source["name"], "url": source["url"],
+                  "category": "team", "checked_at": now(), "discovered": 0}
+        try:
+            collected = collector.collect()
+        except Exception as exc:
+            status.update(status="error", error=str(exc)[:240])
+            _record_source(source, status, None, path)
+            return {"status": "error", "attempted": 0, "ok": 0, "changed": 0,
+                    "documents": [], "source": status, "overview": overview(path)}
+        results = [ingest_document(row, path) for row in collected["candidates"]]
+        for error in collected["errors"]:
+            with _connection(path) as conn:
+                _schema(conn)
+                error["retained_previous"] = bool(conn.execute("SELECT 1 FROM library_documents WHERE document_id=?", (error["document_id"],)).fetchone())
+                conn.execute("INSERT OR REPLACE INTO library_attempts VALUES (?,?)", (error["document_id"], json.dumps(error, ensure_ascii=False)))
+            results.append(error)
+        status.update(status="partial" if any(row["status"] == "error" for row in results) else "ok",
+                      discovered=collected["selected"], total=collected["total"], remaining=collected["remaining"],
+                      coverage=collected["coverage"])
+        _record_source(source, status, None, path)
+        return {"status": status["status"], "attempted": len(results), "ok": sum(row["status"] == "ok" for row in results),
+                "changed": sum(bool(row.get("changed")) for row in results), "documents": results,
+                "source": status, "index": update_index(path), "overview": overview(path)}
+    finally:
+        _SYNC_LOCK.release()
+
+
 def main():
     import sys
     if hasattr(sys.stdout, "reconfigure"):
@@ -396,12 +469,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=LIBRARY_DB)
     parser.add_argument("--sync", action="store_true")
+    parser.add_argument("--team-sync", action="store_true")
+    parser.add_argument("--max-documents", type=int, default=30)
     parser.add_argument("--per-source", type=int, default=3)
     parser.add_argument("--no-seeds", action="store_true")
     parser.add_argument("--query", default="")
     args = parser.parse_args()
-    result = sync(args.db, per_source=args.per_source, include_seeds=not args.no_seeds) if args.sync else search(args.query, db_path=args.db) if args.query else overview(args.db)
+    result = sync_team(args.db, max_documents=args.max_documents) if args.team_sync else sync(args.db, per_source=args.per_source, include_seeds=not args.no_seeds) if args.sync else search(args.query, db_path=args.db) if args.query else overview(args.db)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.team_sync and result["status"] != "ok":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

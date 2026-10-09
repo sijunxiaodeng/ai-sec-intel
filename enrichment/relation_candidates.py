@@ -61,7 +61,7 @@ def source_documents(topic, document_ids, db_path):
     registry = registry_for(topic)
     result = []
     for expected in registry["sources"].values():
-        matches = [d for d in all_docs if canonical(d["url"]) == expected["url"] and (not ids or d["document_id"] in ids)]
+        matches = [d for d in all_docs if canonical(d["url"]) == expected["url"] and d["content_scope"] != "team_summary" and (not ids or d["document_id"] in ids)]
         doc = detail(matches[0]["document_id"], db_path) if len(matches) == 1 else None
         if doc and doc["integrity_status"] == "ok" and doc["content_scope"] == expected["content_scope"] and doc.get("version") == expected["version"]:
             result.append(doc)

@@ -33,7 +33,7 @@ def build_graph(*, document_ids=None, document_type="", topic="indirect_prompt_i
                 and (not document_type or d["document_type"] == document_type)]
     bound, health, facts, evidence, unavailable = {}, [], [], {}, []
     for name, expected in registry["sources"].items():
-        matches = [d for d in selected if canonical(d["url"]) == expected["url"]]
+        matches = [d for d in selected if canonical(d["url"]) == expected["url"] and d["content_scope"] != "team_summary"]
         doc = detail(matches[0]["document_id"], db_path) if len(matches) == 1 else None
         reason = "来源未入库或不在当前选择/筛选中"
         if doc:
