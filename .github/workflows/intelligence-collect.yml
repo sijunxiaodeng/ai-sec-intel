@@ -10,6 +10,10 @@ on:
         description: Same-repository release tag for the initial public-data snapshot
         required: false
         type: string
+      bootstrap_state_commit:
+        description: Full 40-character same-repository commit SHA containing the fixed initial snapshot file
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
+      INTELLIGENCE_BOOTSTRAP_STATE_COMMIT: ${{ inputs.bootstrap_state_commit || vars.INTELLIGENCE_BOOTSTRAP_STATE_COMMIT }}
     steps:
       - name: Check out collector
         uses: actions/checkout@v4

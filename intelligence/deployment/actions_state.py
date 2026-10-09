@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import urllib.error
@@ -130,6 +131,19 @@ class GitHubClient:
             raise StateError("Bootstrap asset exceeds size limit")
         return self.request(f"releases/assets/{matches[0]['id']}", binary=True, accept="application/octet-stream")
 
+    def bootstrap_commit(self, commit_sha):
+        """Read one fixed seed file at an immutable commit in this repository."""
+        if not isinstance(commit_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", commit_sha) is None:
+            raise StateError("Bootstrap state commit must be a full 40-character hexadecimal commit SHA")
+        commit_sha = commit_sha.lower()
+        commit = self.request(f"git/commits/{commit_sha}")
+        if str(commit.get("sha", "")).lower() != commit_sha:
+            raise StateError("Bootstrap source did not resolve to the requested immutable commit")
+        # GitHub's raw Contents representation supports files above the inline
+        # base64 limit without following download_url or another repository.
+        return self.request(f"contents/{BOOTSTRAP_ASSET}?ref={commit_sha}", binary=True,
+                            accept="application/vnd.github.raw+json")
+
 
 def _sha256(path):
     digest = hashlib.sha256()
@@ -221,7 +235,8 @@ def restore_archive(payload, destination, *, repository, branch, run_id):
     return manifest
 
 
-def restore_latest(client, destination, *, workflow, branch, run_id, run_number, run_attempt=1, bootstrap_release_tag=None):
+def restore_latest(client, destination, *, workflow, branch, run_id, run_number, run_attempt=1,
+                   bootstrap_release_tag=None, bootstrap_state_commit=None):
     """Use the newest completed writer; refuse to hide lost state or history."""
     if int(run_attempt) > 1:
         # Replaying an older run can overwrite newer state even when that older
@@ -255,10 +270,13 @@ def restore_latest(client, destination, *, workflow, branch, run_id, run_number,
         if client.collection_started(run["id"]):
             saw_prior_writer = True
             raise StateError("A previous collection started but its snapshot is missing; recover its state before continuing")
-    if bootstrap_release_tag and not saw_prior_writer and (int(run_number) == 1 or saw_prior_run):
-        manifest = restore_archive(client.bootstrap(bootstrap_release_tag), destination,
+    if ((bootstrap_state_commit or bootstrap_release_tag) and not saw_prior_writer
+            and (int(run_number) == 1 or saw_prior_run)):
+        payload = (client.bootstrap_commit(bootstrap_state_commit) if bootstrap_state_commit
+                   else client.bootstrap(bootstrap_release_tag))
+        manifest = restore_archive(payload, destination,
                                    repository=client.repository, branch=branch, run_id=0)
-        print("Restored initial deployment from same-repository release; original first-seen/baselines preserved", flush=True)
+        print("Restored initial deployment from same-repository seed; original first-seen/baselines preserved", flush=True)
         return manifest
     # Workflow run number remains >1 even when users delete its visible history.
     if saw_prior_run or int(run_number) != 1:
@@ -325,6 +343,7 @@ def main(argv=None):
     parser.add_argument("--keep", type=int, default=8)
     parser.add_argument("--workflow", default="intelligence-collect.yml")
     parser.add_argument("--bootstrap-release-tag", default=os.getenv("INTELLIGENCE_BOOTSTRAP_RELEASE_TAG"))
+    parser.add_argument("--bootstrap-state-commit", default=os.getenv("INTELLIGENCE_BOOTSTRAP_STATE_COMMIT"))
     args = parser.parse_args(argv)
     if not args.repository or not args.branch or not args.run_id:
         parser.error("Repository, branch and run ID are required")
@@ -349,7 +368,8 @@ def main(argv=None):
             client = GitHubClient(os.getenv("GITHUB_TOKEN"), args.repository, os.getenv("GITHUB_API_URL", "https://api.github.com"))
             restore_latest(client, args.directory, workflow=args.workflow, branch=args.branch,
                            run_id=args.run_id, run_number=args.run_number, run_attempt=args.run_attempt,
-                           bootstrap_release_tag=args.bootstrap_release_tag)
+                           bootstrap_release_tag=args.bootstrap_release_tag,
+                           bootstrap_state_commit=args.bootstrap_state_commit)
         else:
             if not args.uploaded_artifact_id:
                 parser.error("--uploaded-artifact-id is required for prune")

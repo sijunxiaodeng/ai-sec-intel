@@ -34,6 +34,14 @@ python intelligence/deployment/actions_state.py save \
 
 如果种子采用 **draft Release**，GitHub 只向有仓库写权限的身份暴露 draft。首次初始化的 `main` 工作流可临时使用 `contents: write`；验证首次上传及第二次从 artifact 恢复成功后，立即降回 `contents: read`。脚本通过列举 Release 并匹配 `tag_name` 读取 draft，找不到或不可读时会停止，不能偷偷创建新空库。B 分支模板始终保持 `contents: read`。
 
+### 不使用 Release 上传的迁移方式
+
+也可以把同一份已校验的 `intelligence-bootstrap-state.zip` 放在**同仓库专用种子分支的根目录**，仅提交这个公开来源数据文件。手动运行时填写 `bootstrap_state_commit`，或设置仓库变量 `INTELLIGENCE_BOOTSTRAP_STATE_COMMIT`，其值必须是该提交的完整 **40 位十六进制 commit SHA**；不能填写分支名、短 SHA、其他仓库或下载 URL。
+
+脚本先验证该 SHA 确实是本仓库的 Git 提交，再通过 GitHub Contents API 的 raw 表示读取固定路径 `intelligence-bootstrap-state.zip`；清单仍必须匹配本仓库、`main`、初始 run ID `0`。这种迁移仅需 `contents: read`。artifact 总是优先；还未有任何采集写入时，Git 提交种子优先于可选 Release 种子。两个种子均不用于覆盖后续运行的新数据。
+
+种子分支仅用于一次迁移，不能包含 `.env`、密钥、用户私有资产或私人数据。公共仓库的 Git 种子也是公开文件，因此必须先审核数据。提交 SHA 固定后，新增快照不改变初始种子的身份；后续采集仍只读最新 artifact，不向种子分支提交周期性数据库。
+
 完全新部署、不迁移任何历史数据时，只有第一次运行允许创建新观察基线；此前关机产生的旧记录不会因此被修改。正式比赛时效应持续记录来源发布时间到首次实际入库的延迟，而不是从工作流启动重新计算漏洞发布时间。
 
 ## 查看结果与取回数据

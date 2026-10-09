@@ -64,6 +64,7 @@ class FakeClient:
         self.artifact_list = artifacts or {}
         self.writers = set(writers)
         self.bootstraps = 0
+        self.commit_bootstraps = []
         self.deleted = []
         self.repository_artifacts = []
         self.run_metadata = {}
@@ -74,6 +75,9 @@ class FakeClient:
     def collection_started(self, run_id):
         return run_id in self.writers
     def download(self, artifact_id):
+        return self.payload
+    def bootstrap_commit(self, commit_sha):
+        self.commit_bootstraps.append(commit_sha)
         return self.payload
     def workflow_id(self, workflow):
         return 101
@@ -217,6 +221,44 @@ class ActionsStateTests(unittest.TestCase):
             restore_latest(client, self.root / 'restored', workflow='fixture.yml', branch=BRANCH,
                            run_id=42, run_number=1, run_attempt=2, bootstrap_release_tag='seed')
         self.assertEqual(client.bootstraps, 0)
+    def test_git_seed_requires_full_immutable_commit_sha_before_any_network_request(self):
+        client = GitHubClient('fixture-token', REPOSITORY)
+        for invalid in ('main', '123abc', 'https://example.com/seed', 'g' * 40, 'a' * 41):
+            with self.subTest(value=invalid), patch.object(client, 'request') as request:
+                with self.assertRaisesRegex(StateError, '40-character hexadecimal'):
+                    client.bootstrap_commit(invalid)
+                request.assert_not_called()
+    def test_git_seed_reads_fixed_path_at_verified_same_repo_commit_using_raw_media(self):
+        client = GitHubClient('fixture-token', REPOSITORY)
+        sha = 'a' * 40
+        with patch.object(client, 'request', side_effect=[{'sha': sha}, b'fixture-archive']) as request:
+            self.assertEqual(client.bootstrap_commit(sha.upper()), b'fixture-archive')
+        self.assertEqual(request.call_args_list[0].args[0], 'git/commits/' + sha)
+        self.assertEqual(request.call_args_list[1].args[0], 'contents/' + BOOTSTRAP_ASSET + '?ref=' + sha)
+        self.assertTrue(request.call_args_list[1].kwargs['binary'])
+        self.assertEqual(request.call_args_list[1].kwargs['accept'], 'application/vnd.github.raw+json')
+        with patch.object(client, 'request', return_value={'sha': 'b' * 40}):
+            with self.assertRaisesRegex(StateError, 'requested immutable commit'):
+                client.bootstrap_commit(sha)
+    def test_git_seed_initial_restore_keeps_baseline_and_takes_precedence_over_release(self):
+        seed_dir = self.root / 'seed'
+        save_state(self.source, seed_dir, repository=REPOSITORY, branch=BRANCH, run_id=0)
+        client = FakeClient(archive_of(seed_dir))
+        with patch('sys.stdout', io.StringIO()):
+            manifest = restore_latest(client, self.root / 'restored', workflow='fixture.yml', branch=BRANCH,
+                                      run_id=42, run_number=1, bootstrap_state_commit='a' * 40,
+                                      bootstrap_release_tag='unreachable-release')
+        self.assertEqual(manifest['run_id'], 0)
+        self.assertEqual(client.commit_bootstraps, ['a' * 40])
+        self.assertEqual(client.bootstraps, 0)
+        self.assertEqual(json.loads((self.root / 'restored/monitoring_baseline.json').read_text())['started_at'], BASELINE)
+    def test_existing_artifact_always_wins_over_git_seed(self):
+        client = FakeClient(self.payload, [run()], {42: [artifact()]}, writers={42})
+        with patch('sys.stdout', io.StringIO()):
+            manifest = restore_latest(client, self.root / 'restored', workflow='fixture.yml', branch=BRANCH,
+                                      run_id=43, run_number=2, bootstrap_state_commit='a' * 40)
+        self.assertEqual(manifest['run_id'], 42)
+        self.assertEqual(client.commit_bootstraps, [])
     def test_draft_bootstrap_uses_release_listing_and_fixed_same_repo_asset(self):
         client = GitHubClient('fixture-token', REPOSITORY)
         release = {'tag_name': 'initial-state', 'draft': True,
