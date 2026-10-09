@@ -49,8 +49,22 @@ def write_json(path, value):
 
 def command(args, cwd):
     result = subprocess.run(args, cwd=cwd, encoding="utf-8", errors="replace",
-                            capture_output=True, timeout=60, check=True)
+                            capture_output=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError("child command failed (%d): %s" % (result.returncode, result.stderr[-2000:]))
     return result.stdout
+
+
+def inspect_state():
+    from rag.ingest import document_status
+    from rag.retrieve import search
+    from rag.evidence import DEFAULT_DB, _all_evidence, _connection
+    with _connection(DEFAULT_DB) as connection:
+        snapshots = connection.execute("SELECT digest, body FROM source_snapshots").fetchall()
+    return {"documents": document_status(CVE), "mode": search(CVE + " CVSS")[0]["retrieval_mode"],
+            "ids": [row["evidence_id"] for row in _all_evidence(DEFAULT_DB)],
+            "snapshots_match_hashes": bool(snapshots) and all(
+                digest == hashlib.sha256(body).hexdigest() for digest, body in snapshots)}
 
 
 def seed_team(db):
@@ -237,17 +251,14 @@ def rehearse(directory, team_python):
             unknown = request("/api/ask", {"question": "CVE-2099-99999 的评分？",
                                             "session_id": score["session_id"]})
             require("unknown_cve_has_no_old_evidence", not unknown["evidence"] and "9.8" not in unknown["answer"])
+            before = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             repeated = request("/api/collect", {"keyword": "ollama"})
             require("repeat_collection_is_idempotent", repeated["count"] == 1)
-            inspection = json.loads(command([sys.executable, "-c",
-                "import json; from rag.ingest import document_status; from rag.retrieve import search; "
-                "from rag.evidence import _all_evidence; "
-                f"print(json.dumps(dict(documents=document_status({CVE!r}), "
-                f"mode=search({CVE!r}+' CVSS')[0]['retrieval_mode'], "
-                "ids=[r['evidence_id'] for r in _all_evidence()])))"], source))
+            inspection = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             require("document_failure_preserved", any(row["status"] == "error" for row in inspection["documents"]))
             require("bm25_without_vector_model", inspection["mode"] == "bm25")
-            require("evidence_has_no_duplicates", len(inspection["ids"]) == len(set(inspection["ids"])))
+            require("repeat_evidence_is_stable", bool(inspection["ids"]) and before["ids"] == inspection["ids"])
+            require("source_snapshots_match_hashes", inspection["snapshots_match_hashes"])
             # Stop only the processes created by this rehearsal, including on failure.
             for process in reversed(processes):
                 stop(process)
@@ -270,6 +281,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--seed-team", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--serve", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--inspect", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--team-url", help=argparse.SUPPRESS)
     parser.add_argument("--port", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -278,6 +290,9 @@ def main():
         return
     if args.serve:
         serve_fixture_app(args.team_url, args.port)
+        return
+    if args.inspect:
+        print(json.dumps(inspect_state(), ensure_ascii=False))
         return
     if not args.team_python or not args.team_python.is_file() or not args.output:
         parser.error("--team-python and --output are required")
