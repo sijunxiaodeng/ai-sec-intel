@@ -23,9 +23,14 @@ team_sync_status="skipped"
 library_sync_status="skipped"
 coverage_note=""
 
-# Ensure offline multi-source fixtures exist (idempotent unless DEMO_FORCE_SEED=1).
+# Seed only when DB missing. Avoid DEMO_FORCE_SEED wipe after B API already started
+# (demo-up seeds once before launching processes).
 if [[ "$mode" == "local" ]]; then
-  seed_local_db
+  if [[ ! -f "$ROOT/intelligence/data/intelligence.db" ]]; then
+    seed_local_db
+  else
+    log "B demo DB present — skip re-seed in demo-collect (set DEMO_FORCE_SEED before demo-up to recreate)"
+  fi
 elif [[ "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
   log "compose mode: DEMO_FORCE_SEED=1 — recreate via docker b-seed if needed"
 fi
@@ -114,6 +119,31 @@ if [[ "$LIBRARY_SYNC" == "1" ]]; then
     echo '{}' >"$OUT/library-sync.json"
   fi
   log "library-sync: $library_sync_status"
+
+  # Curated relation topics need arXiv HTML full text (abstract-only breaks injection graph).
+  log "best-effort full-text for curated arXiv paper 2302.12173"
+  set +e
+  paper_id="$(python3 - <<'PY'
+import json,urllib.request
+base="'"$MAIN_URL"'"
+try:
+    with urllib.request.urlopen(base+"/api/library", timeout=10) as r:
+        items=json.load(r).get("items") or []
+except Exception:
+    raise SystemExit(0)
+for row in items:
+    if (row.get("url") or "").rstrip("/") == "https://arxiv.org/abs/2302.12173":
+        print(row["document_id"]); break
+PY
+)"
+  if [[ -n "${paper_id:-}" ]]; then
+    curl -sf --max-time 90 -X POST "$MAIN_URL/api/library/${paper_id}/full-text" \
+      -o "$OUT/paper-full-text.json" && log "paper full-text: ok ($paper_id)" \
+      || log "paper full-text: failed (relations may stay partial)"
+  else
+    log "paper full-text: abs document not found yet — skip"
+  fi
+  set -e
 fi
 
 AI_KEYWORDS_CSV="$AI_SECURITY_KEYWORDS" \
