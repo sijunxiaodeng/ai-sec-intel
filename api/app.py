@@ -25,7 +25,8 @@ def _startup():
 
 
 class CollectBody(BaseModel):
-    keyword: str = "ollama"
+    # Broader AI-security default; comma-separated multi-keyword supported by monitor_agent.
+    keyword: str = "llm"
 
 
 class AskBody(BaseModel):
@@ -98,6 +99,71 @@ def _summary(record):
     }
 
 
+def _team_intel_snapshot():
+    """Best-effort B coverage / document stats for overview narrative (not a category claim)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from collectors.intelligence import team_base_url
+
+    base = team_base_url()
+    out = {
+        "reachable": False,
+        "base_url": base,
+        "database_available": None,
+        "team_total": None,
+        "document_total": None,
+        "coverage": None,
+        "error": None,
+    }
+    try:
+        with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
+            health = json.load(resp)
+        out["reachable"] = True
+        out["database_available"] = bool(health.get("database_available"))
+        out["knowledge_documents_available"] = bool(health.get("knowledge_documents_available"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        out["error"] = type(exc).__name__
+        return out
+    try:
+        with urllib.request.urlopen(
+            base + "/api/intelligence/team?q=&ai_only=true&limit=1", timeout=5
+        ) as resp:
+            team = json.load(resp)
+        out["team_total"] = team.get("total")
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        pass
+    try:
+        with urllib.request.urlopen(base + "/api/documents/stats", timeout=5) as resp:
+            stats = json.load(resp)
+        out["document_total"] = (
+            stats.get("total_documents")
+            or stats.get("total")
+            or stats.get("documents")
+        )
+        cat_counts = stats.get("source_category_counts") or stats.get("source_record_counts")
+        if isinstance(cat_counts, dict):
+            out["document_categories"] = list(cat_counts.keys())
+        elif isinstance(stats.get("categories"), list):
+            out["document_categories"] = stats["categories"]
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        pass
+    try:
+        with urllib.request.urlopen(base + "/api/intelligence/coverage", timeout=5) as resp:
+            cov = json.load(resp)
+        out["coverage"] = {
+            "configured_category_count": cov.get("configured_category_count"),
+            "observed_ai_category_count": cov.get("observed_ai_category_count"),
+            "observed_ai_categories": cov.get("observed_ai_categories"),
+            "required_categories_observed": cov.get("required_categories_observed"),
+            "sla_evidence": cov.get("sla_evidence"),
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        pass
+    return out
+
+
 @app.get("/api/overview")
 def overview():
     records = knowledge_records()
@@ -111,6 +177,7 @@ def overview():
     monitor = monitor_state()
     from rag.library import overview as library_overview
     library = library_overview()
+    team = _team_intel_snapshot()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
         "items": len(records),
@@ -121,6 +188,7 @@ def overview():
         "monitor": monitor,
         "library": {"documents": library["documents"], "chunks": library["chunks"],
                     "source_categories": library["source_categories"]},
+        "team_intel": team,
         "steps": last_steps(),
         "recent": [_summary(record) for record in records[:6]],
     }

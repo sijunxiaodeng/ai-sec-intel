@@ -6,3 +6,4 @@ venv/
 config/local.json
 data/
 *.log
+.demo/

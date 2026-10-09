@@ -1,0 +1,14 @@
+.git
+.venv
+venv
+**/__pycache__
+**/*.pyc
+**/.venv
+intelligence/.venv
+intelligence/data
+data
+*.log
+.env
+config/local.json
+.demo
+**/node_modules

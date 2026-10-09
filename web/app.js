@@ -144,15 +144,35 @@ function loadOverview() {
     var stats = $("stats");
     clear(stats);
     var monitor = data.monitor || {};
+    var team = data.team_intel || {};
+    var cov = team.coverage || {};
+    var teamBits = [];
+    if (team.reachable) {
+      teamBits.push("团队情报可达");
+      if (team.team_total != null) teamBits.push("已分类 AI CVE " + team.team_total + " 条");
+      if (team.document_total != null) teamBits.push("B 文档 " + team.document_total + " 份");
+      if (cov.observed_ai_category_count != null) {
+        teamBits.push("B 观测类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
+      }
+    } else {
+      teamBits.push("团队情报暂不可达");
+    }
     $("monitor-line").textContent =
       "自动监测已启动，间隔 " + (monitor.interval_hours || 6) +
       " 小时，开始于 " + dateText(monitor.started_at) +
       "。可计时效的新漏洞 " + data.latency_count +
-      " 条。更早公布的记录只用于演示。当前来源：" +
-      ((data.sources || []).join("、") || "还没有") + "。安全资料库另收录 " + ((data.library || {}).documents || 0) + " 份资料，可在安全资料库查看与检索。";
+      " 条。更早公布的记录只用于演示。漏洞卡片来源：" +
+      ((data.sources || []).join("、") || "还没有") +
+      "。" + teamBits.join("；") +
+      "。安全资料库另收录 " + ((data.library || {}).documents || 0) +
+      " 份资料（类别：" +
+      (((data.library || {}).source_categories || []).join("、") || "尚无") +
+      "）。";
     [
       [String(data.items), "知识库情报"],
       [String(data.source_count || 0), "漏洞数据库来源"],
+      [String((data.library || {}).documents || 0), "资料库文档"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "离线", "团队 AI CVE"],
       [String(data.latency_count || 0), "可计时效"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
@@ -531,12 +551,12 @@ $("collect-form").addEventListener("submit", function (event) {
   event.preventDefault();
   var button = $("collect-btn");
   button.disabled = true;
-  button.textContent = "正在监测 NVD 与 OSV…";
+  button.textContent = "正在监测 NVD / OSV / 团队情报…";
   clearError();
   api("/api/collect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: $("keyword").value.trim() || "ollama" })
+    body: JSON.stringify({ keyword: $("keyword").value.trim() || "llm" })
   }).then(function () {
     loadItems("monitor");
   }).catch(showError).then(function () {

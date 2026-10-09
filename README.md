@@ -2,18 +2,25 @@
 
 三人共用的仓库。目前支持 NVD/OSV 漏洞监测、关联资料抓取与证据入库、结构化富化与影响说明、登记资产版本匹配，以及带来源引用的检索问答。
 
-## 怎么打开系统
+## 怎么打开系统（一键演示）
 
-在本文件夹打开终端：
+固定端口：**主应用 8023**，**B 情报 API 8765**。
+
+```bash
+./scripts/demo-up.sh      # Docker Compose，或无 Docker 时本地双进程
+./scripts/demo-smoke.sh   # 健康检查 + collect→enrich→ask
+```
+
+浏览器打开 http://127.0.0.1:8023 。停止：`./scripts/demo-down.sh`。详见 [INTEGRATION.md](INTEGRATION.md)。
+
+手动仅起主应用时：
 
 ```
 python -m pip install -r requirements.txt
 python main.py
 ```
 
-浏览器访问 http://127.0.0.1:8023 。页面里可以监测、查看富化、提问，并在「模型设置」里填写 DeepSeek 或通义千问的兼容接口。
-
-接口约定见 `接口说明.md`。
+页面里可以监测、查看富化、提问，并在「模型设置」里填写 DeepSeek 或通义千问的兼容接口。接口约定见 `接口说明.md`。
 
 ## 当前验收入口
 

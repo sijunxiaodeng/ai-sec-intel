@@ -41,7 +41,7 @@
         <div class="stats" id="stats"></div>
         <p id="monitor-line" class="hint"></p>
         <ol class="flow" id="flow">
-          <li><b>监测</b><span>从 NVD 和 OSV 拉取，并按编号合并</span></li>
+          <li><b>监测</b><span>NVD、OSV 与团队情报（B），按编号合并；资料库另同步</span></li>
           <li><b>富化</b><span>查询风险指标，抓取关联资料与修复记录</span></li>
           <li><b>入库</b><span>同一编号合并成一条情报</span></li>
           <li><b>问答</b><span>先检索，再组织回答</span></li>
@@ -65,10 +65,10 @@
       <section id="monitor" class="view" hidden>
         <form id="collect-form" class="toolbar">
           <label>监测关键词
-            <input id="keyword" value="ollama" />
+            <input id="keyword" value="llm,vllm,langchain,huggingface,openai,ollama,jailbreak" />
           </label>
           <button type="submit" class="primary" id="collect-btn">开始监测</button>
-          <p class="hint">一次监测会同时询问 NVD 和 OSV。某一个失败时，另一个仍会入库。同一编号合并成一条。</p>
+          <p class="hint">同时询问 NVD、OSV（用第一个词）与团队情报 B（可逗号多词）。某一源失败时其余继续；同一编号合并。非 CVE 资料见「安全资料库」同步。</p>
         </form>
         <div class="panel">
           <div class="panel-head">

@@ -39,7 +39,7 @@ def run_documents(record):
     return dict(result, steps=steps)
 
 
-def run_collect(keyword="ollama"):
+def run_collect(keyword="llm"):
     monitored = monitor_run(keyword)
     enriched = enrich_run(monitored["items"], online=False)
     saved = upsert(enriched["records"])
