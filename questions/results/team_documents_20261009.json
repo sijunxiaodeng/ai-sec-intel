@@ -1,0 +1,684 @@
+{
+  "source_commit": "988860c4f283de9a6ea8af60854ffd49f475ba6d",
+  "recorded_at": "2026-10-09T12:47:11.377289+00:00",
+  "environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.14",
+    "root_dependency_hash": "539c90b3471f106d80e720c803145e54c0bb937b7e1e6b067bdfd6d60bc98805",
+    "team_dependency_hash": "e46231fa7462740052f1fb4410d8d8de4fac73a723bf79940641d4564212f8ab",
+    "dependency_versions_unchanged_from_step20": true
+  },
+  "scope": "same-machine isolated offline CVE, team summary and explicit article import HTTP rehearsal with synthetic input and fetch responses; not live original source retrieval, independent quality or six-hour latency",
+  "fixture_cve": "CVE-2026-10001",
+  "fixture_sha256": "8f8736acc854869967aeda3536bb9a941ea0979086eab868a806d51867c3f51a",
+  "fresh_runs": [
+    {
+      "passed": true,
+      "checks": [
+        {
+          "name": "rule_classification_without_model",
+          "passed": true
+        },
+        {
+          "name": "team_database_available",
+          "passed": true
+        },
+        {
+          "name": "no_chat_key",
+          "passed": true
+        },
+        {
+          "name": "team_collect_enrich_store",
+          "passed": true
+        },
+        {
+          "name": "nvd_osv_failures_preserved",
+          "passed": true
+        },
+        {
+          "name": "score_and_source",
+          "passed": true
+        },
+        {
+          "name": "followup_keeps_entity_and_changes_fields",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "new_session_has_no_old_context",
+          "passed": true
+        },
+        {
+          "name": "unknown_cve_has_no_old_evidence",
+          "passed": true
+        },
+        {
+          "name": "repeat_collection_is_idempotent",
+          "passed": true
+        },
+        {
+          "name": "document_failure_preserved",
+          "passed": true
+        },
+        {
+          "name": "bm25_without_vector_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_evidence_is_stable",
+          "passed": true
+        },
+        {
+          "name": "source_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "four_non_cve_types_imported",
+          "passed": true
+        },
+        {
+          "name": "team_summaries_have_distinct_scope",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_has_bound_citations",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_retains_scope_without_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_team_document_import_is_stable",
+          "passed": true
+        },
+        {
+          "name": "team_api_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "explicit_original_article_import",
+          "passed": true
+        },
+        {
+          "name": "original_and_summary_remain_distinct",
+          "passed": true
+        },
+        {
+          "name": "original_article_is_answerable",
+          "passed": true
+        },
+        {
+          "name": "team_service_outage_retains_documents",
+          "passed": true
+        },
+        {
+          "name": "stored_summaries_remain_answerable",
+          "passed": true
+        }
+      ],
+      "http": [
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 143.21
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 17.14
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 9.81
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 2.29
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 5.1
+        },
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 51.84
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 299.23
+        },
+        {
+          "path": "/api/library",
+          "elapsed_ms": 26.64
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 67.29
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 234.26
+        },
+        {
+          "path": "/api/library/DOC-c283654da26ddc1a/full-text",
+          "elapsed_ms": 30.07
+        },
+        {
+          "path": "/api/library/DOC-bfc0500ea8f5a3b3",
+          "elapsed_ms": 7.08
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 8.8
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 2082.43
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 48.38
+        }
+      ],
+      "model_calls": 0,
+      "team_documents": {
+        "types": [
+          "academic_paper",
+          "policy",
+          "research_article",
+          "standard"
+        ],
+        "count": 4,
+        "scope": "team_summary",
+        "outage_retained": true,
+        "explicit_original_article": "synthetic_fetch_response"
+      },
+      "retrieval_mode": "bm25",
+      "document_statuses": [
+        "error",
+        "ok"
+      ]
+    },
+    {
+      "passed": true,
+      "checks": [
+        {
+          "name": "rule_classification_without_model",
+          "passed": true
+        },
+        {
+          "name": "team_database_available",
+          "passed": true
+        },
+        {
+          "name": "no_chat_key",
+          "passed": true
+        },
+        {
+          "name": "team_collect_enrich_store",
+          "passed": true
+        },
+        {
+          "name": "nvd_osv_failures_preserved",
+          "passed": true
+        },
+        {
+          "name": "score_and_source",
+          "passed": true
+        },
+        {
+          "name": "followup_keeps_entity_and_changes_fields",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "new_session_has_no_old_context",
+          "passed": true
+        },
+        {
+          "name": "unknown_cve_has_no_old_evidence",
+          "passed": true
+        },
+        {
+          "name": "repeat_collection_is_idempotent",
+          "passed": true
+        },
+        {
+          "name": "document_failure_preserved",
+          "passed": true
+        },
+        {
+          "name": "bm25_without_vector_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_evidence_is_stable",
+          "passed": true
+        },
+        {
+          "name": "source_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "four_non_cve_types_imported",
+          "passed": true
+        },
+        {
+          "name": "team_summaries_have_distinct_scope",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_has_bound_citations",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_retains_scope_without_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_team_document_import_is_stable",
+          "passed": true
+        },
+        {
+          "name": "team_api_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "explicit_original_article_import",
+          "passed": true
+        },
+        {
+          "name": "original_and_summary_remain_distinct",
+          "passed": true
+        },
+        {
+          "name": "original_article_is_answerable",
+          "passed": true
+        },
+        {
+          "name": "team_service_outage_retains_documents",
+          "passed": true
+        },
+        {
+          "name": "stored_summaries_remain_answerable",
+          "passed": true
+        }
+      ],
+      "http": [
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 125.56
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 17.8
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 10.74
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 2.21
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 22.89
+        },
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 32.88
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 363.03
+        },
+        {
+          "path": "/api/library",
+          "elapsed_ms": 26.11
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 70.27
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 252.46
+        },
+        {
+          "path": "/api/library/DOC-c283654da26ddc1a/full-text",
+          "elapsed_ms": 24.55
+        },
+        {
+          "path": "/api/library/DOC-bfc0500ea8f5a3b3",
+          "elapsed_ms": 8.81
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 9.89
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 2070.53
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 38.52
+        }
+      ],
+      "model_calls": 0,
+      "team_documents": {
+        "types": [
+          "academic_paper",
+          "policy",
+          "research_article",
+          "standard"
+        ],
+        "count": 4,
+        "scope": "team_summary",
+        "outage_retained": true,
+        "explicit_original_article": "synthetic_fetch_response"
+      },
+      "retrieval_mode": "bm25",
+      "document_statuses": [
+        "error",
+        "ok"
+      ]
+    },
+    {
+      "passed": true,
+      "checks": [
+        {
+          "name": "rule_classification_without_model",
+          "passed": true
+        },
+        {
+          "name": "team_database_available",
+          "passed": true
+        },
+        {
+          "name": "no_chat_key",
+          "passed": true
+        },
+        {
+          "name": "team_collect_enrich_store",
+          "passed": true
+        },
+        {
+          "name": "nvd_osv_failures_preserved",
+          "passed": true
+        },
+        {
+          "name": "score_and_source",
+          "passed": true
+        },
+        {
+          "name": "followup_keeps_entity_and_changes_fields",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "citations_and_verifier",
+          "passed": true
+        },
+        {
+          "name": "model_not_attempted",
+          "passed": true
+        },
+        {
+          "name": "new_session_has_no_old_context",
+          "passed": true
+        },
+        {
+          "name": "unknown_cve_has_no_old_evidence",
+          "passed": true
+        },
+        {
+          "name": "repeat_collection_is_idempotent",
+          "passed": true
+        },
+        {
+          "name": "document_failure_preserved",
+          "passed": true
+        },
+        {
+          "name": "bm25_without_vector_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_evidence_is_stable",
+          "passed": true
+        },
+        {
+          "name": "source_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "four_non_cve_types_imported",
+          "passed": true
+        },
+        {
+          "name": "team_summaries_have_distinct_scope",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_has_bound_citations",
+          "passed": true
+        },
+        {
+          "name": "team_summary_qa_retains_scope_without_model",
+          "passed": true
+        },
+        {
+          "name": "repeat_team_document_import_is_stable",
+          "passed": true
+        },
+        {
+          "name": "team_api_snapshots_match_hashes",
+          "passed": true
+        },
+        {
+          "name": "explicit_original_article_import",
+          "passed": true
+        },
+        {
+          "name": "original_and_summary_remain_distinct",
+          "passed": true
+        },
+        {
+          "name": "original_article_is_answerable",
+          "passed": true
+        },
+        {
+          "name": "team_service_outage_retains_documents",
+          "passed": true
+        },
+        {
+          "name": "stored_summaries_remain_answerable",
+          "passed": true
+        }
+      ],
+      "http": [
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 130.23
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 17.93
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 8.8
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 11.87
+        },
+        {
+          "path": "/api/ask",
+          "elapsed_ms": 5.52
+        },
+        {
+          "path": "/api/collect",
+          "elapsed_ms": 46.41
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 281.13
+        },
+        {
+          "path": "/api/library",
+          "elapsed_ms": 30.61
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 56.62
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 164.18
+        },
+        {
+          "path": "/api/library/DOC-c283654da26ddc1a/full-text",
+          "elapsed_ms": 38.24
+        },
+        {
+          "path": "/api/library/DOC-bfc0500ea8f5a3b3",
+          "elapsed_ms": 22.16
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 17.2
+        },
+        {
+          "path": "/api/library/team-sync",
+          "elapsed_ms": 2087.9
+        },
+        {
+          "path": "/api/library/ask",
+          "elapsed_ms": 34.78
+        }
+      ],
+      "model_calls": 0,
+      "team_documents": {
+        "types": [
+          "academic_paper",
+          "policy",
+          "research_article",
+          "standard"
+        ],
+        "count": 4,
+        "scope": "team_summary",
+        "outage_retained": true,
+        "explicit_original_article": "synthetic_fetch_response"
+      },
+      "retrieval_mode": "bm25",
+      "document_statuses": [
+        "error",
+        "ok"
+      ]
+    }
+  ],
+  "independent_accuracy": null,
+  "competition_passed": null,
+  "passed": true,
+  "tests": {
+    "root": {
+      "source_commit": "988860c4f283de9a6ea8af60854ffd49f475ba6d",
+      "total": 272,
+      "passed": true,
+      "clean_checkout": true,
+      "warnings": [
+        "Third-party AnyIO MemoryObject streams ResourceWarning; exit code 0"
+      ]
+    },
+    "standalone_team": {
+      "source_commit": "ceaef4f30bd757b6f0235181bd5d9b69640c6ac6",
+      "total": 192,
+      "passed": true,
+      "team_service_code_unchanged_in_final_source": true
+    },
+    "new_root_cases": 21
+  },
+  "bridge_scope": {
+    "types_supported": [
+      "academic_paper",
+      "research_article",
+      "standard",
+      "policy",
+      "vendor_advisory"
+    ],
+    "snapshot_kind": "team_api_record",
+    "content_scope": "team_summary",
+    "default_window": 30,
+    "maximum_window": 200,
+    "shared_with_original_fulltext_identity": false,
+    "team_real_database_connected": false,
+    "default_sync_fetches_original_source": false,
+    "explicit_original_fetch_supported": [
+      "research_article",
+      "vendor_advisory",
+      "academic_paper_arxiv_html"
+    ]
+  },
+  "boundaries": [
+    "Three local offline rehearsals use synthetic fixtures and original article fetch responses; no actual B collection database was available on this host",
+    "Metadata and description fields do not prove original fulltext, policy applicability, standard compliance or CVE-specific facts",
+    "Root and team environments from step20 were reused; source was fast-forwarded from local Git",
+    "No new chat model calls, no embedding model downloads, no independent accuracy or six-hour SLA claim"
+  ],
+  "live_root_check": {
+    "recorded_at": "2026-10-09T12:49:49.204082+00:00",
+    "http_status": 200,
+    "semantic_status": "error",
+    "team_service_available": false,
+    "existing_library_documents": 17,
+    "checks": {
+      "new_sync_button_served": true,
+      "original_fetch_button_served": true,
+      "team_sync_openapi_registered": true,
+      "offline_service_status_reported": true,
+      "existing_library_identities_and_text_preserved": true,
+      "registered_relation_facts_preserved": true
+    },
+    "ui_verification": "served HTML/JS and Node syntax; no browser interaction performed",
+    "model_calls": 0
+  }
+}
