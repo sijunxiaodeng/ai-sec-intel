@@ -81,6 +81,23 @@ def select(raw, candidates, required_documents):
 def fallback(rows, candidates):
     result = []
     for doc_id in dict.fromkeys(r["document_id"] for r in rows):
-        matches = [c for c in candidates if c["rows"][0]["document_id"] == doc_id]
-        result.extend(matches[:2] if matches else [entry(r) for r in rows if r["document_id"] == doc_id][:2])
+        retrieved = [r for r in rows if r["document_id"] == doc_id][:2]
+        chosen = set()
+        for row in retrieved:
+            matches = [c for c in candidates if any(r["citation_id"] == row["citation_id"] for r in c["rows"])]
+            uncovered = list(row["text"])
+            row_range = re.search(r"；字符 \[(\d+),(\d+)\)", row["locator"])
+            if row_range:
+                for candidate in matches:
+                    span = re.search(r"；字符 \[(\d+),(\d+)\)", candidate["locator"])
+                    if span:
+                        left = max(0, int(span[1]) - int(row_range[1]))
+                        right = min(len(uncovered), int(span[2]) - int(row_range[1]))
+                        if right > left: uncovered[left:right] = [" "] * (right - left)
+            # 候选数/长度限制、短标题或缺块导致原文未覆盖时，保留整块而非默默遗漏。
+            if not matches or "".join(uncovered).strip():
+                result.append(entry(row)); continue
+            for candidate in matches:
+                if candidate["excerpt_id"] not in chosen:
+                    chosen.add(candidate["excerpt_id"]); result.append(candidate)
     return result

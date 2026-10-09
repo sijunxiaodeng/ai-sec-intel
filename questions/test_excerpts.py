@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from agents.excerpts import options, select, SelectionError
+from agents.excerpts import fallback, options, select, SelectionError
 
 
 class ExcerptTest(unittest.TestCase):
@@ -58,6 +58,20 @@ class ExcerptTest(unittest.TestCase):
         candidate = self.build([row])[0]
         self.assertEqual(candidate["quote"], row["text"].strip())
         self.assertIn("字符 [2,", candidate["locator"])
+
+    def test_fallback_does_not_drop_third_paragraph_containing_limitation(self):
+        text = "First observation with sufficient context.\nSecond observation with sufficient context.\nHowever, only a well-defined subset is supported, not all procedures."
+        row = self.row(text); candidates = self.build([row])
+        chosen = fallback([row], candidates)
+        self.assertEqual(len(chosen), 3)
+        self.assertIn("not all procedures", chosen[-1]["quote"])
+
+    def test_fallback_keeps_raw_chunk_if_bounded_options_omit_long_paragraph(self):
+        row = self.row("A short and complete source observation.\n" + "Critical limitations must not be silently omitted. " * 60)
+        candidates = self.build([row])
+        chosen = fallback([row], candidates)
+        self.assertEqual(chosen[0]["quote"], row["text"])
+        self.assertIsNone(chosen[0]["excerpt_id"])
 
 
 if __name__ == "__main__": unittest.main()
