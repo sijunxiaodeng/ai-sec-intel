@@ -1,0 +1,617 @@
+{
+  "schema_version": 2,
+  "authored_at": "2026-10-09",
+  "purpose": "两个示范主题的开发检查题；开发者已知实现，不是独立盲测或竞赛准确率验收",
+  "sources": [
+    {
+      "id": "paper",
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "probes": [
+        {
+          "locator": "HTML section S2:",
+          "contains": "line between data and code"
+        },
+        {
+          "locator": "HTML section S5:",
+          "contains": "Other potential defenses"
+        },
+        {
+          "locator": "HTML section S5:",
+          "contains": "The extent of how RLHF"
+        }
+      ]
+    },
+    {
+      "id": "nist",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "probes": [
+        {
+          "locator": "PDF page 15；",
+          "contains": "Indirect prompt injection attacks"
+        },
+        {
+          "locator": "PDF page 37；",
+          "contains": "MS-2.7-007"
+        },
+        {
+          "locator": "PDF page 59；",
+          "contains": "arxiv.org/abs/2302.12173"
+        },
+        {
+          "locator": "PDF page 16；",
+          "contains": "third-party components"
+        },
+        {
+          "locator": "PDF page 25；",
+          "contains": "GV-6.1-005"
+        },
+        {
+          "locator": "PDF page 25；",
+          "contains": "GV-6.1-009"
+        },
+        {
+          "locator": "PDF page 17；",
+          "contains": "Not every suggested action"
+        }
+      ]
+    },
+    {
+      "id": "hf",
+      "url": "https://huggingface.co/docs/hub/security-pickle",
+      "version": null,
+      "content_scope": "article_body",
+      "probes": [
+        {
+          "locator": "extracted_text",
+          "contains": "This does not guarantee that your file is safe"
+        },
+        {
+          "locator": "extracted_text",
+          "contains": "not 100% foolproof"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "R01",
+      "question": "间接提示注入为什么会出现？请结合两份资料解释机制。",
+      "expected_status": "answered",
+      "required_patterns": [
+        "数据与指令边界",
+        "不要求攻击者拥有直接接口"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S2:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 15；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R02",
+      "question": "论文与 NIST 对直接和间接提示注入的区别如何描述？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "直接向系统输入",
+        "可能被检索的数据"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S2:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 15；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R03",
+      "question": "间接提示注入是否要求攻击者拥有直接接口？触发条件是什么？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "不必拥有直接接口",
+        "需被应用检索并读入"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S1:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 15；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R04",
+      "question": "把间接提示注入的条件与可能影响连接起来说明。",
+      "expected_status": "answered",
+      "required_patterns": [
+        "可能使模型受操控",
+        "数据窃取",
+        "不是具体系统已受影响"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S1:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 15；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R05",
+      "question": "过滤检索输入能解决间接提示注入吗？有什么局限和评估方向？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "可能识别不了复杂编码输入",
+        "AI 红队",
+        "不能据此宣称"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S5:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 37；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R06",
+      "question": "RLHF 能否完全消除间接提示注入？结合研究局限和框架建议说明。",
+      "expected_status": "answered",
+      "required_patterns": [
+        "RLHF 的缓解程度仍不清楚",
+        "该论文版本",
+        "不能泛化为所有新模型无效"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S5:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 37；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R07",
+      "question": "NIST 对间接提示注入的红队评估建议是否等于防护已经生效？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "MS-2.7-007",
+        "不能据此宣称",
+        "没有运行攻击或验证防护效果"
+      ],
+      "required_evidence": [
+        {
+          "source": "nist",
+          "locator": "PDF page 37；"
+        },
+        {
+          "source": "paper",
+          "locator": "HTML section S5:"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R08",
+      "question": "NIST 与论文都谈到间接提示注入，能算两次独立复现吗？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "参考文献列出了该论文",
+        "不能认定存在两次独立攻击复现"
+      ],
+      "required_evidence": [
+        {
+          "source": "nist",
+          "locator": "PDF page 59；"
+        },
+        {
+          "source": "paper",
+          "locator": "HTML section S2:"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R09",
+      "question": "比较论文和 NIST 对间接提示注入的机制解释、防护建议及局限。",
+      "expected_status": "answered",
+      "required_patterns": [
+        "数据与指令边界",
+        "较弱过滤模型",
+        "MS-2.7-007"
+      ],
+      "required_evidence": [
+        {
+          "source": "paper",
+          "locator": "HTML section S2:"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 15；"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 37；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R10",
+      "question": "模型窃取的查询攻击如何防护？",
+      "expected_status": "unsupported_topic",
+      "required_patterns": [],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R11",
+      "question": "过滤间接提示注入能修复 CVE-2024-37032 吗？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R12",
+      "question": "哪些 Ollama 版本受间接提示注入影响？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R13",
+      "question": "间接提示注入防护哪种更有效，成功率多少？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "R14",
+      "question": "间接提示注入如何防护？",
+      "expected_status": "insufficient_evidence",
+      "required_patterns": [
+        "缺少完成所问分析的跨文档证据"
+      ],
+      "required_evidence": [],
+      "selected_sources": [
+        "paper"
+      ],
+      "forbidden_patterns": [
+        "已经彻底解决间接提示注入",
+        "已有两次独立复现",
+        "本项目已验证防护生效",
+        "所有新模型都无效"
+      ]
+    },
+    {
+      "id": "S01",
+      "question": "模型供应链中，下载 Pickle 是否就会执行代码？加载条件与治理如何区分？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "仅下载文件不能",
+        "可能发生的任意代码执行",
+        "不能声称 NIST"
+      ],
+      "required_evidence": [
+        {
+          "source": "hf",
+          "locator": "extracted_text"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 16；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S02",
+      "question": "模型供应链有签名是否能保证文件安全？怎么结合供应商评估？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "不能保证文件安全",
+        "不能证明模型文件安全",
+        "使用场景"
+      ],
+      "required_evidence": [
+        {
+          "source": "hf",
+          "locator": "extracted_text"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 25；"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 17；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S03",
+      "question": "模型供应链的 Pickle 扫描没报错，是否安全？有哪些局限？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "不是百分之百可靠",
+        "不能证明模型文件安全"
+      ],
+      "required_evidence": [
+        {
+          "source": "hf",
+          "locator": "extracted_text"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 25；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S04",
+      "question": "模型供应链怎样结合来源核对、监测与漏洞情报来防护？",
+      "expected_status": "answered",
+      "required_patterns": [
+        "事件/漏洞数据库",
+        "签名确认来源",
+        "不能保证文件安全"
+      ],
+      "required_evidence": [
+        {
+          "source": "hf",
+          "locator": "extracted_text"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 25；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S05",
+      "question": "模型供应链的防护建议",
+      "expected_status": "insufficient_evidence",
+      "required_patterns": [
+        "缺少"
+      ],
+      "required_evidence": [],
+      "selected_sources": [
+        "hf"
+      ],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S06",
+      "question": "模型供应链扫描的成功率是多少？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [
+        "没有.*成功率"
+      ],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S07",
+      "question": "模型供应链与间接提示注入的因果关系是什么？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [
+        "分别询问",
+        "尚未核对"
+      ],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S08",
+      "question": "模型供应链的训练投毒和后门风险如何缓解？",
+      "expected_status": "unsupported_question",
+      "required_patterns": [
+        "尚未核对"
+      ],
+      "required_evidence": [],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    },
+    {
+      "id": "S09",
+      "question": "比较 HF 和 NIST 对模型供应链的加载风险、防护建议与扫描局限。",
+      "expected_status": "answered",
+      "required_patterns": [
+        "静态导入扫描",
+        "不能替代具体文件验证",
+        "没有扫描或加载模型样本"
+      ],
+      "required_evidence": [
+        {
+          "source": "hf",
+          "locator": "extracted_text"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 16；"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 25；"
+        },
+        {
+          "source": "nist",
+          "locator": "PDF page 17；"
+        }
+      ],
+      "selected_sources": [],
+      "forbidden_patterns": [
+        "本项目已扫描所有模型",
+        "签名保证文件安全",
+        "已有两次独立复现",
+        "扫描保证绝对安全"
+      ]
+    }
+  ],
+  "manual_review_rubric": [
+    "语义是否与完整来源一致",
+    "是否回答本题且保留条件/不确定性",
+    "综合是否明确区分文献事实与项目推导",
+    "引用关系是否误作独立复现"
+  ]
+}

@@ -24,6 +24,17 @@ INTENTS = {
     "A3": r"防护|防御|缓解|过滤|红队|评估|消除|阻断|RLHF|有效|安全措施",
     "A4": r"独立|两次|复现|引用关系|参考文献|来源依赖|互相引用",
 }
+SUPPLY_PLANS = {
+    "B1": {"label": "加载风险与组件治理", "premises": ["H1", "S1"],
+           "text": "HF 描述的是加载 Pickle 文件时可能发生的任意代码执行；仅下载文件不能据此认定已经执行。NIST 将预训练模型等第三方组件纳入来源和审查治理。项目将两者作为具体加载风险与一般组件治理的对照，不能声称 NIST 该段专门证实了 Pickle 漏洞。"},
+    "B2": {"label": "来源、签名与供应商评估", "premises": ["H2", "S2", "S3", "S4"],
+           "text": "项目综合：可将可信来源核对和签名检查，与 NIST 建议的供应商风险评估、持续监测和事件/漏洞数据库核对结合。HF 明确指出签名确认来源，不能保证文件安全。NIST 建议须按组织和使用场景确定适用性，不能宣称这些措施已经阻断供应链攻击。"},
+    "B3": {"label": "扫描与评估局限", "premises": ["H3", "H4", "S2", "S4"],
+           "text": "HF 描述了不执行文件代码的静态导入扫描，同时明确扫描不是百分之百可靠，也未主动审计 Python 包。扫描未报错不能证明模型文件安全。NIST 的供应商评估是管理建议，不能替代具体文件验证；本项目没有扫描或加载模型样本验证效果。"},
+}
+SUPPLY_INTENTS = {"B1": r"机制|原因|条件|触发|路径|影响|后果|下载|加载|反序列化",
+                 "B2": r"防护|防御|缓解|签名|来源|供应商|治理|监测|防止|安全措施",
+                 "B3": r"扫描|局限|保证|安全|评估|可靠|没.{0,3}报错"}
 
 
 def select_plans(raw, available, required):
@@ -47,18 +58,26 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
         return dict(base, status="unsupported_question", answer="已核对关系没有比较效果或成功率测量，不能给出哪种措施更有效或已验证有效的结论。可询问文献中的防护方向及局限。")
     if "直接提示注入" in question and "间接" not in question:
         return dict(base, status="unsupported_topic", answer="当前关系分析以间接提示注入为主题，单独的直接提示注入分析尚未覆盖；可以询问两者在所用资料中的区别。")
-    if not re.search(r"间接.{0,8}(?:提示)?注入|indirect.{0,20}(?:prompt.{0,3})?injection|提示注入", question, re.I):
-        return dict(base, status="unsupported_topic", answer="当前关系分析仅覆盖间接提示注入的示范主题，其他主题请使用原文摘录。")
-    required = {key for key, pattern in INTENTS.items() if re.search(pattern, question, re.I)}
+    supply = bool(re.search(r"供应链|pickle|反序列化|模型文件|模型权重", question, re.I))
+    injection = bool(re.search(r"间接.{0,8}(?:提示)?注入|indirect.{0,20}(?:prompt.{0,3})?injection|提示注入", question, re.I))
+    if supply and injection:
+        return dict(base, status="unsupported_question", answer="目前逐个主题分析，请分别询问模型供应链或间接提示注入；尚未核对两者之间的因果关系。")
+    if supply and re.search(r"投毒|后门|safetensors|weights_only|torch\.load", question, re.I):
+        return dict(base, status="unsupported_question", answer="模型供应链示范只核对 Pickle 加载风险、来源与扫描边界、第三方组件治理；该格式、加载参数或投毒/后门机制尚未核对，请使用原文摘录。")
+    if not supply and not injection:
+        return dict(base, status="unsupported_topic", answer="当前关系分析覆盖间接提示注入和模型供应链两个示范主题，其他主题请使用原文摘录。")
+    topic = "model_supply_chain" if supply else "indirect_prompt_injection"
+    plans, intents = (SUPPLY_PLANS, SUPPLY_INTENTS) if supply else (PLANS, INTENTS)
+    required = {key for key, pattern in intents.items() if re.search(pattern, question, re.I)}
     if not required:
-        required = {"A1", "A2", "A3", "A4"}
-    graph = build_graph(document_ids=document_ids, document_type=document_type, db_path=db_path)
+        required = set(plans)
+    graph = build_graph(document_ids=document_ids, document_type=document_type, topic=topic, db_path=db_path)
     lookup = {f["id"]: f for f in graph["facts"]}
-    available = {key: plan for key, plan in PLANS.items() if set(plan["premises"]) <= lookup.keys()
+    available = {key: plan for key, plan in plans.items() if set(plan["premises"]) <= lookup.keys()
                  and len({lookup[f]["document_id"] for f in plan["premises"]}) >= 2}
     missing = sorted(required - available.keys())
     if missing:
-        return dict(base, status="insufficient_evidence", answer="缺少完成所问分析的跨文档证据。请选用已入库的间接提示注入论文 HTML 全文与 NIST 框架，或检查来源更新状态。缺少路径：" + "、".join(PLANS[k]["label"] for k in missing),
+        return dict(base, status="insufficient_evidence", answer="缺少完成所问分析的跨文档证据。请选用已核对的主题资料，或检查来源更新状态。缺少路径：" + "、".join(plans[k]["label"] for k in missing),
                     facts=graph["facts"], evidence=graph["evidence"], graph=graph["graph"],
                     source_health=graph["source_health"], unavailable_facts=graph["unavailable_facts"], missing_analysis_ids=missing)
     chosen, attempted, used = sorted(required), False, False
@@ -75,7 +94,7 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
             note = "模型路径未采用，回退程序关系分析。原因：" + str(exc)[:140]
     analyses, fact_ids = [], set()
     for key in chosen:
-        plan = PLANS[key]
+        plan = plans[key]
         citations = list(dict.fromkeys(c for fid in plan["premises"] for c in lookup[fid]["evidence_ids"]))
         analyses.append(dict(plan, id=key, evidence_ids=citations, basis="project_bounded_synthesis",
                              independent_reproduction=False))
@@ -88,7 +107,7 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
     connected_nodes = {node for edge in answer_edges for node in (edge["source"], edge["target"])}
     answer_graph = {"nodes": [node for node in graph["graph"]["nodes"] if node["id"] in connected_nodes],
                     "edges": answer_edges}
-    lines = ["间接提示注入：按来源关系进行限定综合（所用资料：论文 v2、NIST 2024 框架）。"]
+    lines = ["模型供应链：按来源关系进行限定综合（HF 文档存档、NIST 2024 框架）。" if supply else "间接提示注入：按来源关系进行限定综合（所用资料：论文 v2、NIST 2024 框架）。"]
     for analysis in analyses:
         lines.append("\n%s：%s %s" % (analysis["label"], analysis["text"], " ".join("[%s]" % c for c in analysis["evidence_ids"])))
     lines.append("\n来源说明：" + graph["source_independence"] + (" [%s]" % lookup["N4"]["evidence_ids"][0] if "N4" in lookup else ""))
@@ -96,7 +115,10 @@ def run(question, *, document_ids=None, document_type="", use_model=True, db_pat
     for state in graph["source_health"]:
         if state["retained_previous"]:
             lines.append("更新提示：%s 抓取失败，沿用获取于 %s 的证据。" % (state["source"], state["retrieved_at"]))
-    return dict(base, status="answered", answer="\n".join(lines), analyses=analyses, facts=facts,
+    from enrichment.relation_candidates import reviewed_graph
+    supplements = reviewed_graph(topic=topic, document_ids=document_ids, document_type=document_type, db_path=db_path)
+    return dict(base, status="answered", topic=topic, answer="\n".join(lines), analyses=analyses, facts=facts,
+                reviewed_quotes=supplements,
                 evidence=[r for r in graph["evidence"] if r["citation_id"] in citations],
                 graph=answer_graph, source_health=graph["source_health"], unavailable_facts=graph["unavailable_facts"],
                 source_independence=graph["source_independence"], registry_scope=graph["registry_scope"],

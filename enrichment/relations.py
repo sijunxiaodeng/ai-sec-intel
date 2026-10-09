@@ -8,10 +8,19 @@ from enrichment.documents import canonical
 from rag.library import DOCUMENT_TYPES, LIBRARY_DB, detail, documents
 
 REGISTRY = Path(__file__).with_name("relations.json")
+SUPPLY_REGISTRY = Path(__file__).with_name("supply_chain_relations.json")
+TOPICS = ("indirect_prompt_injection", "model_supply_chain")
 
 
-def build_graph(*, document_ids=None, document_type="", db_path=LIBRARY_DB):
-    registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+def registry_for(topic):
+    if topic not in TOPICS:
+        raise ValueError("未知关系主题")
+    path = REGISTRY if topic == TOPICS[0] else SUPPLY_REGISTRY
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def build_graph(*, document_ids=None, document_type="", topic="indirect_prompt_injection", db_path=LIBRARY_DB):
+    registry = registry_for(topic)
     ids = list(dict.fromkeys(document_ids or []))
     if len(ids) > 4 or any(not re.fullmatch(r"DOC-[a-f0-9]{16}", value) for value in ids):
         raise ValueError("最多指定 4 个有效资料编号")
@@ -49,7 +58,7 @@ def build_graph(*, document_ids=None, document_type="", db_path=LIBRARY_DB):
         row = rows[0]
         facts.append({k: spec[k] for k in ("id", "facet", "predicate", "label", "text", "authority", "qualifier")} |
                      {"topic": registry["topic"], "document_id": doc["document_id"], "source": spec["source"],
-                      "publisher": doc["publisher"], "version": doc["version"],
+                      "publisher": doc["publisher"], "version": doc.get("version") or "页面未注明版本；按存档片段核对",
                       "evidence_ids": [row["citation_id"]], "validation": "source_bound_summary"})
         evidence[row["citation_id"]] = row
     nodes = [{"id": registry["topic"], "label": registry["label"], "kind": "topic"}]
@@ -69,6 +78,6 @@ def build_graph(*, document_ids=None, document_type="", db_path=LIBRARY_DB):
             "source_health": health, "unavailable_facts": unavailable,
             "source_independence": "存在来源引用关系；不按文档数量认定独立验证" if reference else "未核对来源独立性",
             "registry_scope": registry["scope"], "review_kind": registry["review_kind"],
-            "limitations": ["首个示范主题的已核对关系，不是所有主题的自动知识图谱",
+            "limitations": ["两个示范主题的已核对关系，不是所有主题的自动知识图谱",
                             "中文说明与固定版本片段绑定，程序校验不替代语义复核",
                             "不据此认定具体资产受影响，不执行攻击、PoC 或防护验证"]}

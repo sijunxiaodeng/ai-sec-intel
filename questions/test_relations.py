@@ -137,7 +137,7 @@ class RelationsTest(unittest.TestCase):
 
     def test_unknown_topic_specific_cve_and_unmeasured_effectiveness_are_not_inferred(self):
         with patch("agents.relations_qa.chat") as model:
-            for q, status in (("模型供应链如何防护", "unsupported_topic"),
+            for q, status in (("模型窃取如何防护", "unsupported_topic"),
                               ("直接提示注入的机制", "unsupported_topic"),
                               ("CVE-2024-37032 能靠过滤间接提示注入修复吗", "unsupported_question"),
                               ("间接提示注入防护哪种更有效", "unsupported_question")):

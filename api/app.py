@@ -56,6 +56,20 @@ class LibraryAskBody(BaseModel):
     use_model: bool = True
 
 
+class RelationCandidatesBody(BaseModel):
+    topic: str = "model_supply_chain"
+    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    use_model: bool = True
+
+
+class RelationReviewBody(BaseModel):
+    decision: str
+    facet: str
+    reviewer: str = Field(..., min_length=1, max_length=80)
+    note: str = Field(..., min_length=10, max_length=1000)
+    review_kind: str = "user_source_review"
+
+
 def _summary(record):
     item = record.get("item") or {}
     cvss = record.get("cvss") or {}
@@ -294,9 +308,42 @@ def library_analyze(body: LibraryAskBody):
 
 
 @app.get("/api/library/relations/graph")
-def library_relations_graph():
+def library_relations_graph(topic: str = "indirect_prompt_injection"):
     from enrichment.relations import build_graph
-    return build_graph()
+    from enrichment.relation_candidates import reviewed_graph
+    try:
+        result = build_graph(topic=topic)
+        result["reviewed_quotes"] = reviewed_graph(topic=topic)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/library/relations/candidates")
+def library_relation_candidates(topic: str = "model_supply_chain"):
+    from enrichment.relation_candidates import list_candidates
+    try:
+        return list_candidates(topic=topic)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/library/relations/candidates")
+def library_generate_candidates(body: RelationCandidatesBody):
+    from enrichment.relation_candidates import generate
+    try:
+        return generate(topic=body.topic, document_ids=body.document_ids, use_model=body.use_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/library/relations/candidates/{candidate_id}/review")
+def library_review_candidate(candidate_id: str, body: RelationReviewBody):
+    from enrichment.relation_candidates import review
+    try:
+        return review(candidate_id, **body.dict())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @app.post("/api/ask")

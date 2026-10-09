@@ -720,7 +720,76 @@ function renderLibraryRelations(data) {
     add(block, "p", "meta", "资料版本：" + fact.version + "；引用：" + fact.evidence_ids.join("、"));
   });
   (data.unavailable_facts || []).forEach(function (item) { add(target, "p", "hint", item.fact_id + "：" + item.reason); });
+  var supplements = data.reviewed_quotes || {};
+  if ((supplements.facts || []).length) {
+    add(target, "h3", "", "已复核的补充原文（未用作综合前提）");
+    supplements.facts.forEach(function (fact) {
+      var block = add(target, "details", "relation-fact");
+      add(block, "summary", "", (roles[fact.facet] || fact.facet) + " · " + fact.publisher);
+      add(block, "p", "", fact.text);
+      add(block, "p", "hint", fact.qualifier + "；审核：" + fact.review.reviewer + " · " + fact.review.review_kind);
+      add(block, "p", "meta", "引用：" + fact.evidence_ids.join("、"));
+    });
+  }
 }
+
+var candidateLabels = {mechanism: "风险机制", condition: "场景条件", impact: "可能影响", mitigation: "潜在防护", limitation: "防护局限", assessment: "评估建议"};
+function renderCandidates(data) {
+  var target = $("candidate-list"); clear(target);
+  $("candidate-status").textContent = (data.note || data.notice || "") + " 当前显示 " + data.items.length + " 项。";
+  var states = {pending: "待审核", approved: "已通过", rejected: "已拒绝", revoked: "已撤销", stale: "来源变化或不可用，已失效"};
+  data.items.forEach(function (item) {
+    var block = add(target, "details", "relation-fact");
+    var reviewedFacet = item.reviews.length ? item.reviews[item.reviews.length - 1].facet : item.facet;
+    add(block, "summary", "", states[item.effective_state] + " · " + candidateLabels[reviewedFacet] + " · " + item.publisher);
+    add(block, "p", "", item.quote);
+    add(block, "p", "meta", item.citation_id + " · " + item.locator);
+    add(block, "p", "hint", "来源版本：" + (item.version || "页面未注明版本；按存档核对") + "；获取于 " + dateText(item.retrieved_at) + (item.retained_previous ? "；沿用旧存档" : ""));
+    libraryLink(block, item.url + (item.locator.indexOf("PDF page ") === 0 ? "#page=" + item.locator.match(/^PDF page (\d+)/)[1] : ""), "打开原始来源");
+    var original = add(block, "button", "ghost", "查看存档原文"); original.type = "button";
+    original.addEventListener("click", function () { api("/api/library/" + item.document_id).then(renderLibraryEvidence).catch(showError); });
+    (item.reviews || []).forEach(function (event) { add(block, "p", "hint", "审核记录：" + states[event.decision] + " · " + candidateLabels[event.facet] + " · " + event.reviewer + " · " + event.review_kind + " · " + dateText(event.reviewed_at) + "；" + event.note); });
+    if (item.state !== "pending" && item.state !== "approved") return;
+    var form = add(block, "form", "");
+    var facetLabel = add(form, "label", "", "核对后分类");
+    var facet = add(facetLabel, "select", "");
+    Object.keys(candidateLabels).forEach(function (key) { var opt = add(facet, "option", "", candidateLabels[key]); opt.value = key; });
+    facet.value = item.reviews.length ? item.reviews[item.reviews.length - 1].facet : item.facet;
+    var reviewerLabel = add(form, "label", "", "审核者");
+    var reviewer = add(reviewerLabel, "input", ""); reviewer.required = true; reviewer.maxLength = 80;
+    var kindLabel = add(form, "label", "", "审核类型");
+    var kind = add(kindLabel, "select", "");
+    [{value: "user_source_review", label: "人工来源核对（不计独立验收）"}, {value: "developer_source_review", label: "开发来源核对（不计独立验收）"}].forEach(function (item) { var opt = add(kind, "option", "", item.label); opt.value = item.value; });
+    var noteLabel = add(form, "label", "", "核对说明（至少 10 字符）");
+    var note = add(noteLabel, "textarea", ""); note.required = true; note.minLength = 10; note.maxLength = 1000; note.rows = 2;
+    var actions = add(form, "div", "toolbar");
+    var decisions = item.state === "approved" ? ["revoked"] : ["approved", "rejected"];
+    decisions.forEach(function (decision) {
+      var button = add(actions, "button", "ghost", {approved: "通过主题关联与分类", rejected: "拒绝候选", revoked: "撤销通过"}[decision]);
+      button.type = "button"; button.disabled = decision === "approved" && !item.source_binding_valid;
+      button.addEventListener("click", function () {
+        if (!form.reportValidity()) return;
+        button.disabled = true;
+        api("/api/library/relations/candidates/" + item.id + "/review", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({decision: decision, facet: facet.value, reviewer: reviewer.value.trim(), note: note.value.trim(), review_kind: kind.value})}).then(function () {
+          clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "审核状态已变更，请重新提问。";
+          return loadCandidates();
+        }).catch(showError).then(function () { button.disabled = false; });
+      });
+    });
+    form.addEventListener("submit", function (event) { event.preventDefault(); });
+  });
+}
+function loadCandidates() {
+  var topic = $("candidate-topic").value;
+  return api("/api/library/relations/candidates?topic=" + encodeURIComponent(topic)).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(showError);
+}
+$("candidate-refresh").addEventListener("click", loadCandidates);
+$("candidate-topic").addEventListener("change", function () { clear($("candidate-list")); loadCandidates(); });
+$("candidate-generate").addEventListener("click", function () {
+  var button = $("candidate-generate"), topic = $("candidate-topic").value; button.disabled = true;
+  $("candidate-status").textContent = "正在提取候选，所有新候选均需审核…";
+  api("/api/library/relations/candidates", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({topic: topic})}).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(showError).then(function () { button.disabled = false; });
+});
 
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
@@ -787,6 +856,11 @@ $("library-relations-example").addEventListener("click", function () {
   $("library-question").value = "比较论文和 NIST 对间接提示注入的机制解释、防护建议及局限。";
   clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "已填入关系示例，将使用已核对的论文全文与 NIST 框架。"; loadLibrary();
 });
+$("library-supply-example").addEventListener("click", function () {
+  $("library-mode").value = "relations"; $("library-type").value = ""; librarySelectedDocs = [];
+  $("library-question").value = "比较 HF 和 NIST 对模型供应链的加载风险、防护建议与扫描局限。";
+  clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "已填入供应链示例，将使用 HF 文档存档与 NIST 框架。"; loadLibrary();
+});
 $("library-ask-form").addEventListener("submit", function (event) {
   event.preventDefault(); clearError();
   var button = $("library-ask"); button.disabled = true; button.textContent = "正在检索原文…";
@@ -797,7 +871,9 @@ $("library-ask-form").addEventListener("submit", function (event) {
     if (requestMode !== $("library-mode").value || requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
     $("library-answer").textContent = result.answer;
     renderLibraryRelations(result);
-    renderLibraryEvidence({evidence: result.evidence, notice: requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
+    var rows = result.evidence || [];
+    ((result.reviewed_quotes || {}).evidence || []).forEach(function (row) { if (!rows.some(function (r) { return r.citation_id === row.citation_id; })) rows.push(row); });
+    renderLibraryEvidence({evidence: rows, notice: requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
   }).catch(showError).then(function () { button.disabled = false; button.textContent = "按证据回答"; });
 });
 $("library-search-form").addEventListener("submit", function (event) {

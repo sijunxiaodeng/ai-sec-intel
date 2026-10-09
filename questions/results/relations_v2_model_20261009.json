@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T05:16:05.896616+00:00",
+  "mode": "model",
+  "purpose": "两个示范主题的开发检查题；开发者已知实现，不是独立盲测或竞赛准确率验收",
+  "source_manifest": {
+    "paper": {
+      "document_id": "DOC-d57ebd5fb555085a",
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "source_response_sha256": "efc0799ef830c9a0d5e149ee8871085d96c624193e316e476b1a632db3ef7efa",
+      "retrieved_at": "2026-10-09T04:09:34.011880+00:00"
+    },
+    "nist": {
+      "document_id": "DOC-b8df5c37607d20c3",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "source_response_sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a",
+      "retrieved_at": "2026-10-09T04:09:03.682428+00:00"
+    },
+    "hf": {
+      "document_id": "DOC-a4e15f3b0f4087ee",
+      "url": "https://huggingface.co/docs/hub/security-pickle",
+      "version": null,
+      "content_scope": "article_body",
+      "source_response_sha256": "37a177bfd38e0e131b04f6715b7754964679adc11491a1c3d31b4e341967538c",
+      "retrieved_at": "2026-10-08T12:44:18.500789+00:00"
+    }
+  },
+  "rows": [
+    {
+      "case_id": "S01",
+      "question": "模型供应链中，下载 Pickle 是否就会执行代码？加载条件与治理如何区分？",
+      "elapsed_http_seconds": 1.7336,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": true,
+      "used_model": true,
+      "analysis_ids": [
+        "B1",
+        "B2"
+      ],
+      "citation_ids": [
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b7d5545b947c",
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-3e291668ed6c",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-7adc10359570",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d1e2d54351e3",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-12e83279cf55",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-237f75105387"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "S03",
+      "question": "模型供应链的 Pickle 扫描没报错，是否安全？有哪些局限？",
+      "elapsed_http_seconds": 0.7103,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": true,
+      "used_model": true,
+      "analysis_ids": [
+        "B3"
+      ],
+      "citation_ids": [
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-18789d32672e",
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b83eaccd5e65",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d1e2d54351e3",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-237f75105387"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    },
+    {
+      "case_id": "S09",
+      "question": "比较 HF 和 NIST 对模型供应链的加载风险、防护建议与扫描局限。",
+      "elapsed_http_seconds": 0.8196,
+      "status": "answered",
+      "automatic_passed": true,
+      "failures": [],
+      "model_attempted": true,
+      "used_model": true,
+      "analysis_ids": [
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "citation_ids": [
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b7d5545b947c",
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-3e291668ed6c",
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-18789d32672e",
+        "DOC-a4e15f3b0f4087ee/LIB-a4e15f3b0f4087ee-b83eaccd5e65",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-7adc10359570",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-d1e2d54351e3",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-12e83279cf55",
+        "DOC-b8df5c37607d20c3/LIB-b8df5c37607d20c3-237f75105387"
+      ],
+      "manual_review": {
+        "reviewer": null,
+        "independent_human": null,
+        "source_supported": null,
+        "relevant": null,
+        "conditions_preserved": null,
+        "synthesis_correct": null,
+        "notes": ""
+      }
+    }
+  ],
+  "summary": {
+    "cases": 3,
+    "automatic_passed": 3,
+    "model_attempted": 3,
+    "model_accepted": 3,
+    "http_under_5s": 3,
+    "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null
+  },
+  "dataset_sha256": "8cc5de130cafff9b508f0c062b1ae81f29e608c159e936067aefdcd606a68344"
+}

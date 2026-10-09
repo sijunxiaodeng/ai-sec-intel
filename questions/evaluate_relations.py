@@ -38,7 +38,7 @@ def source_manifest(base, dataset):
         for probe in source["probes"]:
             if not any(probe["locator"] in r["locator"] and probe["contains"] in r["text"] for r in doc["evidence"]):
                 raise ValueError("题单来源前提已变化，须复核：" + source["id"])
-        sources[source["id"]] = {k: doc[k] for k in ("document_id", "url", "version", "content_scope", "source_response_sha256", "retrieved_at")}
+        sources[source["id"]] = {k: doc.get(k) for k in ("document_id", "url", "version", "content_scope", "source_response_sha256", "retrieved_at")}
     return sources
 
 
@@ -116,12 +116,13 @@ def main():
     parser.add_argument("--url", default="http://127.0.0.1:8023")
     parser.add_argument("--mode", choices=("rules", "model"), default="rules")
     parser.add_argument("--case", action="append")
+    parser.add_argument("--dataset", type=Path, default=DATASET)
     parser.add_argument("--output", type=Path, default=Path("data/relations-evaluation.json"))
     parser.add_argument("--public-output", type=Path)
     args = parser.parse_args()
-    dataset = json.loads(DATASET.read_text(encoding="utf-8"))
+    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
     report = run(args.url, dataset, args.mode, args.case)
-    report["dataset_sha256"] = hashlib.sha256(DATASET.read_bytes()).hexdigest()
+    report["dataset_sha256"] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.public_output:

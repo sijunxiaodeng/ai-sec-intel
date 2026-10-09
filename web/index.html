@@ -109,15 +109,22 @@
         </form>
         <form id="library-ask-form" class="panel library-ask">
           <h2>资料问答与关系分析</h2>
-          <p class="hint">原文摘录支持各类资料，最多勾选 4 份。关系分析先覆盖间接提示注入，区分来源事实、文献建议与项目综合；默认使用已核对的论文全文和 NIST 框架。</p>
+          <p class="hint">原文摘录支持各类资料，最多勾选 4 份。关系分析覆盖间接提示注入、模型供应链；区分来源事实、文献建议与项目综合。自动候选须复核后才能进入补充关系摘录。</p>
           <label for="library-mode">回答方式</label>
-          <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析（间接提示注入）</option></select>
+          <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析（按问题识别主题）</option></select>
           <label for="library-question">问题</label>
           <textarea id="library-question" rows="2" placeholder="例如：管理暂行办法对训练数据有什么规定？适用范围是什么？"></textarea>
-          <div class="toolbar"><button type="submit" class="primary" id="library-ask">按证据回答</button><button type="button" class="ghost" id="library-example">填入政策示例</button><button type="button" class="ghost" id="library-relations-example">填入关系示例</button></div>
+          <div class="toolbar"><button type="submit" class="primary" id="library-ask">按证据回答</button><button type="button" class="ghost" id="library-example">填入政策示例</button><button type="button" class="ghost" id="library-relations-example">填入关系示例</button><button type="button" class="ghost" id="library-supply-example">填入供应链示例</button></div>
           <div id="library-answer" class="answer" aria-live="polite">填写问题后查看按来源组织的原文与引用。</div>
           <div id="library-relations"></div>
         </form>
+        <article class="panel">
+          <h2>关系候选审核</h2>
+          <p class="hint">自动选择原文并提出分类，核对原文、主题与分类后再通过。通过项仅补充来源摘录，不自动成为因果推理前提。开发复核不计为独立验收。</p>
+          <div class="toolbar"><label for="candidate-topic">候选主题</label><select id="candidate-topic"><option value="model_supply_chain">模型供应链</option><option value="indirect_prompt_injection">间接提示注入</option></select><button type="button" class="ghost" id="candidate-generate">自动提取候选</button><button type="button" class="ghost" id="candidate-refresh">刷新审核队列</button></div>
+          <p id="candidate-status" class="hint" aria-live="polite">点击刷新查看本机审核队列。</p>
+          <div id="candidate-list"></div>
+        </article>
         <div class="split enrich-layout">
           <article class="panel"><h2>资料与同步状态</h2><div id="library-sources"></div><div id="library-list"></div></article>
           <article class="panel"><h2>原文证据</h2><div id="library-evidence"><p class="empty">选择一份资料查看片段，或输入主题检索。</p></div></article>
