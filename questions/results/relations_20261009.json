@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T04:56:37.168729+00:00",
+  "scope": "First reviewed topic; bounded synthesis, not general free model reasoning",
+  "graph_snapshot": {
+    "topic": "indirect_prompt_injection",
+    "status": "ready",
+    "facts": 11,
+    "nodes": 14,
+    "edges": 23,
+    "source_independence": "存在来源引用关系；不按文档数量认定独立验证"
+  },
+  "sources": {
+    "paper": {
+      "document_id": "DOC-d57ebd5fb555085a",
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "source_response_sha256": "efc0799ef830c9a0d5e149ee8871085d96c624193e316e476b1a632db3ef7efa",
+      "retrieved_at": "2026-10-09T04:09:34.011880+00:00"
+    },
+    "nist": {
+      "document_id": "DOC-b8df5c37607d20c3",
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "source_response_sha256": "6e73620ab6b64e90ef2c04bf0e0d6246185a2f4b1b13cab0df494496cff89b6a",
+      "retrieved_at": "2026-10-09T04:09:03.682428+00:00"
+    }
+  },
+  "source_review": {
+    "kind": "developer_source_review",
+    "independent_human": false,
+    "pdf_visual_pages_physical": [
+      37,
+      59
+    ],
+    "previous_step_visual_page_physical": 15
+  },
+  "final_http_rules": {
+    "cases": 14,
+    "automatic_passed": 14,
+    "model_attempted": 0,
+    "model_accepted": 0,
+    "http_under_5s": 14,
+    "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null
+  },
+  "final_http_model": {
+    "cases": 3,
+    "automatic_passed": 3,
+    "model_attempted": 3,
+    "model_accepted": 3,
+    "http_under_5s": 3,
+    "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null
+  },
+  "development_history": [
+    {
+      "stage": "before_answer_graph_trimming",
+      "mode": "rules",
+      "summary": {
+        "cases": 14,
+        "automatic_passed": 14,
+        "model_attempted": 0,
+        "model_accepted": 0,
+        "http_under_5s": 14,
+        "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+        "independent_semantic_accuracy": null,
+        "competition_multihop_accuracy": null
+      },
+      "source_review": "Some unused graph edges were returned without their evidence in the answer; graph trimmed and edge evidence check added before final rerun"
+    },
+    {
+      "stage": "before_answer_graph_trimming",
+      "mode": "model",
+      "summary": {
+        "cases": 3,
+        "automatic_passed": 3,
+        "model_attempted": 3,
+        "model_accepted": 3,
+        "http_under_5s": 3,
+        "timing_scope": "Local HTTP request serialization, server work, full response read; excludes browser rendering; one run, no load benchmark",
+        "independent_semantic_accuracy": null,
+        "competition_multihop_accuracy": null
+      },
+      "source_review": "Some unused graph edges were returned without their evidence in the answer; graph trimmed and edge evidence check added before final rerun"
+    }
+  ],
+  "browser_checks": {
+    "relation_example_answered": true,
+    "source_fact_details_expand": true,
+    "policy_example_clears_previous_answer": true,
+    "model_attempted": 2,
+    "model_accepted": 2,
+    "latency_measured": false
+  },
+  "actual_model_call_totals": {
+    "attempted": 8,
+    "accepted_path_selection": 8,
+    "free_text_generation": 0
+  },
+  "tests": {
+    "passed": 181,
+    "javascript_syntax_check": true,
+    "independent_semantic_accuracy": null,
+    "competition_multihop_accuracy": null,
+    "relation_precision": null,
+    "relation_recall": null
+  },
+  "code_hash_basis": "Local working-tree bytes; Git may normalize line endings",
+  "code_sha256": {
+    "enrichment/relations.py": "038d3466e6a2639686aa00487d0a1961b9e987969a7635ddeebda4c556ddb520",
+    "enrichment/relations.json": "871a154d8c2cc0b79cb0b0e87cbf6149bdcd906cc44fc67e11cccc730ae98525",
+    "agents/relations_qa.py": "8b3d7062322c3e06ac5b4a19b5e5a3bf5fbb63791c05694ab85f27af0cafc636",
+    "questions/evaluate_relations.py": "a0ec44f28dc3b079d1b31cdb8ef2ee488c3ed04813dd47f0a0522e21c0c2e151",
+    "questions/relations_evaluation.json": "ec2f459accb87cb49218c83b2c843cbe64889897e4dfec5566915a7e64723a4c",
+    "api/app.py": "2eba03be818525cf2d3218fc69732721ad7c1409eaf72e9a2516d06e3499ab3c",
+    "web/app.js": "2f0f3d6eb0e3e39389e3b3663ed00c6d305955302adcbe2fb3c4cd0ed70a1194",
+    "web/index.html": "426cf779988fca5882ad5ba8e91b9b5cb81988edd552a2bc179acd08e662742b"
+  }
+}

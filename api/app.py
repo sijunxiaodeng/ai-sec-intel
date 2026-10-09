@@ -284,6 +284,21 @@ def library_ask(body: LibraryAskBody):
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@app.post("/api/library/analyze")
+def library_analyze(body: LibraryAskBody):
+    from agents.relations_qa import run
+    try:
+        return run(body.question, document_ids=body.document_ids, document_type=body.document_type, use_model=body.use_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/library/relations/graph")
+def library_relations_graph():
+    from enrichment.relations import build_graph
+    return build_graph()
+
+
 @app.post("/api/ask")
 def ask(body: AskBody):
     question = (body.question or "").strip()

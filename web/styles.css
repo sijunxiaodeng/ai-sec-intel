@@ -193,6 +193,10 @@ button.row {
 .library-ask textarea { margin: 8px 0; }
 .library-selection { display: block; margin: 10px 0; font-size: 13px; }
 .library-selection input { width: auto; }
+
+.relation-fact { margin: 9px 0; padding: 10px 12px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
+.relation-fact summary { cursor: pointer; font-weight: 600; }
+.relation-fact p { overflow-wrap: anywhere; }
 .asset-results { margin-top: 16px; }
 .asset-import textarea { margin-top: 6px; font-family: Consolas, monospace; }
 .asset-import select { max-width: 100%; }

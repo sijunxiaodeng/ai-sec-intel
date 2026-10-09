@@ -108,12 +108,15 @@
           <button type="submit" class="ghost">检索原文</button>
         </form>
         <form id="library-ask-form" class="panel library-ask">
-          <h2>资料问答（原文摘录）</h2>
-          <p class="hint">可在下方勾选最多 4 份资料，分别检索和引用。模型只挑选原文，不生成自由结论；论文、框架与政策保留各自的来源性质。</p>
+          <h2>资料问答与关系分析</h2>
+          <p class="hint">原文摘录支持各类资料，最多勾选 4 份。关系分析先覆盖间接提示注入，区分来源事实、文献建议与项目综合；默认使用已核对的论文全文和 NIST 框架。</p>
+          <label for="library-mode">回答方式</label>
+          <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析（间接提示注入）</option></select>
           <label for="library-question">问题</label>
           <textarea id="library-question" rows="2" placeholder="例如：管理暂行办法对训练数据有什么规定？适用范围是什么？"></textarea>
-          <div class="toolbar"><button type="submit" class="primary" id="library-ask">按证据回答</button><button type="button" class="ghost" id="library-example">填入政策示例</button></div>
+          <div class="toolbar"><button type="submit" class="primary" id="library-ask">按证据回答</button><button type="button" class="ghost" id="library-example">填入政策示例</button><button type="button" class="ghost" id="library-relations-example">填入关系示例</button></div>
           <div id="library-answer" class="answer" aria-live="polite">填写问题后查看按来源组织的原文与引用。</div>
+          <div id="library-relations"></div>
         </form>
         <div class="split enrich-layout">
           <article class="panel"><h2>资料与同步状态</h2><div id="library-sources"></div><div id="library-list"></div></article>

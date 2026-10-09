@@ -706,6 +706,22 @@ function renderLibraryEvidence(data) {
   });
 }
 
+function renderLibraryRelations(data) {
+  var target = $("library-relations"); clear(target);
+  var facts = data.facts || [];
+  if (!facts.length) return;
+  add(target, "h3", "", "来源事实与限定条件");
+  var roles = {mechanism: "风险机制", condition: "场景条件", impact: "可能影响", mitigation: "潜在防护", limitation: "防护局限", assessment: "评估建议", provenance: "引用关系"};
+  facts.forEach(function (fact) {
+    var block = add(target, "details", "relation-fact");
+    add(block, "summary", "", (roles[fact.facet] || fact.facet) + " · " + fact.label + " · " + fact.publisher);
+    add(block, "p", "", fact.text);
+    add(block, "p", "hint", "限定：" + fact.qualifier);
+    add(block, "p", "meta", "资料版本：" + fact.version + "；引用：" + fact.evidence_ids.join("、"));
+  });
+  (data.unavailable_facts || []).forEach(function (item) { add(target, "p", "hint", item.fact_id + "：" + item.reason); });
+}
+
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
     var counts = data.overview.types;
@@ -752,6 +768,7 @@ function loadLibrary() {
             if (result.status !== "ok") throw new Error("全文未获取成功，保留摘要：" + (result.error || "来源暂时不可用"));
             librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
             $("library-answer").textContent = "全文已更新，请重新选择资料并提问。";
+            clear($("library-relations")); clear($("library-evidence"));
             return loadLibrary();
           }).catch(showError).then(function () { fullButton.disabled = false; fullButton.textContent = fullLabel; });
         });
@@ -762,17 +779,25 @@ function loadLibrary() {
   }).catch(showError);
 }
 
-$("library-type").addEventListener("change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
-$("library-example").addEventListener("click", function () { $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; });
+$("library-type").addEventListener("change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); clear($("library-relations")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
+$("library-mode").addEventListener("change", function () { clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "回答方式已切换，请重新提问。"; });
+$("library-example").addEventListener("click", function () { $("library-mode").value = "excerpt"; clear($("library-relations")); clear($("library-evidence")); $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; $("library-answer").textContent = "已填入政策示例，请选择对应政策并提问。"; });
+$("library-relations-example").addEventListener("click", function () {
+  $("library-mode").value = "relations"; $("library-type").value = ""; librarySelectedDocs = [];
+  $("library-question").value = "比较论文和 NIST 对间接提示注入的机制解释、防护建议及局限。";
+  clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "已填入关系示例，将使用已核对的论文全文与 NIST 框架。"; loadLibrary();
+});
 $("library-ask-form").addEventListener("submit", function (event) {
   event.preventDefault(); clearError();
   var button = $("library-ask"); button.disabled = true; button.textContent = "正在检索原文…";
-  $("library-answer").textContent = "正在检索所选资料的原文…"; clear($("library-evidence"));
+  $("library-answer").textContent = "正在按资料证据处理…"; clear($("library-evidence")); clear($("library-relations"));
+  var requestMode = $("library-mode").value;
   var requestBody = JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value});
-  api("/api/library/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: requestBody}).then(function (result) {
-    if (requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
+  api(requestMode === "relations" ? "/api/library/analyze" : "/api/library/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: requestBody}).then(function (result) {
+    if (requestMode !== $("library-mode").value || requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
     $("library-answer").textContent = result.answer;
-    renderLibraryEvidence({evidence: result.evidence, notice: result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
+    renderLibraryRelations(result);
+    renderLibraryEvidence({evidence: result.evidence, notice: requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
   }).catch(showError).then(function () { button.disabled = false; button.textContent = "按证据回答"; });
 });
 $("library-search-form").addEventListener("submit", function (event) {
@@ -784,6 +809,7 @@ $("library-sync").addEventListener("click", function () {
   api("/api/library/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({per_source: 3, include_seeds: true})}).then(function (data) {
     button.textContent = "本轮入库成功 " + data.ok + "/" + data.attempted + " 份";
     clear($("library-evidence"));
+    clear($("library-relations"));
     $("library-answer").textContent = "资料已更新，请重新提问。";
     add($("library-evidence"), "p", "hint", "资料已更新，请重新选择资料或检索。");
     return loadLibrary();

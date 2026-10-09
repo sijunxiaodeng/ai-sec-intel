@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "topic": "indirect_prompt_injection",
+  "label": "间接提示注入",
+  "reviewed_at": "2026-10-09",
+  "review_kind": "developer_source_review",
+  "scope": "首个示范主题；中文关系说明按已核对片段整理，不是自动从所有资料抽取通用知识图谱",
+  "sources": {
+    "paper": {
+      "url": "https://arxiv.org/html/2302.12173",
+      "version": "2302.12173v2",
+      "content_scope": "full_text_html",
+      "kind": "research_paper"
+    },
+    "nist": {
+      "url": "https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf",
+      "version": "NIST AI 600-1 (2024)",
+      "content_scope": "full_text_pdf",
+      "kind": "voluntary_risk_framework"
+    }
+  },
+  "facts": [
+    {
+      "id": "P1",
+      "source": "paper",
+      "facet": "mechanism",
+      "predicate": "describes",
+      "label": "数据与指令边界",
+      "text": "论文指出，检索增强使不可信数据与自然语言指令的界限变得模糊。",
+      "authority": "source_description",
+      "qualifier": "研究论文的机制解释",
+      "evidence_text_sha256": "adafa9adc5ea252c872f3e63a84e79167c3255dd4abea93f201fdfe8cb5f9ab4",
+      "locator_prefix": "HTML section S2: 2. Preliminaries and Related Work"
+    },
+    {
+      "id": "P2",
+      "source": "paper",
+      "facet": "condition",
+      "predicate": "requires",
+      "label": "检索并读入恶意内容",
+      "text": "所描述的间接路径要求恶意提示位于可能在推理时检索的数据中，并被应用检索和读入。",
+      "authority": "source_description",
+      "qualifier": "这是文献中的场景条件，不是所有系统的充要条件",
+      "evidence_text_sha256": "7c832a034ba249e316dc7c8dd1a76b6ac98f91d58a3177c1ae4a20b0e0ed8589",
+      "locator_prefix": "HTML section S1: 1. Introduction"
+    },
+    {
+      "id": "P3",
+      "source": "paper",
+      "facet": "impact",
+      "predicate": "may_lead_to",
+      "label": "数据窃取与拒绝服务等影响",
+      "text": "论文讨论的可能影响包括模型被远程操控、持续受影响、数据窃取和拒绝服务。",
+      "authority": "source_description",
+      "qualifier": "可能影响；不代表本项目已复现或每个应用都受影响",
+      "evidence_text_sha256": "3ffa61d3f4ca415c53d915acd468adf969527db9524bea8eb6e433f185b85821",
+      "locator_prefix": "HTML section S1: 1. Introduction"
+    },
+    {
+      "id": "P4",
+      "source": "paper",
+      "facet": "mitigation",
+      "predicate": "proposes",
+      "label": "过滤检索输入中的指令",
+      "text": "论文把过滤检索输入中的指令作为一种潜在防护方向。",
+      "authority": "research_proposal",
+      "qualifier": "潜在方向，不能宣称已完全阻断攻击",
+      "evidence_text_sha256": "4c7561f19dd4cac6b445dd879b7cf4e4b3f51c1d9a009ac69f9a167cabb2ec5a",
+      "locator_prefix": "HTML section S5: 5. Discussion"
+    },
+    {
+      "id": "P5",
+      "source": "paper",
+      "facet": "limitation",
+      "predicate": "limits",
+      "label": "过滤模型的检测能力",
+      "text": "论文同时指出，能力较弱的过滤模型可能识别不了复杂编码输入。",
+      "authority": "source_limitation",
+      "qualifier": "必须与过滤建议一起保留",
+      "evidence_text_sha256": "4c7561f19dd4cac6b445dd879b7cf4e4b3f51c1d9a009ac69f9a167cabb2ec5a",
+      "locator_prefix": "HTML section S5: 5. Discussion"
+    },
+    {
+      "id": "P6",
+      "source": "paper",
+      "facet": "limitation",
+      "predicate": "requires_evaluation",
+      "label": "防护对混淆与规避的效果",
+      "text": "论文指出，所讨论防护对混淆与规避的有效性及稳健性仍需研究。",
+      "authority": "source_limitation",
+      "qualifier": "对应论文版本中的讨论，不宣称覆盖后续全部研究",
+      "evidence_text_sha256": "9c8c8262d82d0f77ea520bd8b4dcbcc1078f81233cab1719e20488f01b6d859f",
+      "locator_prefix": "HTML section S5: 5. Discussion"
+    },
+    {
+      "id": "P7",
+      "source": "paper",
+      "facet": "limitation",
+      "predicate": "uncertain_effect",
+      "label": "RLHF 的缓解程度",
+      "text": "该论文认为 RLHF 能在多大程度上缓解这类攻击仍不清楚。",
+      "authority": "source_limitation",
+      "qualifier": "论文版本中的判断；不等于所有新模型都无效",
+      "evidence_text_sha256": "20f3d98f990c4533a7031f5bf1c5b36d6f33cba2232dbb0618ad0970e5036c24",
+      "locator_prefix": "HTML section S5: 5. Discussion"
+    },
+    {
+      "id": "N1",
+      "source": "nist",
+      "facet": "mechanism",
+      "predicate": "describes",
+      "label": "直接与间接提示注入",
+      "text": "NIST 区分直接输入恶意提示与把提示注入可能被检索的数据中的间接路径；后者不要求攻击者拥有直接接口。",
+      "authority": "source_description",
+      "qualifier": "框架对风险的概述，不是本项目攻击验证",
+      "evidence_text_sha256": "5c42d63b46776f084743c4145962bd6408787d24f1ba1c135eddca0ba8c2fd43",
+      "locator_prefix": "PDF page 15"
+    },
+    {
+      "id": "N2",
+      "source": "nist",
+      "facet": "impact",
+      "predicate": "reports_research",
+      "label": "研究演示过的影响",
+      "text": "NIST 概述研究者曾展示间接提示注入可窃取专有数据或在机器上远程运行恶意代码。",
+      "authority": "research_report",
+      "qualifier": "来源对已有研究的概述；不能据此给本项目资产判定漏洞",
+      "evidence_text_sha256": "5c42d63b46776f084743c4145962bd6408787d24f1ba1c135eddca0ba8c2fd43",
+      "locator_prefix": "PDF page 15"
+    },
+    {
+      "id": "N3",
+      "source": "nist",
+      "facet": "assessment",
+      "predicate": "recommends_assessment",
+      "label": "AI 红队韧性评估",
+      "text": "NIST 的 MS-2.7-007 建议通过 AI 红队评估针对提示注入等攻击的韧性。",
+      "authority": "framework_recommendation",
+      "qualifier": "评估建议，不是防护生效证明；不是中国强制条款",
+      "evidence_text_sha256": "0586cc2e074bd72defc4a6f1e5c4fcf5651df372d3cb90cd686971d9d85d4d0d",
+      "locator_prefix": "PDF page 37"
+    },
+    {
+      "id": "N4",
+      "source": "nist",
+      "facet": "provenance",
+      "predicate": "references",
+      "label": "来源引用关系",
+      "text": "NIST 参考文献列出了这篇间接提示注入论文。",
+      "authority": "bibliographic_reference",
+      "qualifier": "只能证明引用关系，未核对每个风险句子的具体依赖路径",
+      "evidence_text_sha256": "564393ea971c5857f00860d5007b81459d5995cabff957cccb45f291c9eb0c6a",
+      "locator_prefix": "PDF page 59"
+    }
+  ]
+}
