@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "purpose": "第十九步 D04 开发回归，不是独立语义评测",
+  "tests_passed": 249,
+  "runs": {
+    "20261009-model": {
+      "run_id": "2a75b395b47b488aa33103ef906b2e69",
+      "baseline_commit": "7a8b89753149148f4fdeebc89af0ab7cfb2ef94e",
+      "mode": "model",
+      "configured_model_name": "deepseek-flash",
+      "model_attempted_requests_including_history": 12,
+      "model_adopted_requests_including_history": 12,
+      "source_stable": true,
+      "planned_cases": 27,
+      "captured_cases": 27,
+      "skipped_cases": 0,
+      "errors": 0,
+      "automatic_checks_passed": 27,
+      "cases_needing_attention": [],
+      "timing_by_kind": {
+        "assessment": {
+          "captured": 2,
+          "errors": 0,
+          "p50_seconds": 0.04975,
+          "p95_seconds_nearest_rank": 0.0621,
+          "http_at_most_5s": 2,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "excerpt": {
+          "captured": 9,
+          "errors": 0,
+          "p50_seconds": 0.7455,
+          "p95_seconds_nearest_rank": 0.8939,
+          "http_at_most_5s": 9,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "qa": {
+          "captured": 11,
+          "errors": 0,
+          "p50_seconds": 0.1857,
+          "p95_seconds_nearest_rank": 1.2405,
+          "http_at_most_5s": 11,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "relations": {
+          "captured": 4,
+          "errors": 0,
+          "p50_seconds": 0.2968,
+          "p95_seconds_nearest_rank": 1.0223,
+          "http_at_most_5s": 4,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "reviewed_graph": {
+          "captured": 1,
+          "errors": 0,
+          "p50_seconds": 0.0888,
+          "p95_seconds_nearest_rank": 0.0888,
+          "http_at_most_5s": 1,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        }
+      },
+      "independent_qa_reviewed": 0,
+      "qa_executed_denominator": 24,
+      "independent_qa_accuracy": null,
+      "qa_by_stratum": {
+        "known_topic_or_audit_regression": {
+          "executed": 24,
+          "independent_accuracy": null
+        }
+      },
+      "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+      "independent_enrichment_tp": null,
+      "independent_enrichment_fp": null,
+      "independent_enrichment_fn": null,
+      "independent_enrichment_precision": null,
+      "independent_enrichment_recall": null,
+      "competition_passed": null,
+      "dataset_sha256": "a407bcc8a6079b0b5fc5923dd5d6b798373dccdd776ec6c96e8181eb35c780b2",
+      "source_archive_count": 10,
+      "source_archive_timing": "before_capture",
+      "exact_quote_and_all_citations_checked": 20
+    },
+    "20261009-rules": {
+      "run_id": "86dbcf125fca4fe5aeaf460f8d69fdcd",
+      "baseline_commit": "7a8b89753149148f4fdeebc89af0ab7cfb2ef94e",
+      "mode": "rules",
+      "configured_model_name": "deepseek-flash",
+      "model_attempted_requests_including_history": 0,
+      "model_adopted_requests_including_history": 0,
+      "source_stable": true,
+      "planned_cases": 27,
+      "captured_cases": 16,
+      "skipped_cases": 11,
+      "errors": 0,
+      "automatic_checks_passed": 16,
+      "cases_needing_attention": [],
+      "timing_by_kind": {
+        "assessment": {
+          "captured": 2,
+          "errors": 0,
+          "p50_seconds": 0.08355000000000001,
+          "p95_seconds_nearest_rank": 0.1034,
+          "http_at_most_5s": 2,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "excerpt": {
+          "captured": 9,
+          "errors": 0,
+          "p50_seconds": 0.1396,
+          "p95_seconds_nearest_rank": 0.318,
+          "http_at_most_5s": 9,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "qa": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "relations": {
+          "captured": 4,
+          "errors": 0,
+          "p50_seconds": 0.12355000000000001,
+          "p95_seconds_nearest_rank": 0.3012,
+          "http_at_most_5s": 4,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "reviewed_graph": {
+          "captured": 1,
+          "errors": 0,
+          "p50_seconds": 0.0965,
+          "p95_seconds_nearest_rank": 0.0965,
+          "http_at_most_5s": 1,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        }
+      },
+      "independent_qa_reviewed": 0,
+      "qa_executed_denominator": 13,
+      "independent_qa_accuracy": null,
+      "qa_by_stratum": {
+        "known_topic_or_audit_regression": {
+          "executed": 13,
+          "independent_accuracy": null
+        }
+      },
+      "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+      "independent_enrichment_tp": null,
+      "independent_enrichment_fp": null,
+      "independent_enrichment_fn": null,
+      "independent_enrichment_precision": null,
+      "independent_enrichment_recall": null,
+      "competition_passed": null,
+      "dataset_sha256": "a407bcc8a6079b0b5fc5923dd5d6b798373dccdd776ec6c96e8181eb35c780b2",
+      "source_archive_count": 10,
+      "source_archive_timing": "before_capture",
+      "exact_quote_and_all_citations_checked": 37
+    },
+    "20261009-final-model": {
+      "run_id": "ad993ffd694d42769e5a0d26e9757689",
+      "baseline_commit": "cbd79cb7f6baf628ea0618ae6ed38bb9d5556353",
+      "mode": "model",
+      "configured_model_name": "deepseek-flash",
+      "model_attempted_requests_including_history": 1,
+      "model_adopted_requests_including_history": 1,
+      "source_stable": true,
+      "planned_cases": 10,
+      "captured_cases": 10,
+      "skipped_cases": 0,
+      "errors": 0,
+      "automatic_checks_passed": 10,
+      "cases_needing_attention": [],
+      "timing_by_kind": {
+        "assessment": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "excerpt": {
+          "captured": 3,
+          "errors": 0,
+          "p50_seconds": 0.1426,
+          "p95_seconds_nearest_rank": 0.7808,
+          "http_at_most_5s": 3,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "qa": {
+          "captured": 7,
+          "errors": 0,
+          "p50_seconds": 0.2191,
+          "p95_seconds_nearest_rank": 0.8182,
+          "http_at_most_5s": 7,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "relations": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "reviewed_graph": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        }
+      },
+      "independent_qa_reviewed": 0,
+      "qa_executed_denominator": 10,
+      "independent_qa_accuracy": null,
+      "qa_by_stratum": {
+        "known_topic_or_audit_regression": {
+          "executed": 10,
+          "independent_accuracy": null
+        }
+      },
+      "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+      "independent_enrichment_tp": null,
+      "independent_enrichment_fp": null,
+      "independent_enrichment_fn": null,
+      "independent_enrichment_precision": null,
+      "independent_enrichment_recall": null,
+      "competition_passed": null,
+      "dataset_sha256": "7eee0d7e683c7c414ee8f91b5c63e54048016e8a73dccde4055f6c93fd8812f8",
+      "source_archive_count": 3,
+      "source_archive_timing": "before_capture",
+      "exact_quote_and_all_citations_checked": 7
+    },
+    "20261009-final-rules": {
+      "run_id": "bfdd2fade96d46669d221ebb3b8e557f",
+      "baseline_commit": "cbd79cb7f6baf628ea0618ae6ed38bb9d5556353",
+      "mode": "rules",
+      "configured_model_name": "deepseek-flash",
+      "model_attempted_requests_including_history": 0,
+      "model_adopted_requests_including_history": 0,
+      "source_stable": true,
+      "planned_cases": 10,
+      "captured_cases": 3,
+      "skipped_cases": 7,
+      "errors": 0,
+      "automatic_checks_passed": 3,
+      "cases_needing_attention": [],
+      "timing_by_kind": {
+        "assessment": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "excerpt": {
+          "captured": 3,
+          "errors": 0,
+          "p50_seconds": 0.1044,
+          "p95_seconds_nearest_rank": 0.1554,
+          "http_at_most_5s": 3,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "qa": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "relations": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        },
+        "reviewed_graph": {
+          "captured": 0,
+          "errors": 0,
+          "p50_seconds": null,
+          "p95_seconds_nearest_rank": null,
+          "http_at_most_5s": 0,
+          "scope": "完整本机 HTTP 请求及响应读取；逐题计时不含历史轮次，历史另记；错误不计入低延迟成功样本"
+        }
+      },
+      "independent_qa_reviewed": 0,
+      "qa_executed_denominator": 3,
+      "independent_qa_accuracy": null,
+      "qa_by_stratum": {
+        "known_topic_or_audit_regression": {
+          "executed": 3,
+          "independent_accuracy": null
+        }
+      },
+      "enrichment_scope": "仅本题单 CVSS/CPE 范围/向量条件与影响，不包括 PoC、资产或论文关联召回",
+      "independent_enrichment_tp": null,
+      "independent_enrichment_fp": null,
+      "independent_enrichment_fn": null,
+      "independent_enrichment_precision": null,
+      "independent_enrichment_recall": null,
+      "competition_passed": null,
+      "dataset_sha256": "7eee0d7e683c7c414ee8f91b5c63e54048016e8a73dccde4055f6c93fd8812f8",
+      "source_archive_count": 3,
+      "source_archive_timing": "before_capture",
+      "exact_quote_and_all_citations_checked": 8
+    }
+  },
+  "model_requests_total_this_step": 13,
+  "independent_quality_pending": true,
+  "competition_passed": null,
+  "comparison_answer_length": {
+    "case_id": "Q06",
+    "before_characters": 2093,
+    "after_characters": 771,
+    "scope": "开发样例字符数，包含引用和说明；不是质量或准确率指标"
+  },
+  "policy_scope_cases": {
+    "L05": {
+      "model_attempted": false,
+      "returned_clause_labels": [
+        "第二条",
+        "第十四条"
+      ]
+    },
+    "S05": {
+      "model_attempted": false,
+      "returned_clause_labels": [
+        "第二条",
+        "第十四条"
+      ]
+    },
+    "S06": {
+      "model_attempted": true,
+      "returned_clause_labels": [
+        "第十二条",
+        "第十四条",
+        "第二条"
+      ]
+    }
+  }
+}
