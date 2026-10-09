@@ -122,6 +122,8 @@ def _extract(candidate, response):
         doc["published_at_basis"] = "subscription_metadata" if candidate.get("published_at") else "unknown"
     else:
         doc.setdefault("published_at_basis", "document_metadata")
+    if candidate.get("parent_document_id"):
+        doc["parent_document_id"] = candidate["parent_document_id"]
     text = "\n".join(value for _, value in doc["parts"])
     mentions = sorted({v.upper() for v in CVE.findall(text)})
     declared = set(doc.get("declared_cve_ids", []))
@@ -345,8 +347,16 @@ def search(query, top_k=8, *, document_type="", cve_id="", document_ids=None, db
 
 
 def full_text(document_id, db_path=LIBRARY_DB, fetcher=fetch):
-    """显式获取论文 HTML 全文，另存文档；失败不删除已成功的摘要或全文。"""
+    """显式获取支持的论文/文章原文，另存文档；失败不删除摘要。"""
     doc = detail(document_id, db_path)
+    if doc and doc["content_scope"] == "team_summary" and doc["document_type"] in ("research_article", "vendor_advisory"):
+        if doc["integrity_status"] != "ok":
+            raise ValueError("团队描述存档完整性未通过检查")
+        candidate = {"url": doc["url"], "document_type": doc["document_type"],
+                     "source_name": doc["publisher"], "source_id": "team_source_text",
+                     "parent_document_id": document_id, "discovery": "explicit_source_text"}
+        result = ingest_document(candidate, db_path, fetcher)
+        return dict(result, parent_document_id=document_id, index=update_index(db_path))
     if not doc or doc["document_type"] != "academic_paper" or doc["content_scope"] not in ("abstract", "team_summary"):
         raise ValueError("请选择已经入库的 arXiv 论文摘要")
     match = re.fullmatch(r"/abs/(%s)/?" % ARXIV_ID, urllib.parse.urlsplit(doc["url"]).path)

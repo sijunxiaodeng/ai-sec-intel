@@ -230,6 +230,27 @@ class TeamDocumentsTest(unittest.TestCase):
             self.assertEqual(client.post("/api/library/team-sync", json={"max_documents": 201}).status_code, 422)
             client.close()
 
+    def test_explicit_article_fetch_stores_original_separately_and_makes_it_eligible(self):
+        self.sync()
+        summary_id = team_id(self.rows[0]["document_id"])
+        result = full_text(summary_id, self.db, lambda url: response(url, "Original LLM security prompt injection discussion. " * 6, "text/plain"))
+        original = detail(result["document_id"], self.db)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(original["content_scope"], "article_body")
+        self.assertEqual(original["parent_document_id"], summary_id)
+        self.assertEqual(detail(summary_id, self.db)["content_scope"], "team_summary")
+        self.assertEqual([d["document_id"] for d in source_documents("article_relations", [original["document_id"]], self.db)], [original["document_id"]])
+
+    def test_original_fetch_failure_keeps_team_summary_searchable(self):
+        self.sync()
+        summary_id = team_id(self.rows[0]["document_id"])
+        before = detail(summary_id, self.db)
+        with patch("rag.library.fetch", side_effect=TimeoutError("Synthetic source timeout")) as fetcher:
+            result = full_text(summary_id, self.db, fetcher)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(detail(summary_id, self.db)["text_sha256"], before["text_sha256"])
+        self.assertTrue(search("prompt injection", document_ids=[summary_id], db_path=self.db)["evidence"])
+
 
 if __name__ == "__main__":
     unittest.main()

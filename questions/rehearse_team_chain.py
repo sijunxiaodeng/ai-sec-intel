@@ -107,7 +107,7 @@ def serve_fixture_app(team_url, port):
     from agents import monitor_agent, orchestrator
     from collectors.intelligence import IntelligenceCollector
     from rag.ingest import ingest
-    from rag.library import sync_team
+    from rag.library import sync_team, full_text
     from api.app import app
 
     original_open = urllib.request.urlopen
@@ -123,6 +123,9 @@ def serve_fixture_app(team_url, port):
             payload = {"vulnerabilities": [{"cve": fixture()}]}
             return {"body": json.dumps(payload).encode("utf-8"),
                     "content_type": "application/json", "url": url}
+        if url == "https://example.org/offline-fixture/security_blog":
+            return {"body": b"SYNTHETIC OFFLINE ARTICLE: LLM security prompt injection may occur through retrieved documents. " * 5,
+                    "content_type": "text/plain", "url": url}
         raise TimeoutError("synthetic offline reference failure")
 
     with ExitStack() as stack:
@@ -135,6 +138,7 @@ def serve_fixture_app(team_url, port):
         stack.enter_context(patch.object(orchestrator, "ingest",
             side_effect=lambda record, **kwargs: ingest(record, fetcher=fetch_fixture, **kwargs)))
         stack.enter_context(patch("rag.library.sync_team", side_effect=lambda **kwargs: sync_team(base_url=team_url, **kwargs)))
+        stack.enter_context(patch("rag.library.full_text", side_effect=lambda document_id: full_text(document_id, fetcher=fetch_fixture)))
         stack.enter_context(patch.object(urllib.request, "urlopen", side_effect=localhost_only))
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
@@ -299,15 +303,26 @@ def rehearse(directory, team_python):
             require("repeat_team_document_import_is_stable", repeat_import["ok"] == 4 and repeat_import["changed"] == 0)
             library_state = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             require("team_api_snapshots_match_hashes", library_state["library_hashes_ok"])
+            blog = next(doc for doc in docs if doc["document_type"] == "research_article")
+            original = request("/api/library/" + blog["document_id"] + "/full-text", {})
+            require("explicit_original_article_import", original["status"] == "ok" and original["document_id"] != blog["document_id"])
+            original_detail = request("/api/library/" + original["document_id"])
+            require("original_and_summary_remain_distinct", original_detail["content_scope"] == "article_body"
+                    and original_detail["parent_document_id"] == blog["document_id"] and original_detail["integrity_status"] == "ok")
+            article_answer = request("/api/library/ask", {"question": "prompt injection", "use_model": False,
+                                                          "document_ids": [original["document_id"]]})
+            require("original_article_is_answerable", "原文摘录" in article_answer["answer"]
+                    and "SYNTHETIC OFFLINE ARTICLE" in article_answer["answer"] and not article_answer["model_attempted"])
             stop(team)
             outage = request("/api/library/team-sync", {"max_documents": 10})
             require("team_service_outage_retains_documents", outage["status"] == "error"
-                    and outage["overview"]["documents"] == 4)
+                    and outage["overview"]["documents"] == 5)
             after_outage = request("/api/library/ask", {"question": "prompt injection", "use_model": False,
                                                         "document_ids": [doc["document_id"] for doc in docs]})
             require("stored_summaries_remain_answerable", after_outage["answer"] == library_answer["answer"])
             result["team_documents"] = {"types": sorted({doc["document_type"] for doc in docs}),
-                                        "count": 4, "scope": "team_summary", "outage_retained": True}
+                                        "count": 4, "scope": "team_summary", "outage_retained": True,
+                                        "explicit_original_article": "synthetic_fetch_response"}
             # Stop only the processes created by this rehearsal, including on failure.
             for process in reversed(processes):
                 stop(process)
@@ -358,7 +373,7 @@ def main():
         "environment": {"os": platform.platform(), "python": platform.python_version(),
             "root_dependencies": json.loads(command([sys.executable, "-m", "pip", "list", "--format=json"], ROOT)),
             "team_dependencies": json.loads(command([team_python, "-m", "pip", "list", "--format=json"], ROOT))},
-        "scope": "same-machine isolated offline CVE and team summary HTTP rehearsal with synthetic input; not original document retrieval, independent quality or six-hour latency",
+        "scope": "same-machine isolated offline CVE, team summary and explicit article import HTTP rehearsal with synthetic input and fetch responses; not live original source retrieval, independent quality or six-hour latency",
         "fixture_cve": CVE,
         "fixture_sha256": hashlib.sha256(json.dumps(fixture(), sort_keys=True).encode()).hexdigest(),
         "fresh_runs": [rehearse(output / ("run%d" % i), team_python) for i in range(1, 4)],

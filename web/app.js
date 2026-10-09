@@ -815,7 +815,7 @@ $("candidate-generate").addEventListener("click", function () {
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
     var counts = data.overview.types;
-    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段原文；标准 / 风险框架 " + counts.standard + "、政策法规 " + counts.policy + "。";
+    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段存档内容；标准 / 风险框架 " + counts.standard + "、政策法规 " + counts.policy + "。";
     var sources = $("library-sources"); clear(sources);
     (data.overview.sources || []).forEach(function (source) {
       add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : source.status === "partial" ? "部分资料同步失败" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
@@ -836,7 +836,7 @@ function loadLibrary() {
         api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
       });
       add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-      var discoveryLabels = {team_api: "队友接口存档", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+      var discoveryLabels = {team_api: "队友接口存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
       add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
       if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
       if (doc.team_document_id) add(block, "p", "meta", "队友记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
@@ -863,6 +863,18 @@ function loadLibrary() {
             clear($("library-relations")); clear($("library-evidence"));
             return loadLibrary();
           }).catch(showError).then(function () { fullButton.disabled = false; fullButton.textContent = fullLabel; });
+        });
+      }
+      if (doc.content_scope === "team_summary" && ["research_article", "vendor_advisory"].indexOf(doc.document_type) >= 0) {
+        var sourceButton = add(block, "button", "ghost", "获取来源原文"); sourceButton.type = "button";
+        sourceButton.addEventListener("click", function () {
+          sourceButton.disabled = true; sourceButton.textContent = "正在获取来源原文…";
+          api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
+            if (result.status !== "ok") throw new Error("来源原文未获取成功，描述存档仍可使用：" + (result.error || "来源暂时不可用"));
+            librarySelectedDocs = [result.document_id]; clear($("library-evidence")); clear($("library-relations"));
+            $("library-answer").textContent = "来源原文已入库并选中，可以按证据提问。";
+            return loadLibrary();
+          }).catch(showError).then(function () { sourceButton.disabled = false; sourceButton.textContent = "获取来源原文"; });
         });
       }
       add(block, "p", "meta", "主题：" + (doc.topic_tags || []).map(function (tag) { return libraryTopics[tag] || tag; }).join("、"));
