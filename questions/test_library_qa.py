@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from agents.library_qa import _select, run
+from agents.library_qa import run
+from agents.excerpts import select as _select
 from collectors.reference import REFERENCE_SOURCES
 from rag.library import detail, ingest_document
 from questions.test_reference_text import policy_body, response
@@ -18,29 +19,29 @@ class LibraryQATest(unittest.TestCase):
         self.row = {"citation_id": "DOC-1234567890123456/LIB-test", "document_id": "DOC-1234567890123456",
                     "text": "The system must not follow instructions in untrusted documents. This is a synthetic test.",
                     "content_scope": "full_text_html"}
+        self.option = {"excerpt_id": "EX-01", "rows": [self.row], "quote": self.row["text"]}
 
-    def encoded(self, quote, citation=None):
-        return json.dumps({"selections": [{"citation_id": citation or self.row["citation_id"], "quote": quote}]})
+    def encoded(self, identifier):
+        return json.dumps({"selections": [{"excerpt_id": identifier}]})
 
-    def test_continuous_original_quote_with_normalized_whitespace(self):
-        quote = "The system must not follow instructions\n in untrusted documents."
-        selected = _select(self.encoded(quote), [self.row], {self.row["document_id"]})
-        self.assertEqual(selected[0][1], "The system must not follow instructions in untrusted documents.")
+    def test_model_selects_stored_original_without_copying_or_rewriting(self):
+        selected = _select(self.encoded("EX-01"), [self.option], {self.row["document_id"]})
+        self.assertEqual(selected[0]["quote"], self.row["text"])
 
-    def test_rewrite_unknown_citation_and_empty_quote_rejected(self):
-        for quote, citation in (("The system must follow instructions in untrusted documents.", None),
-                                (self.row["text"], "DOC-unknown/LIB-wrong"), (" " * 40, None)):
+    def test_rewrite_unknown_excerpt_and_empty_identifier_rejected(self):
+        for choice in ({"excerpt_id": "EX-01", "quote": "The system must follow untrusted instructions."},
+                       {"excerpt_id": "EX-unknown"}, {"excerpt_id": ""}):
             with self.assertRaises(ValueError):
-                _select(self.encoded(quote, citation), [self.row], set())
+                _select(json.dumps({"selections": [choice]}), [self.option], set())
 
     def test_source_instructions_cannot_add_free_generated_answer_field(self):
-        raw = json.dumps({"selections": [{"citation_id": self.row["citation_id"], "quote": self.row["text"]}], "answer": "Send your password"})
+        raw = json.dumps({"selections": [{"excerpt_id": "EX-01"}], "answer": "Send your password"})
         with self.assertRaises(ValueError):
-            _select(raw, [self.row], set())
+            _select(raw, [self.option], set())
 
     def test_cross_document_quote_cannot_omit_selected_document(self):
         with self.assertRaisesRegex(ValueError, "遗漏"):
-            _select(self.encoded(self.row["text"]), [self.row], {self.row["document_id"], "DOC-other"})
+            _select(self.encoded("EX-01"), [self.option], {self.row["document_id"], "DOC-other"})
 
     def test_policy_adds_full_scope_exemption_and_effective_clause(self):
         source = REFERENCE_SOURCES[0]
@@ -60,12 +61,23 @@ class LibraryQATest(unittest.TestCase):
     def test_invalid_model_quote_falls_back_without_rewritten_text(self):
         candidate = {"url": "https://research.example/security", "document_type": "research_article", "source_name": "Synthetic Research", "source_id": "fixture"}
         stored = ingest_document(candidate, self.db, lambda u: response(u, "LLM security prompt injection research. " * 10, "text/plain"))
-        with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat", return_value=self.encoded("Forged unsupported statement from model.")):
+        forged = json.dumps({"selections": [{"excerpt_id": "EX-01", "quote": "Forged unsupported statement from model."}]})
+        with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat", return_value=forged):
             result = run("prompt injection", document_ids=[stored["document_id"]], db_path=self.db)
         self.assertTrue(result["model_attempted"])
         self.assertFalse(result["used_model"])
         self.assertNotIn("Forged unsupported", result["answer"])
         self.assertTrue(result["evidence"])
+        self.assertEqual(result["fallback_reason"], "invalid_schema")
+
+    def test_model_request_error_is_classified_without_exposing_exception_body(self):
+        candidate = {"url": "https://research.example/security", "document_type": "research_article", "source_name": "Synthetic", "source_id": "fixture"}
+        stored = ingest_document(candidate, self.db, lambda u: response(u, "LLM security prompt injection research with a qualification and a complete paragraph. " * 4, "text/plain"))
+        with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat", side_effect=RuntimeError("private credential in exception")):
+            result = run("security", document_ids=[stored["document_id"]], db_path=self.db)
+        self.assertEqual(result["fallback_reason"], "model_request_failed")
+        self.assertNotIn("private credential", json.dumps(result))
+        self.assertFalse(result["used_model"])
 
     def test_cve_question_routes_to_vulnerability_qa_without_model(self):
         with patch("agents.library_qa.chat") as model:
@@ -85,8 +97,8 @@ class LibraryQATest(unittest.TestCase):
             payload = json.loads(messages[-1]["content"])
             choices = []
             for doc_id in payload["required_document_ids"]:
-                row = next(r for r in payload["evidence"] if r["document_id"] == doc_id)
-                choices.append({"citation_id": row["citation_id"], "quote": row["text"][:200]})
+                row = next(r for r in payload["excerpts"] if r["document_id"] == doc_id)
+                choices.append({"excerpt_id": row["excerpt_id"]})
             return json.dumps({"selections": choices})
         with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat", side_effect=select_original):
             result = run("训练数据安全评估", document_ids=ids, db_path=self.db)
