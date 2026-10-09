@@ -1,4 +1,6 @@
 fastapi>=0.110,<1
 uvicorn>=0.29,<1
+requests>=2.31,<3
+python-dotenv>=1,<2
 # For offline API tests only:
 httpx>=0.27,<1

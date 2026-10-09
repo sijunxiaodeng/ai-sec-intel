@@ -23,7 +23,8 @@ from fusion.merger import merge_by_cve
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # Subsecond precision matters at the strict six-hour publication boundary.
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def to_json(value: Any) -> str:
@@ -107,10 +108,14 @@ class SQLiteIntelligenceStore:
     @staticmethod
     def _to_item(row: sqlite3.Row) -> IntelligenceItem:
         raw = json.loads(row["payload_json"])
+        # Older databases may have normalized SQL keys but mixed-case JSON IDs.
+        # Normalize on read as well so cross-batch fusion can reuse those rows.
+        raw["cve_id"] = (raw.get("cve_id") or "").strip().upper() or None
         allowed = {field.name for field in fields(IntelligenceItem)}
         return IntelligenceItem(**{key: val for key, val in raw.items() if key in allowed})
 
-    def _refresh_cve(self, conn: sqlite3.Connection, cve_id: str, now: str) -> bool:
+    def _refresh_cve(self, conn: sqlite3.Connection, cve_id: str, now: str,
+                     *, changed_cves: set[str] | None = None) -> bool:
         """Rebuild one CVE from ALL persisted sources, across previous runs.
 
         Return True only when the unified CVE did not already exist.
@@ -156,6 +161,8 @@ class SQLiteIntelligenceStore:
                    VALUES (?,?,?,?,?)""",
                 (cve_id, to_json(payload), content_hash, now, now),
             )
+            if changed_cves is not None:
+                changed_cves.add(cve_id)
             return True
 
         if existing["content_sha256"] != content_hash:
@@ -165,6 +172,8 @@ class SQLiteIntelligenceStore:
                    WHERE cve_id = ?""",
                 (to_json(payload), content_hash, now, cve_id),
             )
+            if changed_cves is not None:
+                changed_cves.add(cve_id)
         return False
 
     def ingest_batch(
@@ -181,6 +190,7 @@ class SQLiteIntelligenceStore:
         """
         if not collector.strip():
             raise ValueError("collector name must not be empty")
+        collector = collector.strip()
 
         materialized = list(items)
         now = utc_now()
@@ -195,22 +205,35 @@ class SQLiteIntelligenceStore:
             "new_cves": 0,
         }
         touched_cves: set[str] = set()
+        observed_sources: set[tuple[str, str]] = set()
+        inserted_sources: set[tuple[str, str]] = set()
+        updated_sources: set[tuple[str, str]] = set()
+        inserted_cves: set[str] = set()
+        changed_cves: set[str] = set()
 
         with self._connect() as conn:
+            # Take the write lock before reading old hashes. Two overlapping
+            # collector runs must not race between the read and upsert.
+            conn.execute("BEGIN IMMEDIATE")
+            now = utc_now()  # Include time spent waiting for the write lock.
             for item in materialized:
                 if not is_dataclass(item):
                     raise TypeError("Collectors must return IntelligenceItem dataclass objects")
                 source = (item.source or "").strip()
                 source_id = (item.source_id or "").strip()
+                if source in {"NVD", "CISA_KEV"} and source_id.upper().startswith("CVE-"):
+                    source_id = source_id.upper()
                 if not source or not source_id:
                     raise ValueError("source and source_id are mandatory for stable de-duplication")
                 # Protect against accidentally attributing one source's items to another run.
                 if source != collector:
                     raise ValueError(f"collector={collector} received item.source={source}")
+                observed_sources.add((source, source_id))
 
-                payload = asdict(item)
-                digest = sha256_of(payload)
                 cve_id = (item.cve_id or "").strip().upper() or None
+                payload = asdict(item)
+                payload.update(source=source, source_id=source_id, cve_id=cve_id)
+                digest = sha256_of(payload)
 
                 old = conn.execute(
                     """SELECT cve_id, content_sha256 FROM source_items
@@ -227,6 +250,7 @@ class SQLiteIntelligenceStore:
                         (source, source_id, cve_id, to_json(payload), digest, now, now, now),
                     )
                     counts["inserted"] += 1
+                    inserted_sources.add((source, source_id))
                     if cve_id:
                         touched_cves.add(cve_id)
                 elif old["content_sha256"] != digest or old["cve_id"] != cve_id:
@@ -238,6 +262,7 @@ class SQLiteIntelligenceStore:
                         (cve_id, to_json(payload), digest, now, now, source, source_id),
                     )
                     counts["updated"] += 1
+                    updated_sources.add((source, source_id))
                     if cve_id:
                         touched_cves.add(cve_id)
                     if old["cve_id"]:
@@ -251,9 +276,36 @@ class SQLiteIntelligenceStore:
                     counts["unchanged"] += 1
 
             for cve_id in sorted(touched_cves):
-                if self._refresh_cve(conn, cve_id, now):
+                if self._refresh_cve(conn, cve_id, now, changed_cves=changed_cves):
                     counts["new_cves"] += 1
+                    inserted_cves.add(cve_id)
                 counts["refreshed_cves"] += 1
+
+            # Source hashing and fusion can take substantial time. Stamp
+            # availability after processing, close to the transaction commit;
+            # never replace first_seen_at on an existing source or unified CVE.
+            now = utc_now()
+            conn.executemany(
+                "UPDATE source_items SET last_seen_at=? WHERE source=? AND source_id=?",
+                ((now, source, source_id) for source, source_id in sorted(observed_sources)),
+            )
+            conn.executemany(
+                """UPDATE source_items SET first_seen_at=?,content_updated_at=?
+                   WHERE source=? AND source_id=?""",
+                ((now, now, source, source_id) for source, source_id in sorted(inserted_sources)),
+            )
+            conn.executemany(
+                "UPDATE source_items SET content_updated_at=? WHERE source=? AND source_id=?",
+                ((now, source, source_id) for source, source_id in sorted(updated_sources)),
+            )
+            conn.executemany(
+                "UPDATE unified_vulnerabilities SET content_updated_at=? WHERE cve_id=?",
+                ((now, cve_id) for cve_id in sorted(changed_cves)),
+            )
+            conn.executemany(
+                "UPDATE unified_vulnerabilities SET first_seen_at=? WHERE cve_id=?",
+                ((now, cve_id) for cve_id in sorted(inserted_cves)),
+            )
 
             conn.execute(
                 """INSERT INTO collector_state (collector,last_success_at,last_fetched_count)
@@ -277,14 +329,50 @@ class SQLiteIntelligenceStore:
             )
         return counts
 
-    def record_failure(self, collector: str, error: str, started_at: str | None = None) -> None:
-        now = utc_now()
+    def rebuild_unified(self) -> dict[str, int]:
+        """Explicitly refresh existing databases after a fusion code upgrade.
+
+        Collection and classification stay separate: this uses only retained
+        source records, performs no network calls, and does not overwrite AI
+        classifications. Changed hashes make their old decisions stale.
+        """
+        counts = {"refreshed_cves": 0, "new_cves": 0}
+        changed_cves: set[str] = set()
+        inserted_cves: set[str] = set()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            now = utc_now()
+            cves = conn.execute(
+                """SELECT cve_id FROM source_items WHERE cve_id IS NOT NULL
+                   UNION SELECT cve_id FROM unified_vulnerabilities
+                   ORDER BY cve_id"""
+            ).fetchall()
+            for row in cves:
+                if self._refresh_cve(conn, row["cve_id"], now, changed_cves=changed_cves):
+                    counts["new_cves"] += 1
+                    inserted_cves.add(row["cve_id"])
+                counts["refreshed_cves"] += 1
+            now = utc_now()
+            conn.executemany(
+                "UPDATE unified_vulnerabilities SET content_updated_at=? WHERE cve_id=?",
+                ((now, cve_id) for cve_id in sorted(changed_cves)),
+            )
+            conn.executemany(
+                "UPDATE unified_vulnerabilities SET first_seen_at=? WHERE cve_id=?",
+                ((now, cve_id) for cve_id in sorted(inserted_cves)),
+            )
+        return counts
+
+    def record_failure(self, collector: str, error: str, started_at: str | None = None) -> None:
+        started_at = started_at or utc_now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            now = utc_now()
             conn.execute(
                 """INSERT INTO collector_runs
                    (collector,started_at,finished_at,status,error_text)
                    VALUES (?, ?, ?, 'failed', ?)""",
-                (collector, started_at or now, now, str(error)[:2000]),
+                (collector, started_at, now, str(error)[:2000]),
             )
 
     def get_vulnerability(self, cve_id: str) -> dict[str, Any] | None:

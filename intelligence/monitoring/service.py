@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,7 +73,10 @@ def parse_source_results(text: str) -> tuple[dict, bool, bool]:
         match = re.search(r'>>> 成功来源\s+(\d+)，失败来源\s+(\d+)', line)
         if match:
             summary_success, summary_failed = map(int, match.groups())
-    valid_summary = summary_success == 3 and summary_failed == 0
+    valid_summary = (
+        summary_success == 3 and summary_failed == 0
+        and all(source in results and not results[source].get('error') for source in SOURCE_ORDER)
+    )
     return results, bool(valid_summary and len(results) == 3), backlog
 
 
@@ -143,16 +147,28 @@ def _optional_run_classification(root: Path, emit, interpreter: str) -> None:
 
 def run_once(root: Path, python_executable: str | None = None, script_name='run_incremental_v2.py') -> dict:
     root = Path(root).resolve()
+    from dotenv import load_dotenv
+    load_dotenv(root / '.env')
     interpreter = python_executable or sys.executable
     script = root / script_name
     logs_dir = root / 'logs' / 'monitoring'
     data_dir = root / 'data'
     lock_file = data_dir / '.monitoring.lock'
     status_file = data_dir / 'monitoring_status.json'
+    timeout_seconds = int(os.getenv('MONITOR_TIMEOUT_SECONDS', '900'))
+    if timeout_seconds <= 0:
+        raise ValueError('MONITOR_TIMEOUT_SECONDS must be positive')
 
     try:
         with ProcessFileLock(lock_file):
             started = utc_now()
+            baseline_file = data_dir / 'monitoring_baseline.json'
+            if not baseline_file.exists():
+                atomic_json(baseline_file, {'started_at': started})
+            from .metrics import baseline
+            monitoring_started = baseline(root)
+            if monitoring_started is None:
+                raise ValueError('Invalid monitoring baseline; preserve and inspect the existing file')
             stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
             logs_dir.mkdir(parents=True, exist_ok=True)
             log_file = logs_dir / f'monitor_{stamp}.log'
@@ -188,12 +204,34 @@ def run_once(root: Path, python_executable: str | None = None, script_name='run_
                             encoding='utf-8', errors='replace', bufsize=1,
                             env=child_env,
                         )
-                        assert proc.stdout is not None
-                        for raw in proc.stdout:
-                            line = raw.rstrip('\r\n')
-                            output_lines.append(line)
-                            emit(line)
-                        exit_code = proc.wait()
+                        expired = threading.Event()
+                        def stop_child():
+                            if proc.poll() is None:
+                                expired.set()
+                                try:
+                                    proc.kill()
+                                except ProcessLookupError:
+                                    pass
+                        deadline = threading.Timer(timeout_seconds, stop_child)
+                        deadline.daemon = True
+                        deadline.start()
+                        try:
+                            assert proc.stdout is not None
+                            for raw in proc.stdout:
+                                line = raw.rstrip('\r\n')
+                                output_lines.append(line)
+                                emit(line)
+                            exit_code = proc.wait()
+                        finally:
+                            deadline.cancel()
+                            if proc.poll() is None:
+                                proc.kill()
+                            proc.wait()
+                            if proc.stdout is not None:
+                                proc.stdout.close()
+                        if expired.is_set():
+                            error = f'采集超过 {timeout_seconds} 秒，已停止本轮子进程；下轮保留检查点重试'
+                            emit('[MONITOR] ERROR: ' + error)
                     except Exception as exc:
                         error = f'{type(exc).__name__}: {exc}'
                         exit_code = 2
@@ -208,6 +246,7 @@ def run_once(root: Path, python_executable: str | None = None, script_name='run_
                 result = {
                     'status': status,
                     'started_at': started,
+                    'monitoring_started_at': monitoring_started,
                     'finished_at': finished,
                     'return_code': exit_code,
                     'sources': source_results,

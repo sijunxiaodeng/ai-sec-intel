@@ -17,7 +17,8 @@ def as_utc(value: str) -> datetime:
 def iso_utc(dt: datetime) -> str:
     if dt.tzinfo is None:
         raise ValueError('Naive datetime is not supported')
-    return dt.astimezone(timezone.utc).isoformat(timespec='seconds')
+    precision = 'microseconds' if dt.microsecond else 'seconds'
+    return dt.astimezone(timezone.utc).isoformat(timespec=precision)
 
 
 class CursorStore:
@@ -55,12 +56,22 @@ class CursorStore:
 
     def advance(self, source: str, end: datetime) -> None:
         """Call ONLY after a complete source window is stored successfully."""
+        if not source.strip():
+            raise ValueError('source must not be empty')
         stamp = iso_utc(end)
         now = iso_utc(datetime.now(timezone.utc))
         with self._connect() as conn:
+            # Comparing ISO strings is unsafe for legacy offset/Z timestamps
+            # and for mixed fractional precision. Lock the read/update pair.
+            conn.execute('BEGIN IMMEDIATE')
+            previous = conn.execute(
+                'SELECT window_end_at FROM incremental_cursors WHERE source=?',
+                (source,),
+            ).fetchone()
+            if previous and as_utc(previous['window_end_at']) >= end.astimezone(timezone.utc):
+                return
             conn.execute('''INSERT INTO incremental_cursors(source, window_end_at, recorded_at)
                 VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET
                   window_end_at=excluded.window_end_at,
-                  recorded_at=excluded.recorded_at
-                WHERE excluded.window_end_at > incremental_cursors.window_end_at''',
+                  recorded_at=excluded.recorded_at''',
                 (source, stamp, now))

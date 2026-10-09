@@ -1,232 +1,98 @@
 import os
-import requests
+import re
 
+import requests
 from dotenv import load_dotenv
 
-from collectors.base import IntelligenceItem
+from collectors.http import _get, github_next_url
+from incremental.api_collectors import from_github
 
 
 load_dotenv()
 
 
 class GitHubAdvisoryCollector:
-
-    BASE_URL = "https://api.github.com/advisories"
-
+    BASE_URL = 'https://api.github.com/advisories'
     AI_KEYWORDS = [
-        "ollama",
-        "vllm",
-        "triton",
-        "pytorch",
-        "tensorflow",
-        "huggingface",
-        "transformers",
-        "langchain",
-        "llamaindex",
-        "gradio",
-        "weaviate",
-        "milvus",
-        "qdrant",
-        "chroma",
-        "open webui",
-        "machine learning",
-        "large language model",
-        "artificial intelligence",
-        "llm",
-        "embedding",
-        "vector database",
+        'ollama', 'vllm', 'triton', 'pytorch', 'tensorflow', 'huggingface',
+        'transformers', 'langchain', 'llamaindex', 'gradio', 'weaviate',
+        'milvus', 'qdrant', 'chroma', 'open webui', 'machine learning',
+        'large language model', 'artificial intelligence', 'llm', 'embedding',
+        'vector database',
     ]
 
-    def __init__(self, token=None):
+    def __init__(self, token=None, session=None, max_pages=30):
+        self.token = token if token is not None else (os.getenv('GITHUB_TOKEN') or os.getenv('GH_TOKEN'))
+        self.session = session or requests.Session()
+        if max_pages <= 0:
+            raise ValueError('max_pages must be positive')
+        self.max_pages = max_pages
 
-        self.token = token or os.getenv("GITHUB_TOKEN")
-
-        if not self.token:
-            print(
-                "警告：未检测到 GITHUB_TOKEN，"
-                "将使用 GitHub 未认证 API，容易触发限流。"
-            )
+    def _collect_pages(self, params, limit=None):
+        headers = {
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'AI-Security-Intelligence-System',
+        }
+        if self.token:
+            headers['Authorization'] = f'Bearer {self.token}'
+        url, seen_urls, seen_ids, items = self.BASE_URL, set(), set(), []
+        for _ in range(self.max_pages):
+            if url in seen_urls:
+                raise RuntimeError('GitHub pagination loop')
+            seen_urls.add(url)
+            response = _get(self.session, url, headers=headers, params=params)
+            advisories = response.json()
+            if not isinstance(advisories, list):
+                raise ValueError('GitHub advisories API did not return a list')
+            for advisory in advisories:
+                if not isinstance(advisory, dict) or not advisory.get('ghsa_id'):
+                    raise ValueError('Invalid GitHub advisory payload')
+                if advisory['ghsa_id'] in seen_ids:
+                    raise RuntimeError('GitHub repeated advisory during pagination; retry later')
+                seen_ids.add(advisory['ghsa_id'])
+                items.append(self._parse_advisory(advisory))
+            url = github_next_url(response)
+            if not url or (limit is not None and len(items) >= limit):
+                return items[:limit] if limit is not None else items
+            if not advisories:
+                raise RuntimeError('GitHub returned empty page before final page')
+            params = None
+        raise RuntimeError(f'GitHub reached max_pages={self.max_pages}; result is incomplete')
 
     def collect(self, limit=20, severity=None, ecosystem=None):
-
-        params = {
-            "per_page": min(limit, 100),
-            "sort": "published",
-            "direction": "desc",
-        }
-
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise ValueError('limit must be a nonnegative integer')
+        if not limit:
+            return []
+        params = {'type': 'reviewed', 'per_page': min(limit, 100),
+                  'sort': 'published', 'direction': 'desc'}
         if severity:
-            params["severity"] = severity
-
+            params['severity'] = severity
         if ecosystem:
-            params["ecosystem"] = ecosystem
-
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
-            "User-Agent": "AI-Security-Intelligence-System",
-        }
-
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-
-        response = requests.get(
-            self.BASE_URL,
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
-
-        if response.status_code == 403:
-            remaining = response.headers.get(
-                "X-RateLimit-Remaining"
-            )
-
-            reset_time = response.headers.get(
-                "X-RateLimit-Reset"
-            )
-
-            raise RuntimeError(
-                "GitHub API 请求被限流。"
-                f" Remaining={remaining},"
-                f" Reset={reset_time}。"
-                " 请检查 GITHUB_TOKEN 是否配置正确。"
-            )
-
-        response.raise_for_status()
-
-        advisories = response.json()
-
-        items = []
-
-        for advisory in advisories[:limit]:
-
-            item = self._parse_advisory(advisory)
-
-            items.append(item)
-
-        return items
+            params['ecosystem'] = ecosystem
+        return self._collect_pages(params, limit=limit)
 
     def collect_by_cve(self, cve_id):
-
-        params = {
-            "cve_id": cve_id
-        }
-
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2026-03-10",
-            "User-Agent": "AI-Security-Intelligence-System",
-        }
-
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-
-        response = requests.get(
-            self.BASE_URL,
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-        advisories = response.json()
-
-        return [
-            self._parse_advisory(advisory)
-            for advisory in advisories
-        ]
+        return self._collect_pages({'cve_id': str(cve_id).strip().upper(), 'per_page': 100})
 
     def _parse_advisory(self, advisory):
-
-        ghsa_id = advisory.get("ghsa_id", "")
-        cve_id = advisory.get("cve_id")
-
-        summary = advisory.get("summary", "")
-        description = advisory.get("description", "")
-
-        severity = advisory.get("severity")
-
-        ai_score, ai_tags = self._check_ai_relevance(
-            " ".join([
-                summary or "",
-                description or "",
-                self._package_text(advisory),
-            ])
-        )
-
-        tags = [
-            "github_advisory",
-            "ghsa",
-            *ai_tags
-        ]
-
-        return IntelligenceItem(
-            source="GITHUB_ADVISORY",
-
-            source_id=ghsa_id,
-            cve_id=cve_id,
-
-            title=summary or ghsa_id,
-            description=description,
-
-            url=advisory.get("html_url"),
-
-            published_at=advisory.get("published_at"),
-            modified_at=advisory.get("updated_at"),
-
-            severity=(
-                severity.upper()
-                if severity
-                else None
-            ),
-
-            ai_relevance_hint=ai_score,
-
-            tags=tags,
-
-            raw_data=advisory,
-        )
+        item = from_github(advisory)
+        score, tags = self._check_ai_relevance(' '.join([
+            item.title, item.description, self._package_text(advisory),
+        ]))
+        item.ai_relevance_hint = score
+        item.tags = ['github_advisory', 'ghsa', *tags]
+        return item
 
     def _package_text(self, advisory):
-
         names = []
-
-        for vulnerability in advisory.get(
-            "vulnerabilities",
-            []
-        ):
-
-            package = vulnerability.get(
-                "package",
-                {}
-            )
-
-            name = package.get("name", "")
-            ecosystem = package.get("ecosystem", "")
-
-            names.append(
-                f"{ecosystem} {name}"
-            )
-
-        return " ".join(names)
+        for vulnerability in advisory.get('vulnerabilities') or []:
+            package = vulnerability.get('package') or {}
+            names.append(f"{package.get('ecosystem', '')} {package.get('name', '')}")
+        return ' '.join(names)
 
     def _check_ai_relevance(self, text):
-
-        text = text.lower()
-
-        matched = []
-
-        for keyword in self.AI_KEYWORDS:
-
-            if keyword.lower() in text:
-                matched.append(keyword)
-
-        if matched:
-            return 1.0, [
-                "ai_candidate",
-                *matched
-            ]
-
-        return 0.0, []
+        matched = [term for term in self.AI_KEYWORDS
+                   if re.search(r'(?<!\w)' + re.escape(term) + r'(?!\w)', text, re.I)]
+        return (1.0, ['ai_candidate', *matched]) if matched else (0.0, [])

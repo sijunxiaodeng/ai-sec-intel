@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -106,7 +107,8 @@ class ClassificationStore:
         if limit <= 0:
             return []
         return self._select("""
-            SELECT v.cve_id, v.payload_json, v.content_sha256
+            SELECT v.cve_id, v.payload_json, v.content_sha256,
+                   a.state AS previous_state, a.updated_at AS classification_updated_at
             FROM ai_classifications a
             JOIN unified_vulnerabilities v ON v.cve_id = a.cve_id
             WHERE a.content_sha256 = v.content_sha256
@@ -128,6 +130,8 @@ class ClassificationStore:
         """Atomic optimistic check: do not save a classification of stale CVE content."""
         if state not in {"classified", "review", "pending_llm", "retry"}:
             raise ValueError(f"Unknown state: {state}")
+        if state in {"classified", "review"} and result is None:
+            raise ValueError("Completed classifications require a result")
         now = utc_now()
         if result is None:
             related = None
@@ -139,7 +143,8 @@ class ClassificationStore:
             review = 0
             rule_score = None
         else:
-            related = int(bool(result.is_ai_related))
+            related = (None if result.is_ai_related is None
+                       else int(bool(result.is_ai_related)))
             category = result.category
             conf = float(result.confidence)
             reason = result.reason
@@ -147,6 +152,11 @@ class ClassificationStore:
             source = result.decision_source
             review = int(bool(result.needs_review))
             rule_score = float(result.rule_score)
+            if not math.isfinite(conf) or not 0 <= conf <= 1:
+                raise ValueError("Classification confidence must be finite and in [0, 1]")
+        if state in {"retry", "pending_llm"}:
+            # A deferred/failed model operation has no classification verdict.
+            related, category, conf, review = None, "unknown", None, 1
         retry_after = (
             (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat(timespec="seconds")
             if state == "retry" else None
@@ -229,11 +239,18 @@ class ClassificationStore:
                 SELECT COUNT(*) FROM ai_classifications a
                 JOIN unified_vulnerabilities v ON v.cve_id=a.cve_id
                 WHERE a.classifier_version=? AND a.content_sha256=v.content_sha256
-                  AND a.state IN ('classified','review') AND a.ai_related=1
+                  AND a.state='classified' AND a.ai_related=1
+            """, (version,)).fetchone()[0]
+            review_ai_positive = con.execute("""
+                SELECT COUNT(*) FROM ai_classifications a
+                JOIN unified_vulnerabilities v ON v.cve_id=a.cve_id
+                WHERE a.classifier_version=? AND a.content_sha256=v.content_sha256
+                  AND a.state='review' AND a.ai_related=1
             """, (version,)).fetchone()[0]
         return {
             "total_cves": total, "need_initial_or_refresh": needs_new,
             "states": states, "classified_ai_positive": ai_positive,
+            "review_ai_positive": review_ai_positive,
         }
 
     def export_jsonl(self, path: str | Path, version: str, only_ai: bool = False) -> int:
@@ -252,7 +269,7 @@ class ClassificationStore:
         """
         params: tuple = (version,)
         if only_ai:
-            sql += " AND a.ai_related=1"
+            sql += " AND a.ai_related=1 AND a.state='classified'"
         sql += " ORDER BY v.cve_id"
         n = 0
         with self.connect() as con, path.open("w", encoding="utf-8", newline="\n") as f:

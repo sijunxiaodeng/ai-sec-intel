@@ -37,13 +37,13 @@ def run_priority_batch(db_path: str | Path, version: str,
                 if cand.llm_required and stats["semantic_calls"] >= max_llm_calls:
                     state, result, error = "pending_llm", None, "LLM budget exhausted; postponed"
                 else:
-                    if cand.llm_required:
+                    if cand.llm_required and judge.semantic_judge.is_configured():
                         # Count the attempted invocation, including API/parse failures.
                         stats["semantic_calls"] += 1
                     result = judge.classify_vulnerability(_vulnerability_from_row(row))
                     error = None
                     if result.decision_source in ("semantic_error", "semantic_unavailable"):
-                        state, error, result = "retry", result.reason, None
+                        state, error = "retry", result.reason
                     elif result.needs_review:
                         state = "review"
                     else:
@@ -80,7 +80,7 @@ def run_priority_batch(db_path: str | Path, version: str,
                 if verbose:
                     print(f"[{idx}/{len(selected)}] {cve_id}: {state} ({cand.priority})", flush=True)
             except Exception as exc:
-                msg = f"{type(exc).__name__}: {exc}"
+                msg = f"{type(exc).__name__}: classification processing failed"
                 try:
                     wrote = store.record(row, version, "retry", error=msg)
                     if wrote:

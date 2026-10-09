@@ -22,6 +22,12 @@ class UnifiedVulnerability:
 
     cvss_score: Optional[float] = None
 
+    # The score, vector, version and severity always describe one selected metric.
+    cvss_vector: Optional[str] = None
+    cvss_version: Optional[str] = None
+    cvss_source: Optional[str] = None
+    cvss_evidence: list[dict[str, Any]] = field(default_factory=list)
+
     epss_score: Optional[float] = None
 
     cwes: list[str] = field(default_factory=list)
@@ -58,6 +64,7 @@ class UnifiedVulnerability:
     # =========================
 
     published_at: Optional[str] = None
+    publication_source: Optional[str] = None
 
     modified_at: Optional[str] = None
 
@@ -83,6 +90,9 @@ class UnifiedVulnerability:
     tags: list[str] = field(default_factory=list)
 
     references: list[str] = field(default_factory=list)
+
+    # Identify every contributing record even when a source has several GHSAs.
+    source_evidence: list[dict[str, Any]] = field(default_factory=list)
 
     # =========================
     # 保存各来源原始数据

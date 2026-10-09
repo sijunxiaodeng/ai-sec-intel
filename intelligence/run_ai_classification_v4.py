@@ -63,7 +63,8 @@ def main(argv=None) -> int:
 
     version = classifier_version()
     store = ClassificationStore(args.db)
-    status_path = ROOT / "data" / "classification_status.json"
+    state_dir = Path(args.db).resolve().parent
+    status_path = state_dir / "classification_status.json"
 
     if args.stats:
         print(json.dumps(
@@ -80,7 +81,7 @@ def main(argv=None) -> int:
     from monitoring.lock import AlreadyRunning, ProcessFileLock
 
     try:
-        with ProcessFileLock(ROOT / "data" / ".ai_classification.lock"):
+        with ProcessFileLock(state_dir / ".ai_classification.lock"):
             start = utc_now()
             try:
                 stats = run_batch(

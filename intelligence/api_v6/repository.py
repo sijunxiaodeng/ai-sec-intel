@@ -9,6 +9,8 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from monitoring.metrics import baseline, latency_report
+
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 CLASSIFIER_FILES = (
     "classification/ai_relevance.py",
@@ -114,15 +116,30 @@ class IntelligenceRepository:
             yield con
 
     @staticmethod
-    def _base_query(version: str | None) -> tuple[str, tuple]:
-        sql = """
+    def _base_query(version: str | None, classification_available: bool = True) -> tuple[str, tuple]:
+        # Classification is optional. A freshly collected database has no
+        # classification table; keep the API read-only and return unknowns.
+        table = "ai_classifications" if classification_available else """(
+            SELECT NULL AS cve_id, NULL AS content_sha256,
+                   NULL AS classifier_version, NULL AS state, NULL AS ai_related,
+                   NULL AS ai_category, NULL AS confidence, NULL AS reason,
+                   NULL AS evidence_json, NULL AS decision_source,
+                   NULL AS needs_review, NULL AS classified_at WHERE 0
+        )"""
+        sql = f"""
             FROM unified_vulnerabilities AS v
-            LEFT JOIN ai_classifications AS a
+            LEFT JOIN {table} AS a
               ON a.cve_id = v.cve_id
              AND a.content_sha256 = v.content_sha256
              AND a.classifier_version = ?
         """
         return sql, (version or "__missing_classifier_sources__",)
+
+    @staticmethod
+    def _classification_available(con: sqlite3.Connection) -> bool:
+        return con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ai_classifications'"
+        ).fetchone() is not None
 
     @staticmethod
     def _columns() -> str:
@@ -174,9 +191,9 @@ class IntelligenceRepository:
     def list_items(self, *, q: str | None = None, source: str | None = None,
                    ai_related: bool | None = None, category: str | None = None,
                    state: str | None = None, limit: int = 20, offset: int = 0,
-                   sort: str = "updated") -> dict:
+                   sort: str = "updated", full: bool = False,
+                   include_raw: bool = False) -> dict:
         version = current_classifier_version(self.root)
-        base, base_params = self._base_query(version)
         where, where_params = self._where(q=q, source=source, ai_related=ai_related,
                                           category=category, state=state)
         orders = {
@@ -186,6 +203,7 @@ class IntelligenceRepository:
         }
         order = orders[sort]  # validated against Literal in API; never accept raw SQL
         with self.read() as con:
+            base, base_params = self._base_query(version, self._classification_available(con))
             total = con.execute("SELECT COUNT(*) " + base + where,
                                 base_params + where_params).fetchone()[0]
             rows = con.execute(
@@ -196,13 +214,13 @@ class IntelligenceRepository:
         return {
             "total": total, "limit": limit, "offset": offset,
             "classifier_version": version,
-            "items": [_record(row) for row in rows],
+            "items": [_record(row, full=full, include_raw=include_raw) for row in rows],
         }
 
     def one(self, cve_id: str, include_raw: bool = False) -> dict | None:
         version = current_classifier_version(self.root)
-        base, base_params = self._base_query(version)
         with self.read() as con:
+            base, base_params = self._base_query(version, self._classification_available(con))
             row = con.execute(
                 "SELECT " + self._columns() + base + " WHERE v.cve_id = ?",
                 base_params + (cve_id.upper(),),
@@ -211,8 +229,8 @@ class IntelligenceRepository:
 
     def stats(self) -> dict:
         version = current_classifier_version(self.root)
-        base, base_params = self._base_query(version)
         with self.read() as con:
+            base, base_params = self._base_query(version, self._classification_available(con))
             total = con.execute("SELECT COUNT(*) FROM unified_vulnerabilities").fetchone()[0]
             state_rows = con.execute("""
                 SELECT COALESCE(a.state, 'unclassified_or_stale') AS state,
@@ -221,11 +239,14 @@ class IntelligenceRepository:
                                      base_params).fetchall()
             positive = con.execute("""
                 SELECT COUNT(*) """ + base
-                + " WHERE a.state IN ('classified','review') AND a.ai_related = 1",
+                + " WHERE a.state = 'classified' AND a.ai_related = 1",
+                base_params).fetchone()[0]
+            review_positive = con.execute(
+                "SELECT COUNT(*) " + base + " WHERE a.state = 'review' AND a.ai_related = 1",
                 base_params).fetchone()[0]
             cats = con.execute("""
                 SELECT a.ai_category AS category, COUNT(*) AS n """ + base
-                + " WHERE a.state IN ('classified','review') AND a.ai_related = 1"
+                + " WHERE a.state = 'classified' AND a.ai_related = 1"
                   " GROUP BY a.ai_category ORDER BY n DESC, a.ai_category",
                 base_params).fetchall()
             by_source = con.execute(
@@ -238,6 +259,7 @@ class IntelligenceRepository:
             "classifier_version": version,
             "classification_states": {row["state"]: row["n"] for row in state_rows},
             "classified_ai_positive": positive,
+            "review_ai_positive": review_positive,
             "ai_categories": {row["category"]: row["n"] for row in cats},
             "source_record_counts": {row["source"]: row["n"] for row in by_source},
             "note": "分类仅统计与当前 CVE 内容哈希、分类器版本均一致的结果；待复核正例未视作人工确认。",
@@ -255,3 +277,7 @@ class IntelligenceRepository:
                 ORDER BY r.collector
             """).fetchall()
         return [dict(row) for row in rows]
+
+    def monitoring_metrics(self) -> dict:
+        with self.read() as con:
+            return latency_report(con, baseline(self.root, state_dir=self.db_path.parent))

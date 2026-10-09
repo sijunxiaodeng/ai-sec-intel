@@ -109,20 +109,22 @@ def plan_batch(store: ClassificationStore, version: str, judge,
         # Backlog is separate from fresh. Retry cooldown must be respected.
         ready_pending = [dict(r) for r in con.execute("""
             SELECT v.cve_id, v.payload_json, v.content_sha256,
-                   v.content_updated_at, 1 AS previously_classified
+                   v.content_updated_at, 1 AS previously_classified,
+                   a.updated_at AS classification_updated_at
             FROM ai_classifications a
             JOIN unified_vulnerabilities v ON v.cve_id=a.cve_id
             WHERE a.content_sha256=v.content_sha256
               AND a.classifier_version=?
               AND (a.state='pending_llm' OR
                   (a.state='retry' AND (a.retry_after IS NULL OR a.retry_after<=?)))
-        """, (version, utc_now()))] if max_llm_calls > 0 else []
+        """, (version, utc_now()))]
 
     fresh = [_rank(r, judge) for r in fresh_rows]
     pending = [_rank(r, judge, pending=True) for r in ready_pending]
     # Rank by AI relevance first, then recency. Use CVE as stable tie-breaker.
     fresh.sort(key=lambda c: (c.score, c.updated_at, c.row["cve_id"]), reverse=True)
-    pending.sort(key=lambda c: (c.score, c.updated_at, c.row["cve_id"]), reverse=True)
+    # Old pending work must eventually progress, including low-priority rows.
+    pending.sort(key=lambda c: (c.row.get("classification_updated_at") or "", c.row["cve_id"]))
 
     # V5.1: budget is shared fairly between fresh semantic candidates and
     # previous pending records, but *unused* fresh semantic slots are given
@@ -131,7 +133,9 @@ def plan_batch(store: ClassificationStore, version: str, judge,
     if max_llm_calls == 0:
         # Preserve V5 zero-budget mode: scan and queue fresh semantic items
         # as pending_llm without contacting a provider.
-        selected = fresh[:max_items]
+        # Local retries do not require a provider and remain runnable offline.
+        local_pending = [c for c in pending if not c.llm_required]
+        selected = (local_pending + fresh)[:max_items]
         pending_llm_quota = 0
         fresh_llm_quota = 0
     else:

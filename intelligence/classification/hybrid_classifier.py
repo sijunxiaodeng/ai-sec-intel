@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from classification.ai_relevance import (
@@ -13,7 +12,7 @@ from classification.semantic_judge import (
 
 @dataclass
 class HybridClassificationResult:
-    is_ai_related: bool
+    is_ai_related: bool | None
     category: str
     confidence: float
     reason: str
@@ -47,6 +46,7 @@ class HybridAIClassifier:
         "generative ai",
         "genai",
         "agentic",
+        "multi-agent",
         "ai agent",
         "agent tool",
         "chatbot",
@@ -111,23 +111,8 @@ class HybridAIClassifier:
         text: str,
         term: str,
     ) -> bool:
-        """
-        Route matching is deliberately permissive, but still avoids
-        obvious substring accidents for short tokens such as rag/llm.
-        """
-        term = term.lower()
-
-        if len(term) <= 4:
-            pattern = (
-                r"(?<![a-z0-9_])"
-                + re.escape(term)
-                + r"(?![a-z0-9_])"
-            )
-            return bool(
-                re.search(pattern, text)
-            )
-
-        return term in text
+        """Broad concepts route for review, but substrings are not evidence."""
+        return AIRelevanceClassifier._contains_term(text, term)
 
     def _should_use_semantic_judge(
         self,
@@ -148,7 +133,12 @@ class HybridAIClassifier:
 
         hits = []
 
-        for term in self.AI_ROUTE_TERMS:
+        route_terms = dict.fromkeys([
+            *self.AI_ROUTE_TERMS,
+            *(entity for entities in self.rule_classifier.AI_ENTITIES.values() for entity in entities),
+            *(concept for concepts in self.rule_classifier.AI_CONCEPTS.values() for concept in concepts),
+        ])
+        for term in route_terms:
             if self._contains_route_term(
                 text,
                 term,
@@ -231,8 +221,8 @@ class HybridAIClassifier:
         # -------------------------------------------------
         if not self.semantic_judge.is_configured():
             return HybridClassificationResult(
-                is_ai_related=False,
-                category="non_ai",
+                is_ai_related=None,
+                category="unknown",
                 confidence=0.0,
                 reason=(
                     "Semantic review was required but the "
@@ -260,12 +250,12 @@ class HybridAIClassifier:
             )
         except Exception as exc:
             return HybridClassificationResult(
-                is_ai_related=False,
-                category="non_ai",
+                is_ai_related=None,
+                category="unknown",
                 confidence=0.0,
                 reason=(
                     "Semantic judge failed: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"{type(exc).__name__}"
                 ),
                 evidence=[
                     f"route:{x}"

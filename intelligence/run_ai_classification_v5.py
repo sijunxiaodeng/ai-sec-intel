@@ -25,9 +25,10 @@ def main(argv=None):
     parser.add_argument("--max-llm-calls", type=int,
                         default=int(os.getenv("CLASSIFY_V5_MAX_LLM_CALLS", "2")))
     parser.add_argument("--preview", type=int, nargs="?", const=15,
-                        help="仅查看优先队列前 N 项，不写数据库、无需 API")
+                        help="查看优先队列前 N 项（可初始化分类表，不写分类结果，无需 API）")
     parser.add_argument("--stats", action="store_true", help="只看分类表统计")
     args = parser.parse_args(argv)
+    state_dir = Path(args.db).resolve().parent
     version = classifier_version()  # NEVER alter V4's classifier version.
     store = ClassificationStore(args.db)
     if args.stats:
@@ -44,12 +45,12 @@ def main(argv=None):
     from monitoring.lock import AlreadyRunning, ProcessFileLock
     from ai_pipeline.store import utc_now
     try:
-        with ProcessFileLock(ROOT / "data" / ".ai_classification.lock"):
+        with ProcessFileLock(state_dir / ".ai_classification.lock"):
             start = utc_now()
             try:
                 report = run_priority_batch(args.db, version, args.max_items,
                                             args.max_llm_calls)
-                atomic_status(ROOT / "data" / "classification_status.json", {
+                atomic_status(state_dir / "classification_status.json", {
                     "status": "success", "started_at": start,
                     "finished_at": utc_now(), "classifier_version": version,
                     "worker": "V5_priority", "stats": report, "error": None,
@@ -57,7 +58,7 @@ def main(argv=None):
                 print(">>> V5 优先分类汇总", json.dumps(report, ensure_ascii=False))
                 return 0
             except Exception as exc:
-                atomic_status(ROOT / "data" / "classification_status.json", {
+                atomic_status(state_dir / "classification_status.json", {
                     "status": "failed", "started_at": start,
                     "finished_at": utc_now(), "classifier_version": version,
                     "worker": "V5_priority", "error": f"{type(exc).__name__}: {exc}",

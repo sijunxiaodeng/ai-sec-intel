@@ -44,6 +44,7 @@ class AIRelevanceClassifier:
             "pytorch",
             "tensorflow",
             "onnxruntime",
+            "onnx runtime",
             "tensorrt",
             "deepspeed",
             "triton inference server",
@@ -73,14 +74,10 @@ class AIRelevanceClassifier:
             "open webui",
             "modelcontextprotocol",
             "model context protocol",
-            "knowns",
         ],
 
         "ai_supply_chain": [
             "safetensors",
-            "model hub",
-            "model repository",
-            "model artifact",
         ],
     }
 
@@ -107,17 +104,16 @@ class AIRelevanceClassifier:
             "embedding model": 2,
             "vector database": 3,
 
-            "prompt injection": 3,
-            "prompt leakage": 3,
-            "system prompt leakage": 3,
             "model poisoning": 3,
             "data poisoning": 3,
         },
 
         "ai_application_agent": {
+            "prompt injection": 3,
+            "prompt leakage": 3,
+            "system prompt leakage": 3,
             "ai agent": 3,
             "llm agent": 3,
-            "multi-agent": 3,
             "agentic ai": 3,
 
             "retrieval augmented generation": 3,
@@ -154,7 +150,7 @@ class AIRelevanceClassifier:
 
         pattern = (
             r"(?<![A-Za-z0-9_])"
-            + re.escape(term.lower())
+            + r"[ _-]+".join(re.escape(part) for part in re.split(r"[ _-]+", term.lower()))
             + r"(?![A-Za-z0-9_])"
         )
 
@@ -208,6 +204,10 @@ class AIRelevanceClassifier:
 
                 for field_name, text in structured_texts:
 
+                    if entity in {"autogen", "transformers"} and field_name != "package":
+                        if str(text or "").strip().lower() != entity:
+                            continue
+
                     if self._contains_term(
                         text,
                         entity
@@ -219,10 +219,10 @@ class AIRelevanceClassifier:
                             f"{field_name}:{entity}"
                         )
 
-                # title：
-                # 同样比较可信
+                # Bare "autogen" can mean automatic code generation.
+                unambiguous_text_entity = entity not in {"autogen", "transformers"}
 
-                if self._contains_term(
+                if unambiguous_text_entity and self._contains_term(
                     title,
                     entity
                 ):
@@ -236,7 +236,7 @@ class AIRelevanceClassifier:
                 # description：
                 # 权重低一点
 
-                if self._contains_term(
+                if unambiguous_text_entity and self._contains_term(
                     description,
                     entity
                 ):
@@ -315,23 +315,28 @@ class AIRelevanceClassifier:
 
         if entity_scores:
 
-            best_category = max(
-                entity_scores,
-                key=entity_scores.get
-            )
+            def entity_priority(category):
+                fields = [item.split(":", 1)[0] for item in entity_evidence[category]]
+                rank = max({"product": 3, "package": 3, "vendor": 2, "title": 1,
+                            "description": 0}[name] for name in fields)
+                return rank, entity_scores[category]
+
+            best_category = max(entity_scores, key=entity_priority)
 
             score_value = (
                 entity_scores[best_category]
             )
 
-            # 有结构化实体命中时通常得分 >= 4/5
-            if score_value >= 5:
-                relevance = 1.0
-            else:
-                relevance = 0.8
+            # A description mention can identify a dependency or mitigation,
+            # rather than the vulnerable product. Route weak mentions for review.
+            strong_evidence = any(
+                not item.startswith("description:")
+                for item in entity_evidence[best_category]
+            )
+            relevance = (1.0 if score_value >= 5 else 0.9) if strong_evidence else 0.5
 
             return AIClassificationResult(
-                is_ai_related=True,
+                is_ai_related=strong_evidence,
                 score=relevance,
                 category=best_category,
                 evidence=list(
@@ -356,17 +361,26 @@ class AIRelevanceClassifier:
 
         if concept_scores:
 
-            best_category = max(
-                concept_scores,
-                key=concept_scores.get
-            )
+            def concept_priority(category):
+                has_explicit_concept = any(
+                    item.removeprefix("concept:") in self.STRONG_AI_CONCEPTS
+                    for item in concept_evidence[category]
+                )
+                return has_explicit_concept, concept_scores[category]
+
+            best_category = max(concept_scores, key=concept_priority)
 
             score_value = (
                 concept_scores[best_category]
             )
 
-            # 概念词要求更严格
-            if score_value >= 5:
+            # One explicit AI attack/protocol is enough; generic concepts
+            # remain review hints even when several occur together.
+            strong_concept = any(
+                item.removeprefix("concept:") in self.STRONG_AI_CONCEPTS
+                for item in concept_evidence[best_category]
+            )
+            if strong_concept:
 
                 relevance = 0.9
                 is_ai_related = True

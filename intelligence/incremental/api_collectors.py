@@ -1,20 +1,17 @@
 """NVD modified-time and GitHub modified-time incremental collectors.
 
-Uses the existing IntelligenceItem dataclass and merger raw_data shapes.
-No changes are made to the user's existing collector implementations.
+Uses the existing IntelligenceItem dataclass and preserves source raw_data.
 """
 from __future__ import annotations
 
-import json
 import os
 import time
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
 from collectors.base import IntelligenceItem
+from collectors.http import _get, github_next_url, nvd_page
 
 
 NVD_URL = 'https://services.nvd.nist.gov/rest/json/cves/2.0'
@@ -24,45 +21,14 @@ GITHUB_URL = 'https://api.github.com/advisories'
 def _api_timestamp(dt: datetime) -> str:
     if dt.tzinfo is None:
         raise ValueError('Timezone-aware datetime required')
-    return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+    return dt.astimezone(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
 def _iso_timestamp(dt: datetime) -> str:
     if dt.tzinfo is None:
         raise ValueError('Timezone-aware datetime required')
-    return dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-
-def _get(session, url, *, headers=None, params=None, timeout=35, retries=4):
-    for attempt in range(retries):
-        try:
-            response = session.get(url, headers=headers, params=params, timeout=timeout)
-        except requests.RequestException:
-            if attempt == retries - 1:
-                raise
-            time.sleep(min(2 ** (attempt + 1), 25))
-            continue
-        status = response.status_code
-        if status in {429, 500, 502, 503, 504} or (
-            status == 403 and response.headers.get('X-RateLimit-Remaining') == '0'
-        ):
-            if attempt == retries - 1:
-                response.raise_for_status()
-            delay = min(2 ** (attempt + 1), 30)
-            retry_after = response.headers.get('Retry-After')
-            if retry_after:
-                try:
-                    delay = min(max(float(retry_after), 0), 120)
-                except ValueError:
-                    try:
-                        delay = min(max((parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds(), 0), 120)
-                    except Exception:
-                        pass
-            time.sleep(delay)
-            continue
-        response.raise_for_status()
-        return response
-    raise RuntimeError('Unreachable HTTP retry state')
+    precision = 'microseconds' if dt.microsecond else 'seconds'
+    return dt.astimezone(timezone.utc).isoformat(timespec=precision).replace('+00:00', 'Z')
 
 
 def _nvd_description(cve: dict[str, Any]) -> str:
@@ -77,8 +43,12 @@ def _nvd_description(cve: dict[str, Any]) -> str:
 
 def _nvd_severity(cve: dict[str, Any]) -> str | None:
     metrics = cve.get('metrics') or {}
+    if not isinstance(metrics, dict):
+        raise ValueError('Invalid NVD metrics payload')
     for key in ('cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30', 'cvssMetricV2'):
         for metric in metrics.get(key) or []:
+            if not isinstance(metric, dict):
+                raise ValueError('Invalid NVD metric payload')
             data = metric.get('cvssData') or {}
             severity = data.get('baseSeverity') or metric.get('baseSeverity')
             if severity:
@@ -115,10 +85,15 @@ def from_github(raw: dict[str, Any]) -> IntelligenceItem:
 
 
 class NVDModifiedCollector:
-    def __init__(self, session=None, api_key=None, max_pages=30):
+    def __init__(self, session=None, api_key=None, max_pages=30, page_size=500):
         self.session = session or requests.Session()
         self.api_key = api_key if api_key is not None else os.getenv('NVD_API_KEY', '')
         self.max_pages = max_pages
+        self.page_size = page_size
+        if max_pages <= 0:
+            raise ValueError('max_pages must be positive')
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 2000:
+            raise ValueError('NVD page_size must be 1..2000')
         self._last_call = None
 
     def _rate_limit(self):
@@ -131,6 +106,14 @@ class NVDModifiedCollector:
         self._last_call = time.monotonic()
 
     def collect_window(self, start: datetime, end: datetime):
+        return self._collect_window(start, end, 'lastMod')
+
+    def collect_published_window(self, start: datetime, end: datetime):
+        return self._collect_window(start, end, 'pub')
+
+    def _collect_window(self, start: datetime, end: datetime, field: str):
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError('Timezone-aware window boundaries required')
         if not start < end:
             return []
         if (end - start).total_seconds() > 119 * 86400:
@@ -141,32 +124,25 @@ class NVDModifiedCollector:
         page = 0
         start_index = 0
         output = []
+        seen_ids = set()
         total = None
         while True:
             if page >= self.max_pages:
                 raise RuntimeError(f'NVD reached max_pages={self.max_pages}; cursor will NOT advance')
-            self._rate_limit()
             r = _get(self.session, NVD_URL, headers=headers, params={
-                'lastModStartDate': _api_timestamp(start),
-                'lastModEndDate': _api_timestamp(end),
-                'resultsPerPage': 2000,
+                f'{field}StartDate': _api_timestamp(start),
+                f'{field}EndDate': _api_timestamp(end),
+                'resultsPerPage': self.page_size,
                 'startIndex': start_index,
-            })
-            doc = r.json()
-            vulnerabilities = doc.get('vulnerabilities')
-            if not isinstance(vulnerabilities, list):
-                raise ValueError('NVD did not return vulnerabilities list')
-            if total is None:
-                total = int(doc.get('totalResults', 0))
-            elif total != int(doc.get('totalResults', 0)):
-                # Avoid checkpoint advancement if upstream pagination moved underneath us.
-                raise RuntimeError('NVD totalResults changed during pagination; retry later')
-            if len(vulnerabilities) == 0 and start_index < total:
-                raise RuntimeError('NVD returned incomplete page before reaching totalResults')
+            }, before_request=self._rate_limit)
+            vulnerabilities, total = nvd_page(r.json(), start_index, total)
             for row in vulnerabilities:
                 raw = row.get('cve') if isinstance(row, dict) else None
                 if not isinstance(raw, dict) or not raw.get('id'):
                     raise ValueError('Invalid NVD CVE payload')
+                if raw['id'] in seen_ids:
+                    raise RuntimeError('NVD repeated CVE during pagination; retry later')
+                seen_ids.add(raw['id'])
                 output.append(from_nvd(raw))
             start_index += len(vulnerabilities)
             page += 1
@@ -180,16 +156,29 @@ class NVDModifiedCollector:
 class GithubModifiedCollector:
     def __init__(self, session=None, token=None, max_pages=30):
         self.session = session or requests.Session()
-        self.token = token if token is not None else os.getenv('GITHUB_TOKEN', '')
+        self.token = token if token is not None else (os.getenv('GITHUB_TOKEN') or os.getenv('GH_TOKEN', ''))
         self.max_pages = max_pages
+        if max_pages <= 0:
+            raise ValueError('max_pages must be positive')
 
     def collect_window(self, start: datetime, end: datetime):
+        return self._collect_window(start, end, 'modified')
+
+    def collect_published_window(self, start: datetime, end: datetime):
+        return self._collect_window(start, end, 'published')
+
+    def _collect_window(self, start: datetime, end: datetime, field: str):
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError('Timezone-aware window boundaries required')
         if not start < end:
             return []
         # "modified" includes advisories published OR updated in the window.
         params = {
             'type': 'reviewed',
-            'modified': f'{_iso_timestamp(start)}..{_iso_timestamp(end)}',
+            # GitHub rejects fractional seconds (422). Widen the query by at
+            # most a second so precise local cursor boundaries cannot omit rows.
+            field: f'{_iso_timestamp(start.replace(microsecond=0))}..'
+                   f'{_iso_timestamp((end + timedelta(seconds=1 if end.microsecond else 0)).replace(microsecond=0))}',
             'sort': 'updated',
             'direction': 'desc',
             'per_page': 100,
@@ -204,6 +193,7 @@ class GithubModifiedCollector:
         url = GITHUB_URL
         seen_urls = set()
         output = []
+        seen_ids = set()
         pages = 0
         while url:
             if pages >= self.max_pages:
@@ -218,13 +208,15 @@ class GithubModifiedCollector:
             for raw in docs:
                 if not isinstance(raw, dict) or not raw.get('ghsa_id'):
                     raise ValueError('Invalid GitHub advisory payload')
+                if raw['ghsa_id'] in seen_ids:
+                    raise RuntimeError('GitHub repeated advisory during pagination; retry later')
+                seen_ids.add(raw['ghsa_id'])
                 # GHSA without CVE remains in source_items for future non-CVE support,
                 # but the existing merger only creates unified CVE records.
                 output.append(from_github(raw))
             pages += 1
-            nxt = r.links.get('next', {}).get('url')
-            if nxt and urlparse(nxt).netloc != 'api.github.com':
-                raise RuntimeError('Unexpected GitHub pagination host')
-            url = nxt
+            url = github_next_url(r)
+            if url and not docs:
+                raise RuntimeError('GitHub returned empty page before final page')
             params = None  # next URL already contains its own cursor params
         return output
