@@ -15,6 +15,12 @@ python main.py
 
 接口约定见 `接口说明.md`。
 
+## 当前验收入口
+
+任务 C 的功能状态、比赛阈值、演示脚本和部署联调步骤集中在 [任务 C 验收包](验收包/README.md)。已完成开发链路；新文章通用关系处理、独立质量评测、另一台电脑部署和正式比赛材料仍按四阶段收尾。
+
+启动系统后运行 `python -m questions.acceptance_snapshot`，报告写入本机 `data/`。该程序不调用模型或触发采集，只检查资料现状、接口和引用绑定，不据此判断比赛得分。
+
 ## 怎么重新采集
 
 在本文件夹打开终端：
@@ -23,7 +29,7 @@ python main.py
 python collect_nvd.py
 ```
 
-需要能访问 NVD，第一次可能要等一分钟。成功后再双击 `page.html`。
+需要能访问 NVD，第一次可能要等一分钟。这是保留的早期静态采集入口；当前主系统的数据准备与联调按 [部署与联调](验收包/部署与联调.md) 执行，网页使用 `python main.py` 启动。
 
 ## 三人分工
 
@@ -31,7 +37,7 @@ python collect_nvd.py
 | --- | --- | --- |
 | A | `models.py`、`store.py`、`orchestrator.py`、`page.html` | 采集细节、问答题 |
 | B | `collectors/` 里的来源。返回的字典必须能被 `models.normalize` 收成卡片 | `orchestrator.py` |
-| C | 从原文抄 CVSS 和受影响版本；`questions/` 里的题目 | `orchestrator.py` |
+| C | 富化、知识库、混合检索、引用问答及评测；当前交付见验收包 | `orchestrator.py` |
 
 同一条漏洞用 `cve_id` 合并成一张卡。原文没有的分数或版本留空，不要编。
 
