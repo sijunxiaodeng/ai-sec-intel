@@ -1,5 +1,6 @@
 import re
 from agents.citation_guard import answer_issues
+from agents.question_scope import positive_question, topics as question_topics
 
 CVE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 SCORE = re.compile(r"CVSS(?!:[234]\.[01]/)(?:\s*v?[234]\.[01])?\s*(?:基础分(?:为|是)?|评分(?:为|是)?|分数(?:为|是)?|为|是|:|：)\s*([0-9]+(?:\.[0-9]+)?)", re.I)
@@ -30,13 +31,12 @@ def _condition_present(plain, row):
 def required_fields(answer, evidence, question):
     """校验可直接核对的必需字段；不能代替完整语义评审。"""
     plain = CITATION.sub("", answer or "").lower()
-    q = question.lower()
+    q = positive_question(question).lower()
     issues = []
     for record in evidence:
         from enrichment.guidance import formatted_facts
-        from rag.answer import TOPIC_WORDS
         guidance = record.get("item", {}).get("raw_data", {}).get("related_guidance") or {}
-        topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in q for word in words)}
+        topics = question_topics(question)
         if "conditions" in topics and not any(w in q for w in ("利用条件", "攻击条件", "暴露", "部署", "成因", "原理")):
             topics.discard("conditions")
         facts = formatted_facts(guidance, topics)

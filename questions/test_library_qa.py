@@ -111,6 +111,26 @@ class LibraryQATest(unittest.TestCase):
             clauses = [r["locator"].split("；")[0] for r in result["evidence"] if r["document_id"] == doc_id]
             self.assertIn("第二条", clauses)
 
+    def test_scope_and_effective_only_keeps_complete_clauses_without_model_extra(self):
+        ids = []
+        for source in REFERENCE_SOURCES[:2]:
+            body = policy_body(source)
+            candidate = dict(source, source_id=source["id"], source_name=source["name"], document_type="policy")
+            with patch("enrichment.reference_text.extract_document", return_value={"title": source["expected_title"], "parts": [("body", body)]}):
+                stored = ingest_document(candidate, self.db, lambda u: response(u, "fixture " + source["id"]))
+            ids.append(stored["document_id"])
+        with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat") as model:
+            result = run("请摘录两份政策各自的适用范围及施行条款，不判断我是否属于监管对象。", document_ids=ids, db_path=self.db)
+        model.assert_not_called()
+        self.assertFalse(result["model_attempted"])
+        self.assertEqual(result["answer_scope"], "policy_scope_and_effective")
+        for doc_id in ids:
+            doc = detail(doc_id, self.db)
+            expected = [r for r in doc["evidence"] if r["locator"].split("；")[0] in ("第二条", "第二十四条" if doc["article_count"] == 24 else "第十四条")]
+            self.assertEqual({r["citation_id"] for r in result["evidence"] if r["document_id"] == doc_id}, {r["citation_id"] for r in expected})
+            for row in expected: self.assertIn(row["text"], result["answer"])
+        self.assertNotIn("第十二条", result["answer"])
+
     def test_empty_question_and_invalid_or_missing_document_rejected(self):
         for kwargs in ({"question": " "}, {"question": "security", "document_ids": ["http://127.0.0.1"]}, {"question": "security", "document_ids": ["DOC-1234567890123456"]}):
             with self.assertRaises(ValueError):

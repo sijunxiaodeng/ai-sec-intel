@@ -1,18 +1,18 @@
 from config.llm import chat, configured
 from rag.retrieve import search
 from agents.verifier_agent import run as verify_answer, required_fields
-from rag.answer import TOPIC_WORDS
 from rag.evidence import CVE, DEFAULT_DB
 import json
 from urllib.parse import urlsplit
 from agents.citation_guard import claim_issues
+from agents.question_scope import topics as question_topics, positive_question, compare_scores
 
 MAX_CLAIMS = 24
 
 
 def _local_notes(record, question):
     report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
-    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    topics = question_topics(question)
     notes = []
     guidance = record.get("item", {}).get("raw_data", {}).get("related_guidance") or {}
     if "poc" in topics and report.get("poc_candidates"):
@@ -35,7 +35,7 @@ def _assessment_lines(record, question):
     report = (record["item"].get("raw_data") or {}).get("automatic_assessment")
     if not report or report["status"] not in ("ok", "partial"):
         return _guidance_lines(record, question)
-    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    topics = question_topics(question)
     lines, ids = [], set()
 
     def add(text, evidence_ids):
@@ -87,7 +87,7 @@ def _assessment_lines(record, question):
 def _guidance_lines(record, question):
     from enrichment.guidance import formatted_facts
     guidance = (record["item"].get("raw_data") or {}).get("related_guidance") or {}
-    topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+    topics = question_topics(question)
     if "conditions" in topics and not any(word in question for word in ("利用条件", "攻击条件", "暴露", "部署", "成因", "原理")):
         topics.discard("conditions")
     lines = []
@@ -167,7 +167,7 @@ def _field_line(record):
     return score + version + extra
 
 
-def _extractive(records, question="", model_attempted=False):
+def _extractive(records, question="", model_attempted=False, *, fields_only=False):
     if not records:
         return "当前知识库里没有能回答这个问题的情报。"
     lines = []
@@ -178,7 +178,7 @@ def _extractive(records, question="", model_attempted=False):
         if structured:
             lines.extend(structured)
             lines.extend(_local_notes(record, question))
-            topics = {topic for topic, words in TOPIC_WORDS.items() if any(word in question.lower() for word in words)}
+            topics = question_topics(question)
             extras = topics & {"ai_relevance", "conditions", "impact", "remediation"}
             report = item.get("raw_data", {}).get("automatic_assessment") or {}
             if not any(word in question for word in ("文章", "原文", "分析", "原理", "成因")):
@@ -187,6 +187,10 @@ def _extractive(records, question="", model_attempted=False):
                         extras.discard(topic)
             lines.extend("来源补充原文：%s [%s]" % (chunk["text"], chunk["citation_id"]) for chunk in record.get("evidence_chunks") or []
                          if chunk.get("relation_type") in ("direct_analysis", "poc_candidate") and extras & set(chunk.get("topics") or []))
+            continue
+        if fields_only and question_topics(question) <= {"cvss", "versions", "conditions", "impact", "remediation", "poc"}:
+            lines.append("当前入库记录没有本轮所问字段的可引用事实；这不证明外部资料中不存在。")
+            lines.extend(_local_notes(record, question))
             continue
         chunks = record.get("evidence_chunks") or []
         if chunks:
@@ -299,9 +303,14 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, libra
     else:
         records = search(question, top_k=top_k, db_path=db_path, **options)
     if len(requested) > 1:
-        # 比较逐条展示 CVSS、范围与修复证据，不让不同实体争抢同一个 top_k。
-        detail_question = question + " CVSS 评分 受影响版本 修复 利用条件 技术影响"
-        answer = _extractive(records, detail_question) + "\n" + _comparison(records)
+        # 有明确字段时按本轮范围回答；没有字段的概览比较才使用默认范围。
+        if not question_topics(question) and positive_question(question) != question.strip():
+            return {"answer": "请明确本轮需要比较的字段，例如评分、版本范围、利用条件或修复记录。", "evidence": records,
+                    "used_model": False, "steps": [{"role": "问答", "action": "确认比较范围", "detail": "没有指定肯定的字段范围，不自动追加被排除字段"}]}
+        detail_question = question if question_topics(question) else question + " CVSS 评分 受影响版本 修复 利用条件 技术影响"
+        answer = _extractive(records, detail_question, fields_only=True)
+        if compare_scores(detail_question):
+            answer += "\n" + _comparison(records)
         return {"answer": answer, "evidence": records, "used_model": False,
                 "steps": [{"role": "问答", "action": "按漏洞分别检索并比较", "detail": "分别引用 %d 条漏洞的证据；评分版本不同时不排序" % len(records)}]}
     for record in records:
