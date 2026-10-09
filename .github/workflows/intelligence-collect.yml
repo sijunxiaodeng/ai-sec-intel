@@ -1,0 +1,123 @@
+name: B public intelligence collection
+
+on:
+  schedule:
+    # UTC; equivalent to every 15 minutes in any timezone. Avoid minute 0 peaks.
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      bootstrap_release_tag:
+        description: Same-repository release tag for the initial public-data snapshot
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+# Same branch uses one database lineage. Never cancel a writer that must upload.
+concurrency:
+  group: intelligence-public-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    # A manual dispatch on a feature branch must not create another database.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      AUTO_CLASSIFY_V5: '1'
+      CLASSIFY_V5_MAX_ITEMS: '300'
+      CLASSIFY_V5_MAX_LLM_CALLS: '0'
+      CLASSIFY_V4_MAX_LLM_CALLS: '0'
+      GITHUB_TOKEN: ${{ github.token }}
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
+    steps:
+      - name: Check out collector
+        uses: actions/checkout@v4
+        with:
+          # Only this small workflow needs to be in the default branch. B's
+          # runtime stays on its existing team branch; A/C are not overwritten.
+          ref: feat/intelligence
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: intelligence/requirements.lock.txt
+      - name: Restore durable public state
+        id: restore
+        run: python intelligence/deployment/actions_state.py restore --directory intelligence/data
+      - name: Install collector dependencies
+        run: python -m pip install --disable-pip-version-check -r intelligence/requirements.lock.txt
+      - name: Collect public intelligence
+        id: collect
+        timeout-minutes: 11
+        # GNU timeout stops the whole child process group. State upload still runs.
+        run: timeout --signal=TERM --kill-after=20s 10m python -u intelligence/run_monitor.py --once --source-timeout 120 --workers 4
+      - name: Prepare consistent SQLite snapshot
+        id: snapshot
+        if: ${{ always() && steps.restore.outcome == 'success' && steps.collect.outcome != 'skipped' }}
+        run: python intelligence/deployment/actions_state.py save --source intelligence/data --directory "${RUNNER_TEMP}/intelligence-state"
+      - name: Persist public collection state
+        id: upload
+        if: ${{ always() && steps.snapshot.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: intelligence-state-${{ github.run_id }}
+          path: ${{ runner.temp }}/intelligence-state/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+      - name: Retain the latest eight trusted snapshots
+        if: ${{ always() && steps.upload.outcome == 'success' }}
+        env:
+          UPLOADED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: python intelligence/deployment/actions_state.py prune --directory intelligence/data --uploaded-artifact-id "$UPLOADED_ARTIFACT_ID" --keep 8
+      - name: Summarize collection
+        if: ${{ always() }}
+        env:
+          COLLECTION_OUTCOME: ${{ steps.collect.outcome }}
+          SNAPSHOT_OUTCOME: ${{ steps.snapshot.outcome }}
+        run: |
+          python - <<'PY'
+          import json, os, sqlite3, sys
+          from contextlib import closing
+          from pathlib import Path
+          root = Path('intelligence').resolve()
+          lines = ['## B 云端自动采集',
+                   '本轮在 GitHub 服务器执行，个人电脑关机不影响采集。',
+                   f"采集步骤：{os.environ['COLLECTION_OUTCOME']}；状态备份：{os.environ['SNAPSHOT_OUTCOME']}。"]
+          path = root / 'data/monitoring_status.json'
+          if path.exists():
+              status = json.loads(path.read_text(encoding='utf-8'))
+              lines.extend([f"最近一次完整写出的采集状态：{status.get('status')}；成功来源：{status.get('success_sources')}；失败来源：{status.get('failed_sources')}。",
+                            f"该状态完成时间（UTC）：{status.get('finished_at')}。"])
+              rows = ['| 来源 | 类别 | 状态 | 待补采 |', '|---|---|---|---|']
+              for name, item in sorted(status.get('sources', {}).items()):
+                  rows.append(f"| {name} | {item.get('category', '')} | {item.get('status')} | {'是' if item.get('pending') else '否'} |")
+              lines.append('\n'.join(rows))
+          try:
+              sys.path.insert(0, str(root))
+              from monitoring.coverage import coverage_report
+              from monitoring.source_registry import get_sources
+              from api_v6.repository import current_classifier_version
+              with closing(sqlite3.connect(f"{(root / 'data/intelligence.db').as_uri()}?mode=ro", uri=True)) as db:
+                  db.row_factory = sqlite3.Row
+                  report = coverage_report(db, get_sources(), classifier_version=current_classifier_version(root))
+              lines.extend([f"配置来源类别：{report['configured_category_count']}；已有 AI 内容候选的类别：{report['observed_ai_category_count']}（文档相关性仍需人工抽查）。",
+                            f"可精确计时的在线样本：{report['live_precise_samples']}；延迟 ≥6 小时：{report['violations_ge_6h']}；时间未知：{report['unknown_live_timing']}。",
+                            '严格时效要求为发布到首次入库 <6 小时；保留原始超限记录，不重置历史指标。'])
+          except Exception:
+              lines.append('本轮详细统计暂不可用；请查看采集日志及已保存的状态快照。')
+          lines.extend(['SQLite 快照保留首次入库时间、增量游标、来源观察基线、HTTP 缓存和分类结果；只滚动保留最近八份。',
+                        'GitHub 定时任务可能排队或延迟，不能仅凭配置宣称已满足六小时时效。',
+                        '此任务负责自动采集及备份，不提供常驻网页或 API。'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as output:
+              output.write('\n\n'.join(lines) + '\n')
+          PY
