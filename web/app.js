@@ -709,8 +709,7 @@ function renderLibraryEvidence(data) {
 function renderLibraryRelations(data) {
   var target = $("library-relations"); clear(target);
   var facts = data.facts || [];
-  if (!facts.length) return;
-  add(target, "h3", "", "来源事实与限定条件");
+  if (facts.length) add(target, "h3", "", "来源事实与限定条件");
   var roles = {mechanism: "风险机制", condition: "场景条件", impact: "可能影响", mitigation: "潜在防护", limitation: "防护局限", assessment: "评估建议", provenance: "引用关系"};
   facts.forEach(function (fact) {
     var block = add(target, "details", "relation-fact");
@@ -727,13 +726,25 @@ function renderLibraryRelations(data) {
       var block = add(target, "details", "relation-fact");
       add(block, "summary", "", (roles[fact.facet] || fact.facet) + " · " + fact.publisher);
       add(block, "p", "", fact.text);
+      renderCandidateRelation(block, fact);
       add(block, "p", "hint", fact.qualifier + "；审核：" + fact.review.reviewer + " · " + fact.review.review_kind);
       add(block, "p", "meta", "引用：" + fact.evidence_ids.join("、"));
     });
   }
+  if (!facts.length && !(supplements.facts || []).length) add(target, "p", "empty", "暂无来源有效且已通过复核的关系。");
 }
 
 var candidateLabels = {mechanism: "风险机制", condition: "场景条件", impact: "可能影响", mitigation: "潜在防护", limitation: "防护局限", assessment: "评估建议"};
+function renderCandidateRelation(block, item) {
+  if (item.topic !== "article_relations") return;
+  var relation = item.relation;
+  if (relation) {
+    add(block, "p", "title", "主语：" + relation.subject);
+    add(block, "p", "", "关系：" + relation.predicate + "；宾语：" + relation.object);
+    add(block, "p", "hint", "提取条件：" + (relation.conditions.length ? relation.conditions.join("；") : "未提取到明确条件，需核对整句，不能理解为无条件"));
+  } else add(block, "p", "hint", "句子候选：尚未提取结构化关系，需结合原文审核。");
+  add(block, "p", "hint", item.scope_notice + "；保留整句中的范围、情态和否定词，语义完整性需复核。");
+}
 function renderCandidates(data) {
   var target = $("candidate-list"); clear(target);
   $("candidate-status").textContent = (data.note || data.notice || "") + " 当前显示 " + data.items.length + " 项。";
@@ -743,6 +754,7 @@ function renderCandidates(data) {
     var reviewedFacet = item.reviews.length ? item.reviews[item.reviews.length - 1].facet : item.facet;
     add(block, "summary", "", states[item.effective_state] + " · " + candidateLabels[reviewedFacet] + " · " + item.publisher);
     add(block, "p", "", item.quote);
+    renderCandidateRelation(block, item);
     add(block, "p", "meta", item.citation_id + " · " + item.locator);
     add(block, "p", "hint", "来源版本：" + (item.version || "页面未注明版本；按存档核对") + "；获取于 " + dateText(item.retrieved_at) + (item.retained_previous ? "；沿用旧存档" : ""));
     libraryLink(block, item.url + (item.locator.indexOf("PDF page ") === 0 ? "#page=" + item.locator.match(/^PDF page (\d+)/)[1] : ""), "打开原始来源");
@@ -765,7 +777,7 @@ function renderCandidates(data) {
     var actions = add(form, "div", "toolbar");
     var decisions = item.state === "approved" ? ["revoked"] : ["approved", "rejected"];
     decisions.forEach(function (decision) {
-      var button = add(actions, "button", "ghost", {approved: "通过主题关联与分类", rejected: "拒绝候选", revoked: "撤销通过"}[decision]);
+      var button = add(actions, "button", "ghost", {approved: item.topic === "article_relations" ? "通过原文关系与条件核对" : "通过主题关联与分类", rejected: "拒绝候选", revoked: "撤销通过"}[decision]);
       button.type = "button"; button.disabled = decision === "approved" && !item.source_binding_valid;
       button.addEventListener("click", function () {
         if (!form.reportValidity()) return;
@@ -784,11 +796,20 @@ function loadCandidates() {
   return api("/api/library/relations/candidates?topic=" + encodeURIComponent(topic)).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(showError);
 }
 $("candidate-refresh").addEventListener("click", loadCandidates);
+$("candidate-graph").addEventListener("click", function () {
+  var topic = $("candidate-topic").value;
+  api("/api/library/relations/graph?topic=" + encodeURIComponent(topic)).then(function (data) {
+    if (topic === $("candidate-topic").value) renderLibraryRelations(data);
+  }).catch(showError);
+});
 $("candidate-topic").addEventListener("change", function () { clear($("candidate-list")); loadCandidates(); });
 $("candidate-generate").addEventListener("click", function () {
-  var button = $("candidate-generate"), topic = $("candidate-topic").value; button.disabled = true;
+  var button = $("candidate-generate"), topic = $("candidate-topic").value;
+  var ids = topic === "article_relations" ? librarySelectedDocs.slice() : [];
+  if (topic === "article_relations" && !ids.length) { $("candidate-status").textContent = "请先在下方资料列表勾选 1 至 4 份资料，再提取文章关系。"; return; }
+  button.disabled = true;
   $("candidate-status").textContent = "正在提取候选，所有新候选均需审核…";
-  api("/api/library/relations/candidates", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({topic: topic})}).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(showError).then(function () { button.disabled = false; });
+  api("/api/library/relations/candidates", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({topic: topic, document_ids: ids})}).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(function (error) { if (topic === $("candidate-topic").value) $("candidate-status").textContent = "提取失败，请检查所选资料与来源状态。"; showError(error); }).then(function () { button.disabled = false; });
 });
 
 function loadLibrary() {
@@ -821,7 +842,7 @@ function loadLibrary() {
       if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
       var selection = add(block, "label", "library-selection");
       var check = add(selection, "input", ""); check.type = "checkbox"; check.checked = librarySelectedDocs.indexOf(doc.document_id) >= 0;
-      selection.appendChild(document.createTextNode(" 用于资料问答"));
+      selection.appendChild(document.createTextNode(" 用于资料问答或文章关系提取"));
       check.addEventListener("change", function () {
         if (check.checked && librarySelectedDocs.length >= 4) { check.checked = false; showError(new Error("最多选择 4 份资料")); return; }
         librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });

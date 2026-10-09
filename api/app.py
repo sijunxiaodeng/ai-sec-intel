@@ -312,7 +312,8 @@ def library_relations_graph(topic: str = "indirect_prompt_injection"):
     from enrichment.relations import build_graph
     from enrichment.relation_candidates import reviewed_graph
     try:
-        result = build_graph(topic=topic)
+        result = ({"topic": topic, "facts": [], "status": "reviewed_quotes_only"}
+                  if topic == "article_relations" else build_graph(topic=topic))
         result["reviewed_quotes"] = reviewed_graph(topic=topic)
         return result
     except ValueError as exc:

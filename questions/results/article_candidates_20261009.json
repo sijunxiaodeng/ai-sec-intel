@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-09T08:02:04.317712+00:00",
+  "purpose": "新文章提取、来源绑定、审核与原主题回归的开发检查，非独立语义验收",
+  "baseline_commit": "a5e078d8b00933cd5d98177f624b7b6074c82d61",
+  "working_tree_sha256": {
+    "api/app.py": "c2845f737f0db2bf07bd584ab731d3e6bcdf67104cec90905fef6f49b7283076",
+    "enrichment/relation_candidates.py": "f8f9a7a618069eeb0d8a04164f05c02281024977613e25910da01945ed4a76b8",
+    "web/app.js": "217ec00c4b33dff0e8edf6092a2a31d3262a26dc7df1d91eb97aea440a6bccfb",
+    "web/index.html": "0bebd29a02fbceeaf9eee8260eede8c6be912f295bf61a12eac38e5cf7b76384",
+    "questions/test_article_relations.py": "4b397e2260c2cd5d83731a4674bbdbc1e3c321225c2cfd31d6f957cc998c8afd"
+  },
+  "source": {
+    "document_id": "DOC-71fc2221d1295bd6",
+    "url": "https://blog.trailofbits.com/2026/09/15/1passwords-ai-patching-benchmark-is-misleading/",
+    "publisher": "Trail of Bits 研究博客",
+    "content_scope": "article_body",
+    "version": null,
+    "retrieved_at": "2026-10-08T12:44:21.877813+00:00",
+    "integrity_status": "ok"
+  },
+  "source_fingerprint": "50ac6e41006c2c04fff5027d4f5807e45ed3a16e2100cc855bda0a2582e2faa5",
+  "model_calls": [
+    {
+      "path": "initial_local_http",
+      "used_model": false,
+      "fallback": "pending_source_quotes",
+      "elapsed_http_seconds": 1.842
+    },
+    {
+      "path": "diagnostic_direct_python",
+      "used_model": false,
+      "failure": "invalid_container_and_overlapping_relation_spans",
+      "elapsed_http_seconds": null
+    },
+    {
+      "path": "browser_after_prompt_fix",
+      "used_model": true,
+      "structured_selected": 8,
+      "elapsed_http_seconds": null
+    }
+  ],
+  "candidate_states": {
+    "pending": 14,
+    "approved": 2
+  },
+  "structured_candidates": [
+    {
+      "id": "RC-2f23975f24aec2ef83eb50df",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-20716bcabe99",
+      "state": "pending",
+      "quote_sha256": "40d0f036a243a4bfd6287fe6a94cd7449d0188e6e49016605aab737c2a40f704",
+      "relation_sha256": "d9999e45c403690114078ce8f450f534a412db41344c53a2b1db2ddce66e9889",
+      "independent_review": false
+    },
+    {
+      "id": "RC-75551e8fe88c4137f094c10b",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-e92993fc1546",
+      "state": "pending",
+      "quote_sha256": "1406c60e9831703b83c96d509b7a7a78a0a221a96c05dd5a03ae19e786f3decc",
+      "relation_sha256": "905088c8deef8796506391e41a0158f6fcf15abdb3f45560cc3dadb212a62afd",
+      "independent_review": false
+    },
+    {
+      "id": "RC-8d60107efb5d6d9eb9122d67",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-41b4034bcef8",
+      "state": "pending",
+      "quote_sha256": "434873387771b6d3565b49fae0e4a0faf791e3dfa768030efecde3c93b1ee471",
+      "relation_sha256": "813c8bf2c42f235aa48002b29c2fefca1a4515e740599ce35096929273049dc7",
+      "independent_review": false
+    },
+    {
+      "id": "RC-90b905718e1a2b093bf907ac",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-57e28650e023",
+      "state": "pending",
+      "quote_sha256": "27b2dd71084db94501e47507bbb885e500bafe9253bf97b7a86d90b21773f973",
+      "relation_sha256": "d482c62b557ef82800029b2988c7538627224e9b64b537ea7ff69c155930f4c6",
+      "independent_review": false
+    },
+    {
+      "id": "RC-933b9ac124d0602dd02cc391",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-f26c27655b82",
+      "state": "approved",
+      "quote_sha256": "51c3757cfbdade73720ee6e4ad1bbb126e2f1d218d1683ce5f64563d78f802a6",
+      "relation_sha256": "a95e7b4cae5049d37807f68c19c13f4e788022bf0c6ed40947f90c5fb0664434",
+      "independent_review": false
+    },
+    {
+      "id": "RC-999daafbc6449a4e463735f6",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-c16a64238e8a",
+      "state": "pending",
+      "quote_sha256": "a8b174276a1a7448ed99ac769f85e89c7af120f91d393077c55aec126b53709a",
+      "relation_sha256": "ba2d48372b441276a4d8c6b86a69ba9aea63cb8b58fc356fce0f73dca91a418b",
+      "independent_review": false
+    },
+    {
+      "id": "RC-c2f2d9de03f0c1d9c87dc974",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-22f0381edbca",
+      "state": "pending",
+      "quote_sha256": "afc10f697a344ed7ba457cbd9c99597f3ac3e3fc6701a61963ccf3a7f05a2f61",
+      "relation_sha256": "9568a6d230ad06efe4f03eb29198b8eb71ab1f2ec4bdd36cfe0278d4040484aa",
+      "independent_review": false
+    },
+    {
+      "id": "RC-172b95c74ce78eb4666ebc74",
+      "citation_id": "DOC-71fc2221d1295bd6/LIB-71fc2221d1295bd6-768e72be7d2c",
+      "state": "approved",
+      "quote_sha256": "89d9e5fe826bd1d2e1843bd13d5faa071f3dd604e46b35bcd4c7f5365dd95ed4",
+      "relation_sha256": "18f14bd8208931e6f2870a10af31561fe0056ed5cd4c10da5928e19d590eda96",
+      "independent_review": false
+    }
+  ],
+  "reviewed_graph": {
+    "facts": 2,
+    "edges": 6,
+    "citation_binding_passed": true,
+    "pending_in_graph": false,
+    "review_kind": "developer_source_review"
+  },
+  "verification": {
+    "unit_tests": 215,
+    "unit_tests_passed": 215,
+    "original_topic_http_rule_cases": 23,
+    "original_topic_http_rule_passed": 23,
+    "acceptance_snapshot_summary": {
+      "checks": 11,
+      "errors": 0,
+      "needs_data_or_review": 0,
+      "independent_enrichment_accuracy": null,
+      "independent_enrichment_recall": null,
+      "independent_qa_accuracy": null,
+      "competition_passed": null
+    },
+    "javascript_syntax": "passed"
+  },
+  "independent_semantic_accuracy": null,
+  "competition_passed": null,
+  "original_quotes_or_model_output_exported": false
+}

@@ -120,8 +120,8 @@
         </form>
         <article class="panel">
           <h2>关系候选审核</h2>
-          <p class="hint">自动选择原文并提出分类，核对原文、主题与分类后再通过。通过项仅补充来源摘录，不自动成为因果推理前提。开发复核不计为独立验收。</p>
-          <div class="toolbar"><label for="candidate-topic">候选主题</label><select id="candidate-topic"><option value="model_supply_chain">模型供应链</option><option value="indirect_prompt_injection">间接提示注入</option></select><button type="button" class="ghost" id="candidate-generate">自动提取候选</button><button type="button" class="ghost" id="candidate-refresh">刷新审核队列</button></div>
+          <p class="hint">所选文章模式从勾选资料提出主语、关系、宾语和条件，保留整句原文；模型不可用时提出句子供核对。需检查分类、指代、否定词和条件后再通过。队列包含此前生成的候选；通过项不自动成为因果推理前提。开发复核不计为独立验收。</p>
+          <div class="toolbar"><label for="candidate-topic">候选主题</label><select id="candidate-topic"><option value="model_supply_chain">模型供应链</option><option value="indirect_prompt_injection">间接提示注入</option><option value="article_relations">所选文章（先在资料列表勾选）</option></select><button type="button" class="ghost" id="candidate-generate">自动提取候选</button><button type="button" class="ghost" id="candidate-refresh">刷新审核队列</button><button type="button" class="ghost" id="candidate-graph">查看已复核关系</button></div>
           <p id="candidate-status" class="hint" aria-live="polite">点击刷新查看本机审核队列。</p>
           <div id="candidate-list"></div>
         </article>
