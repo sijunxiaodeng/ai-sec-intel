@@ -6,6 +6,17 @@ B 已实现多源采集、CVE 融合与分类、非 CVE 文档存储和独立只
 
 团队监测（`dev`）已注册 `IntelligenceCollector`。主程序采集时会请求本机 `http://127.0.0.1:8765/api/intelligence/team`，所以要先在本目录启动只读 API，主页面才会收到 B 的 CVE。非 CVE 文档仍需 A/C 接入主知识库、检索与问答。
 
+### 离线演示库（无外网采集时）
+
+`data/` 与 `*.db` 不进 Git。本地可生成合成演示库（**仅联调，非比赛证据**）：
+
+```bash
+python seed_demo_db.py --force
+INTELLIGENCE_DB_PATH=data/intelligence.db python run_intelligence_api_v6.py
+```
+
+种子写入合成编号 `CVE-2099-90001`（含 ollama 关键词，避开真实 NVD 编号），并做规则分类，使默认 `ai_only=true` 的 `/api/intelligence/team` 能返回条目。三人启动顺序见仓库根目录 [INTEGRATION.md](../INTEGRATION.md)。
+
 ## 电脑关机后的云端采集
 
 新增 GitHub Actions 定时任务，由 GitHub 的云端机器执行，每 15 分钟采集一轮，不依赖个人电脑开机。每轮恢复上一轮的 SQLite 数据库、增量游标和观察基线，采集后保存一致性快照，保留原始首次入库时间。状态缺失或损坏会明确失败，不以空数据库重置历史；成功上传后只保留最近八份状态快照。
