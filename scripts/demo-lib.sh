@@ -12,6 +12,11 @@ B_URL="http://127.0.0.1:${B_PORT}"
 MAIN_URL="http://127.0.0.1:${MAIN_PORT}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-ai-sec-intel-demo}"
 
+# Broader AI-security keyword set for demos (comma-separated for multi-pass collect).
+# Primary default for a single NVD/OSV call is "llm" (not only "ollama").
+AI_SECURITY_KEYWORDS="${AI_SECURITY_KEYWORDS:-llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection}"
+DEMO_KEYWORD="${DEMO_KEYWORD:-llm}"
+
 mkdir -p "$DEMO_DIR"
 
 log() { printf '[demo] %s\n' "$*"; }

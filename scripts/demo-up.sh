@@ -27,7 +27,9 @@ start_compose() {
   log "URLs:"
   log "  Main UI / API: $MAIN_URL"
   log "  B health:      $B_URL/api/intelligence/health"
-  log "  B team:        $B_URL/api/intelligence/team?q=ollama"
+  log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "Next: multi-source collect + library team-sync"
+  "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
   log "Keep running: docker compose -p $COMPOSE_PROJECT logs -f"
   log "Stop:           ./scripts/demo-down.sh"
 }
@@ -76,7 +78,9 @@ start_local() {
   log "URLs:"
   log "  Main UI / API: $MAIN_URL"
   log "  B health:      $B_URL/api/intelligence/health"
-  log "  B team:        $B_URL/api/intelligence/team?q=ollama"
+  log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "Next: multi-source collect + library team-sync"
+  "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
   log "Logs: $DEMO_DIR/b-api.log  $DEMO_DIR/main-api.log"
   log "Stop: ./scripts/demo-down.sh"
 }

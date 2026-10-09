@@ -1,4 +1,4 @@
-.PHONY: demo demo-up demo-down demo-smoke
+.PHONY: demo demo-up demo-down demo-smoke demo-collect
 
 demo: demo-up demo-smoke
 
@@ -10,3 +10,6 @@ demo-down:
 
 demo-smoke:
 	./scripts/demo-smoke.sh
+
+demo-collect:
+	./scripts/demo-collect.sh
