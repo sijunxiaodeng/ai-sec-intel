@@ -47,6 +47,24 @@ class QuestionScopeTest(unittest.TestCase):
             self.assertIn(wanted, answer)
         self.assertNotIn("基础分最高", answer)
 
+    def test_exclusion_after_question_exclamation_or_newline_keeps_only_requested_fields(self):
+        for separator in ("？", "?", "！", "!", "\n"):
+            with self.subTest(separator=separator):
+                question = f"对比 {A} 和 {B} 的版本范围{separator}不要比较评分。"
+                self.assertEqual(topics(question), {"versions"})
+                answer = self.answer(question)
+                self.assertIn("< 1.2.3", answer)
+                self.assertNotIn("基础分为", answer)
+                self.assertFalse(required_fields("版本 < 1.2.3。", self.records()[:1], question))
+
+    def test_positive_do_not_omit_and_factual_negation_after_question_mark_remain(self):
+        question = "评分是多少？不要遗漏版本范围。"
+        self.assertEqual(positive_question(question), question)
+        self.assertEqual(topics(question), {"cvss", "versions"})
+        factual = "利用条件是什么？不需要用户交互吗？"
+        self.assertEqual(positive_question(factual), factual)
+        self.assertEqual(topics(factual), {"conditions"})
+
     def test_explicit_no_ranking_keeps_scores_without_ranking(self):
         answer = self.answer(f"分别列 {A} 和 {B} 的评分，不排序")
         self.assertIn("8.8", answer); self.assertNotIn("基础分最高", answer)
