@@ -1,6 +1,7 @@
 """Offline regression checks for document API read-side queries."""
 from __future__ import annotations
 
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -41,7 +42,7 @@ class DocumentRepositoryTests(unittest.TestCase):
                 self.store.ingest(item.source, item.source_category, [item])
 
     def schema(self):
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             return connection.execute("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").fetchall()
 
     def test_read_payload_metadata_default_raw_omission_and_explicit_evidence(self):
@@ -133,7 +134,7 @@ class DocumentRepositoryTests(unittest.TestCase):
         legacy = self.root / "legacy.db"
         SQLiteIntelligenceStore(legacy)
         repository = DocumentRepository(legacy, self.root)
-        with sqlite3.connect(legacy) as connection:
+        with closing(sqlite3.connect(legacy)) as connection, connection:
             before = connection.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
         self.assertFalse(repository.available())
         self.assertEqual(repository.list_items(), {"total": 0, "limit": 20, "offset": 0, "items": []})
@@ -142,7 +143,7 @@ class DocumentRepositoryTests(unittest.TestCase):
             "total_documents": 0, "source_record_counts": {}, "source_category_counts": {},
             "content_type_counts": {}, "latest_runs": [],
         })
-        with sqlite3.connect(legacy) as connection:
+        with closing(sqlite3.connect(legacy)) as connection, connection:
             after = connection.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
         self.assertEqual(before, after)
 
@@ -157,12 +158,12 @@ class DocumentRepositoryTests(unittest.TestCase):
 
     def test_partial_schema_reports_unavailable_without_repair_or_mutation(self):
         partial = self.root / "partial.db"
-        with sqlite3.connect(partial) as connection:
+        with closing(sqlite3.connect(partial)) as connection, connection:
             connection.execute("CREATE TABLE knowledge_documents(document_id TEXT PRIMARY KEY)")
         repository = DocumentRepository(partial, self.root)
         self.assertFalse(repository.available())
         self.assertEqual(repository.list_items()["total"], 0)
-        with sqlite3.connect(partial) as connection:
+        with closing(sqlite3.connect(partial)) as connection, connection:
             columns = [row[1] for row in connection.execute("PRAGMA table_info(knowledge_documents)")]
         self.assertEqual(columns, ["document_id"])
 

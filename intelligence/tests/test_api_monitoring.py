@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -46,7 +47,7 @@ class APIReadinessTests(unittest.TestCase):
         self.addCleanup(self.client.close)
 
     def test_collected_but_never_classified_is_readable_without_schema_writes(self):
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             before = con.execute('SELECT name, sql FROM sqlite_master ORDER BY name').fetchall()
         listing = self.client.get('/api/intelligence')
         self.assertEqual(listing.status_code, 200)
@@ -58,7 +59,7 @@ class APIReadinessTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/intelligence/ai').json()['total'], 0)
         self.assertEqual(self.client.get('/api/intelligence/health').json()['database_available'], True)
         self.assertEqual(self.client.get('/api/intelligence/metrics').json()['continuous_monitoring']['samples'], 0)
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             after = con.execute('SELECT name, sql FROM sqlite_master ORDER BY name').fetchall()
         self.assertEqual(before, after)
 

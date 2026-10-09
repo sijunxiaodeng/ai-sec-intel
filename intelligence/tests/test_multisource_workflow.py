@@ -1,6 +1,7 @@
 import io
 import json
 import os
+from contextlib import closing
 import sqlite3
 import subprocess
 import tempfile
@@ -73,14 +74,14 @@ class MultisourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             db = Path(directory) / 'intel.db'
             self.assertEqual(collect_source(spec, db, collector=collector)['status'], 'success')
-            with sqlite3.connect(db) as con:
+            with closing(sqlite3.connect(db)) as con, con:
                 anchor = con.execute('SELECT started_at FROM source_observation_baselines').fetchone()[0]
             self.assertEqual(collect_source(spec, db, collector=collector)['status'], 'success')
             documents = SQLiteDocumentStore(db)
             self.assertEqual(documents.stats()['documents'], 1)
             self.assertEqual(documents.get_http_state(spec.name)['etag'], 'v1')
             self.assertEqual(collector.calls[1]['etag'], 'v1')
-            with sqlite3.connect(db) as con:
+            with closing(sqlite3.connect(db)) as con, con:
                 self.assertEqual(con.execute('SELECT started_at FROM source_observation_baselines').fetchone()[0], anchor)
 
     def test_one_failed_source_does_not_block_other_categories(self):
@@ -96,7 +97,7 @@ class MultisourceTests(unittest.TestCase):
             self.assertEqual(result['failed_sources'], 1)
             self.assertEqual(len(calls), 11)
             self.assertEqual(len({v['category'] for v in result['sources'].values()}), 8)
-            with sqlite3.connect(db) as con:
+            with closing(sqlite3.connect(db)) as con, con:
                 self.assertEqual(con.execute('SELECT COUNT(*) FROM source_observation_baselines').fetchone()[0], 11)
             self.assertEqual(json.loads((db.parent / 'monitoring_status.json').read_text())['status'], 'partial')
 

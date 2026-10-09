@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import sqlite3
 import sys
 import tempfile
@@ -183,7 +184,7 @@ class ClassificationQueueTests(unittest.TestCase):
     def make_store(self, records):
         self.counter += 1
         path = Path(self.temp.name) / f"queue-{self.counter}.db"
-        with sqlite3.connect(path) as con:
+        with closing(sqlite3.connect(path)) as con, con:
             con.execute("""CREATE TABLE unified_vulnerabilities (
                 cve_id TEXT PRIMARY KEY, payload_json TEXT, content_sha256 TEXT,
                 first_seen_at TEXT, content_updated_at TEXT)""")

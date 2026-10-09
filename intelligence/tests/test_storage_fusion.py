@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -207,7 +208,7 @@ class SQLiteStoreTests(unittest.TestCase):
         self.store = SQLiteIntelligenceStore(self.db)
 
     def query(self, sql):
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.row_factory = sqlite3.Row
             return [dict(row) for row in connection.execute(sql)]
 
@@ -301,7 +302,7 @@ class SQLiteStoreTests(unittest.TestCase):
 
     def test_explicit_rebuild_repairs_legacy_payload_and_is_idempotent(self):
         self.store.ingest_batch("NVD", [item()])
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             row = connection.execute("SELECT payload_json FROM source_items").fetchone()
             payload = json.loads(row[0])
             payload["cve_id"] = "cve-2026-1234"
@@ -316,7 +317,7 @@ class SQLiteStoreTests(unittest.TestCase):
 
     def test_rebuild_failure_is_transactional(self):
         self.store.ingest_batch("NVD", [item(), item(cve="CVE-2026-9999")])
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute("UPDATE unified_vulnerabilities SET payload_json='{}', content_sha256='old'")
             connection.execute("UPDATE source_items SET payload_json='{}' WHERE cve_id='CVE-2026-9999'")
         before = self.query("SELECT * FROM unified_vulnerabilities ORDER BY cve_id")

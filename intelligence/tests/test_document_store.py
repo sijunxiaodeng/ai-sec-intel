@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -39,7 +40,7 @@ class DocumentStoreTests(unittest.TestCase):
         self.store = SQLiteDocumentStore(self.db)
 
     def rows(self, sql, params=()):
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.row_factory = sqlite3.Row
             return [dict(row) for row in connection.execute(sql, params)]
 
@@ -158,7 +159,7 @@ class DocumentStoreTests(unittest.TestCase):
         self.ingest_at(T2, [document()])
         self.store.save_http_state(SOURCE, '"retained"')
         self.assertIsNotNone(self.store.get_http_state(SOURCE))
-        with sqlite3.connect(self.db) as connection:
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute("DELETE FROM knowledge_documents")
         self.assertIsNone(self.store.get_http_state(SOURCE))
 

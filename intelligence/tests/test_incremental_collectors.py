@@ -1,6 +1,7 @@
 """Offline regression checks: no third-party calls or credentials required."""
 from __future__ import annotations
 
+from contextlib import closing
 import sqlite3
 import sys
 import tempfile
@@ -303,7 +304,7 @@ class WindowAndCursorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'cursor.db'
             cursors = CursorStore(path)
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection, connection:
                 connection.execute('INSERT INTO incremental_cursors VALUES(?,?,?)',
                                    ('NVD', '2026-01-01T08:00:00.500000+08:00', 'legacy'))
             older = datetime(2026, 1, 1, 0, 0, 0, 400000, tzinfo=timezone.utc)
