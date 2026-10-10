@@ -1,11 +1,20 @@
 var titles = {
   overview: "总览",
   monitor: "情报监测",
-  enrich: "情报富化",
+  enrich: "情报富集",
   library: "安全资料库",
-  assets: "资产影响",
+  assets: "情报富集",
   ask: "情报问答",
   settings: "模型设置"
+};
+var eyebrows = {
+  overview: "工作流一览",
+  monitor: "自动采集的 AI 安全情报流",
+  enrich: "单条漏洞补维度 · 含影响资产",
+  library: "已沉淀、可检索的知识存档",
+  assets: "单条漏洞补维度 · 含影响资产",
+  ask: "按证据回答",
+  settings: "本机模型配置"
 };
 
 var prompts = [
@@ -159,18 +168,21 @@ function setPill(ready) {
 
 function setView(name) {
   clearError();
+  if (name === "assets") name = "enrich";
   Object.keys(titles).forEach(function (key) {
-    $(key).hidden = key !== name;
+    if ($(key)) $(key).hidden = key !== name;
   });
+  if ($("assets")) $("assets").hidden = true;
   document.querySelectorAll(".nav button").forEach(function (button) {
     button.className = button.getAttribute("data-view") === name ? "is-on" : "";
   });
-  $("page-title").textContent = titles[name];
+  $("page-title").textContent = titles[name] || name;
+  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "智能体驱动的知识情报系统";
   if (name === "overview") loadOverview();
   if (name === "monitor" || name === "enrich") loadItems(name);
   if (name === "ask") loadAsk();
   if (name === "library") loadLibrary();
-  if (name === "assets") loadAssets().catch(showError);
+  if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
 }
 
@@ -194,16 +206,16 @@ function loadOverview() {
       teamBits.push("团队情报暂不可达");
     }
     $("monitor-line").textContent =
-      "自动监测已启动，间隔 " + (monitor.interval_hours || 6) +
-      " 小时，开始于 " + dateText(monitor.started_at) +
-      "。可计时效的新漏洞 " + data.latency_count +
-      " 条。更早公布的记录只用于演示。漏洞卡片来源：" +
+      "监测流自动运行，间隔 " + (monitor.interval_hours || 6) +
+      " 小时（开始于 " + dateText(monitor.started_at) +
+      "）。可计时效 " + data.latency_count +
+      " 条。漏洞来源标签：" +
       ((data.sources || []).join("、") || "还没有") +
       "。" + teamBits.join("；") +
-      "。安全资料库另收录 " + ((data.library || {}).documents || 0) +
-      " 份资料（类别：" +
+      "。资料库已沉淀 " + ((data.library || {}).documents || 0) +
+      " 份（" +
       (((data.library || {}).source_categories || []).join("、") || "尚无") +
-      "）。";
+      "）。影响资产在「情报富集」里评估。";
     [
       [String(data.items), "知识库情报"],
       [String(data.source_count || 0), "漏洞数据库来源"],
@@ -254,9 +266,9 @@ function loadItems(view) {
       var counts = data.counts || {};
       var summary = $("monitor-summary");
       if (summary) {
-        summary.textContent = "漏洞 CVE " + (counts.cve || 0) + " 条 · 非 CVE 资料 " + (counts.document || 0) + " 份"
+        summary.textContent = "情报流：漏洞 CVE " + (counts.cve || 0) + " · 非 CVE 资料 " + (counts.document || 0)
           + "（团队文档 " + (((data.team_documents || {}).total) || 0) + "）"
-          + "。筛选不会清空数据；「开始监测」只新增/合并漏洞卡片。";
+          + "。主操作是「立即监测一轮」；关键词仅可选收窄。";
       }
       if (!items.length) {
         add(target, "p", "empty", "没有匹配的情报。可切换「仅资料」或先同步安全资料库。");
@@ -329,7 +341,7 @@ function openMonitorDetail(item) {
       add(field, "span", "", pair[0]);
       add(field, "b", "", pair[1]);
     });
-    var go = add(panel, "button", "ghost", "去情报富化查看完整评估");
+    var go = add(panel, "button", "primary", "送去富集（含影响资产）");
     go.type = "button";
     go.addEventListener("click", function () { openDetail(cveId); });
   }).catch(showError);
@@ -453,11 +465,13 @@ function renderDetail(item) {
       guidanceButton.textContent = "本次成功 " + data.ok + "/" + data.attempted + " 个关联来源";
     }).catch(showError).then(function () { guidanceButton.disabled = false; });
   });
-  var assetButton = add(panel, "button", "ghost", "查看登记资产影响");
+  var assetButton = add(panel, "button", "ghost", "评估影响资产（富集）");
   assetButton.type = "button";
   assetButton.addEventListener("click", function () {
-    setView("assets");
+    var drawer = $("asset-drawer");
+    if (drawer) drawer.open = true;
     loadAssets(item.cve_id).then(function () { return evaluateSavedAssets(); }).catch(showError);
+    if ($("asset-cve")) $("asset-cve").value = item.cve_id;
   });
   var links = add(panel, "div", "links");
   (item.papers || []).forEach(function (paper) {
@@ -680,17 +694,44 @@ $("collect-form").addEventListener("submit", function (event) {
   event.preventDefault();
   var button = $("collect-btn");
   button.disabled = true;
-  button.textContent = "正在监测 NVD / OSV / 团队情报…";
+  button.textContent = "正在按关键词补采…";
   clearError();
+  var keyword = $("keyword").value.trim();
   api("/api/collect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: $("keyword").value.trim() || "llm" })
+    body: JSON.stringify({ keyword: keyword || "llm,vllm,langchain,huggingface,openai,ollama,jailbreak" })
   }).then(function () {
     loadItems("monitor");
   }).catch(showError).then(function () {
     button.disabled = false;
-    button.textContent = "开始监测";
+    button.textContent = "按关键词补采 CVE";
+  });
+});
+
+$("auto-monitor-btn").addEventListener("click", function () {
+  var button = $("auto-monitor-btn");
+  var status = $("auto-monitor-status");
+  button.disabled = true;
+  button.textContent = "正在自动监测…";
+  if (status) status.textContent = "按宽范围 AI 安全关键词采集 CVE，并同步团队非 CVE 资料…";
+  clearError();
+  api("/api/monitor/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keyword: "", sync_library: true, max_documents: 30 })
+  }).then(function (data) {
+    var lib = data.library_sync || {};
+    if (status) {
+      status.textContent = "本轮完成：CVE 入库相关 " + (data.count || 0) + " 条"
+        + (lib.status ? "；资料同步 " + lib.status : "")
+        + "。定时任务仍会每 6 小时自动跑。";
+    }
+    loadItems("monitor");
+    if ($("overview") && !$("overview").hidden) loadOverview();
+  }).catch(showError).then(function () {
+    button.disabled = false;
+    button.textContent = "立即监测一轮";
   });
 });
 
@@ -720,7 +761,7 @@ $("enrich-btn").addEventListener("click", function () {
     button.textContent = "查询完成";
   }).catch(showError).then(function () {
     button.disabled = false;
-    if (button.textContent !== "查询完成") button.textContent = "查询 EPSS、KEV 与论文";
+    if (button.textContent !== "查询完成") button.textContent = "批量查询 EPSS / KEV / 论文";
   });
 });
 

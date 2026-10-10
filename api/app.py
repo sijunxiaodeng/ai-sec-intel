@@ -29,6 +29,13 @@ class CollectBody(BaseModel):
     keyword: str = "llm"
 
 
+class MonitorRunBody(BaseModel):
+    """One-click auto monitor cycle. Empty keyword uses the built-in AI-security set."""
+    keyword: str = ""
+    sync_library: bool = True
+    max_documents: int = Field(30, ge=1, le=200)
+
+
 class AskBody(BaseModel):
     question: str = Field(..., max_length=4000)
     cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
@@ -445,10 +452,44 @@ def asset_impact(cve_id: str):
     return impact_report(_asset_assessment(cve_id), load_assets())
 
 
+# Built-in AI-security scope for one-click auto monitor (comma-separated).
+AUTO_MONITOR_KEYWORDS = (
+    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection"
+)
+
+
+@app.post("/api/monitor/run")
+def monitor_run(body: MonitorRunBody):
+    """One-click auto monitor: broad AI-security CVE collect + optional library team-sync."""
+    keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
+    try:
+        result = run_collect(keyword)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
+    library = None
+    if body.sync_library:
+        try:
+            from rag.library import sync_team
+            library = sync_team(max_documents=body.max_documents)
+        except ValueError as exc:
+            library = {"status": "busy", "error": str(exc)}
+        except Exception as exc:
+            library = {"status": "error", "error": type(exc).__name__}
+    return {
+        "mode": "auto",
+        "keyword": keyword,
+        "count": len(result["records"]),
+        "steps": result["steps"],
+        "library_sync": library,
+        "items": [_summary(record) for record in result["records"][:10]],
+        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步团队非 CVE 资料；列表见 /api/monitor/feed。",
+    }
+
+
 @app.post("/api/collect")
 def collect(body: CollectBody):
     try:
-        result = run_collect(body.keyword.strip() or "ollama")
+        result = run_collect(body.keyword.strip() or AUTO_MONITOR_KEYWORDS)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="监测没有完成：%s" % exc)
     return {

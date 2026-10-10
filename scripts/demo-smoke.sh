@@ -102,27 +102,48 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
+check "ia-monitor-copy" grep -q "情报监测 = 自动情报流" "$OUT/page.html"
+check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
+check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
+python3 - <<PY
+import sys
+html=open("$OUT/page.html",encoding="utf-8").read()
+sys.exit(0 if 'data-view="assets"' not in html else 1)
+PY
+check "ia-no-assets-nav" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"
 check "main-assets" test -s "$OUT/app.js"
-check "ui-mentions-team" grep -q "团队情报" "$OUT/app.js"
+check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
 
-# collect — allow longer timeout (NVD/OSV may be slow; team must succeed)
-curl -sf --max-time 240 -X POST "$MAIN_URL/api/collect" \
+# One-click auto monitor (broad AI scope) — primary IA path
+curl -sf --max-time 240 -X POST "$MAIN_URL/api/monitor/run" \
   -H 'Content-Type: application/json' \
-  -d "{\"keyword\":\"${COLLECT_KEYWORD}\"}" \
-  -o "$OUT/collect.json"
-python3 - "$OUT/collect.json" <<'PY'
+  -d '{"keyword":"","sync_library":true,"max_documents":30}' \
+  -o "$OUT/monitor-run.json"
+python3 - "$OUT/monitor-run.json" <<'PY'
 import json,sys
 c=json.load(open(sys.argv[1]))
 steps=c.get("steps") or []
 team_ok=any("团队情报" in (s.get("action") or "") and "得到" in (s.get("detail") or "") for s in steps)
 team_fail=any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "") for s in steps)
+print("mode", c.get("mode"), "keyword_head", (c.get("keyword") or "")[:48])
 print("steps:")
 for s in steps:
     print("-", s.get("action"), "|", (s.get("detail") or "")[:160])
-sys.exit(0 if team_ok and not team_fail else 1)
+sys.exit(0 if c.get("mode")=="auto" and team_ok and not team_fail else 1)
 PY
-check "collect-team-ok" true
+check "auto-monitor-run-ok" true
+
+curl -sf --max-time 5 "$MAIN_URL/api/monitor/feed?kind=all" -o "$OUT/monitor-feed.json"
+python3 - <<PY
+import json,sys
+d=json.load(open("$OUT/monitor-feed.json"))
+c=d.get("counts") or {}
+kinds={i.get("kind") for i in (d.get("items") or [])}
+print("counts", c, "kinds", sorted(kinds))
+sys.exit(0 if c.get("document",0)>=1 and c.get("cve",0)>=1 and "document" in kinds else 1)
+PY
+check "monitor-feed-mixed" true
 
 # After collect, overview sources should include more than OSV-only narrative when team labels land
 curl -sf --max-time 5 "$MAIN_URL/api/overview" -o "$OUT/overview-after-collect.json"
