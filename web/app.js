@@ -1,15 +1,15 @@
 var titles = {
-  overview: "架构总览",
-  monitor: "自动监测",
+  overview: "总览",
+  monitor: "情报监测",
   enrich: "情报富集",
-  library: "资料库沉淀",
+  library: "资料库",
   assets: "情报富集",
   ask: "证据问答",
   settings: "模型设置"
 };
 var eyebrows = {
-  overview: "A 平台架构视图",
-  monitor: "CVE + 非 CVE 情报流",
+  overview: "工作台",
+  monitor: "CVE + 资料情报流",
   enrich: "EPSS / KEV / 论文 / 影响资产",
   library: "可检索原文与片段",
   assets: "EPSS / KEV / 论文 / 影响资产",
@@ -33,14 +33,26 @@ function $(id) {
 
 function api(path, options) {
   return fetch(path, options).then(function (response) {
-    return response.json().then(function (data) {
+    var ctype = (response.headers.get("content-type") || "").toLowerCase();
+    var parse = ctype.indexOf("application/json") >= 0
+      ? response.json()
+      : response.text().then(function (text) {
+        try { return JSON.parse(text); }
+        catch (e) { return { detail: text ? text.slice(0, 200) : "空响应" }; }
+      });
+    return parse.then(function (data) {
       if (!response.ok) {
-        var detail = data && data.detail ? data.detail : "请求失败";
+        var detail = data && data.detail ? data.detail : ("请求失败 HTTP " + response.status);
         if (Array.isArray(detail)) detail = "字段校验未通过：" + detail.slice(0, 3).map(function (row) { return (row.loc || []).slice(1).join(".") + "：" + row.msg; }).join("；");
         throw new Error(typeof detail === "string" ? detail : "请求失败");
       }
       return data;
     });
+  }).catch(function (error) {
+    if (error && error.message && error.name !== "Error") {
+      throw new Error("网络或服务不可达：" + error.message);
+    }
+    throw error;
   });
 }
 
@@ -58,14 +70,99 @@ function clearError() {
 var toastTimer = null;
 function showToast(text, kind) {
   var toast = $("toast");
-  if (!toast) return;
+  if (!toast) {
+    console.warn("toast missing:", text);
+    return;
+  }
   toast.hidden = false;
   toast.className = "toast" + (kind === "error" ? " is-error" : kind === "busy" ? " is-busy" : " is-ok");
-  toast.textContent = text;
+  toast.textContent = text || (kind === "busy" ? "处理中…" : "完成");
   if (toastTimer) clearTimeout(toastTimer);
   if (kind !== "busy") {
-    toastTimer = setTimeout(function () { toast.hidden = true; }, 6000);
+    toastTimer = setTimeout(function () { toast.hidden = true; }, 7000);
   }
+}
+
+function setBusyButton(button, busy, busyLabel, idleLabel) {
+  if (!button) return;
+  button.disabled = !!busy;
+  if (busy) {
+    button.classList.add("btn-busy");
+    button.setAttribute("aria-busy", "true");
+    if (busyLabel) button.textContent = busyLabel;
+  } else {
+    button.classList.remove("btn-busy");
+    button.removeAttribute("aria-busy");
+    if (idleLabel) button.textContent = idleLabel;
+  }
+}
+
+/** Map raw source ids to product labels / filter families (not A/B/C). */
+function sourceFamily(raw) {
+  var s = String(raw || "").toUpperCase();
+  if (!s) return "other";
+  if (s === "NVD" || s.indexOf("NVD") === 0) return "nvd";
+  if (s === "OSV" || s.indexOf("OSV") === 0) return "osv";
+  if (s.indexOf("GITHUB") >= 0 || s.indexOf("GHSA") >= 0) return "github";
+  if (s.indexOf("CISA") >= 0 || s.indexOf("KEV") >= 0) return "kev";
+  if (s.indexOf("TEAM") >= 0 || s.indexOf("INTELLIGENCE") >= 0) return "team";
+  if (s.indexOf("ARXIV") >= 0 || s.indexOf("PAPER") >= 0 || s.indexOf("ACADEMIC") >= 0) return "paper";
+  if (s.indexOf("HF_") >= 0 || s.indexOf("COMMUNITY") >= 0 || s.indexOf("BLOG") >= 0 || s.indexOf("TRAIL") >= 0) return "community";
+  if (s.indexOf("LIBRARY") >= 0 || s.indexOf("NIST") >= 0 || s.indexOf("FEDERAL") >= 0 || s.indexOf("POLICY") >= 0 || s.indexOf("STANDARD") >= 0) return "library";
+  return "other";
+}
+
+function sourceLabel(raw) {
+  var map = {
+    nvd: "NVD",
+    osv: "OSV",
+    github: "GitHub Advisory",
+    kev: "CISA KEV",
+    team: "团队情报",
+    library: "资料库",
+    paper: "论文",
+    community: "安全社区",
+    other: "其他"
+  };
+  var fam = sourceFamily(raw);
+  if (fam !== "other") return map[fam];
+  var s = String(raw || "").trim();
+  return s || "来源未写明";
+}
+
+function itemSourceLabels(item) {
+  var raws = (item && item.sources) || [];
+  if (!raws.length && item) {
+    if (item.source) raws = [item.source];
+    else if (item.origin === "team_documents") raws = ["TEAM"];
+    else if (item.origin === "library") raws = ["LIBRARY"];
+  }
+  var labels = [];
+  var seen = {};
+  raws.forEach(function (r) {
+    var label = sourceLabel(r);
+    if (!seen[label]) { seen[label] = true; labels.push(label); }
+  });
+  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["团队情报"]) {
+    labels.unshift("团队情报");
+  }
+  return labels.length ? labels : ["来源未写明"];
+}
+
+function itemMatchesSourceFilter(item, filter) {
+  if (!filter || filter === "all") return true;
+  if (item.origin === "team_documents" && filter === "team") return true;
+  if (item.origin === "library" && filter === "library") return true;
+  var raws = (item.sources || []).concat(item.source ? [item.source] : []);
+  if (!raws.length && item.kind === "document") {
+    if (filter === "paper" || filter === "community" || filter === "library" || filter === "team") {
+      var cat = String(item.category || item.category_label || "").toLowerCase();
+      if (filter === "paper" && (cat.indexOf("paper") >= 0 || cat.indexOf("学术") >= 0 || cat.indexOf("academic") >= 0)) return true;
+      if (filter === "community" && (cat.indexOf("community") >= 0 || cat.indexOf("blog") >= 0 || cat.indexOf("社区") >= 0)) return true;
+      if (filter === "library") return true;
+    }
+  }
+  return raws.some(function (r) { return sourceFamily(r) === filter; });
 }
 
 function hideToast() {
@@ -190,15 +287,27 @@ function renderItemRow(parent, item, onPick) {
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(freshBadge);
   }
-  add(id, "div", "meta", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明");
+  var labels = itemSourceLabels(item);
+  var srcWrap = add(id, "div", "src-row");
+  labels.slice(0, 4).forEach(function (label) {
+    var fam = "other";
+    if (label === "NVD") fam = "nvd";
+    else if (label === "OSV") fam = "osv";
+    else if (label.indexOf("GitHub") === 0) fam = "gh";
+    else if (label.indexOf("KEV") >= 0) fam = "kev";
+    else if (label.indexOf("团队") >= 0) fam = "team";
+    else if (label.indexOf("资料") >= 0) fam = "lib";
+    else if (label.indexOf("论文") >= 0) fam = "paper";
+    else if (label.indexOf("社区") >= 0) fam = "comm";
+    add(srcWrap, "span", "src-tag src-" + fam, label);
+  });
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
   else add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
   var text = add(row, "div");
   var headline = item.title && item.title !== item.cve_id ? item.title : (item.description || "");
   add(text, "div", "desc", (headline || "").slice(0, 140));
   var product = item.product ? (" · " + item.product) : "";
-  var origin = item.origin === "team_documents" ? " · 团队文档" : item.origin === "library" ? " · 资料库" : "";
-  add(text, "div", "meta", dateText(item.published_at) + " · " + ((item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明") + product + origin);
+  add(text, "div", "meta", dateText(item.published_at) + " · " + labels.join("、") + product);
 }
 
 function setPill(ready) {
@@ -217,7 +326,7 @@ function setView(name) {
     button.className = button.getAttribute("data-view") === name ? "is-on" : "";
   });
   $("page-title").textContent = titles[name] || name;
-  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "A 平台架构视图";
+  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "工作台";
   if (name === "overview") loadOverview();
   if (name === "monitor") {
     loadMonitorStatus();
@@ -228,10 +337,6 @@ function setView(name) {
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
-  if (name === "monitor" || name === "enrich" || name === "library" || name === "ask") {
-    if (visibilityCache) applyVisibility(visibilityCache);
-    else loadVisibility();
-  }
 }
 
 function setTeamHealth(team) {
@@ -239,9 +344,9 @@ function setTeamHealth(team) {
   if (!el) return;
   if (team && team.reachable === false) {
     el.hidden = false;
-    el.textContent = "团队情报暂不可用（同进程嵌入库）"
+    el.textContent = "团队情报库暂不可用"
       + (team.error ? "：" + team.error : "")
-      + "。请用 ./scripts/demo-up.sh 起演示（会 seed intelligence.db）；自动监测仍会采集 NVD/OSV；B 源已跳过。";
+      + "。仍会采集 NVD/OSV；请确认已运行 ./scripts/demo-up.sh。";
   } else {
     el.hidden = true;
     el.textContent = "";
@@ -255,119 +360,6 @@ function statusClass(status) {
   if (s === "空" || s === "未配置") return "st-empty";
   if (s.indexOf("部分") === 0 || s === "部分可计") return "st-warn";
   return "st-bad";
-}
-
-var visibilityCache = null;
-
-function renderIntegration(row) {
-  var host = $("integ-row");
-  if (!host) return;
-  clear(host);
-  (row || []).forEach(function (item) {
-    var chip = add(host, "div", "integ-chip");
-    add(chip, "span", "party", item.party + " · " + (item.name || ""));
-    var st = add(chip, "span", "status " + statusClass(item.status), item.status || "—");
-    st.className = "status " + statusClass(item.status);
-    add(chip, "span", "detail", item.detail || "");
-  });
-}
-
-function renderGaps(gaps, standards) {
-  var host = $("gap-row");
-  if (!host) return;
-  clear(host);
-  var list = (gaps && gaps.length) ? gaps : (standards || []);
-  if (!list.length) {
-    add(host, "p", "hint", "暂无自评缺口条目。");
-    return;
-  }
-  list.forEach(function (item) {
-    var chip = add(host, "div", "gap-chip");
-    add(chip, "span", "metric", item.metric || item.id || "");
-    var level = add(chip, "span", "level", item.level || "—");
-    level.className = "level " + statusClass(item.level);
-    add(chip, "span", "note", item.note || "");
-  });
-}
-
-function renderTriad(mod) {
-  if (!mod) return;
-  var host = document.querySelector('[data-triad="' + mod.id + '"]');
-  if (!host) return;
-  clear(host);
-  var duty = add(host, "div", "cell");
-  add(duty, "em", "", "职责");
-  duty.appendChild(document.createTextNode(mod.position || ""));
-  var std = add(host, "div", "cell");
-  add(std, "em", "", "达标");
-  var strong = document.createElement("strong");
-  strong.textContent = (mod.standard && mod.standard.level) || "—";
-  std.appendChild(strong);
-  std.appendChild(document.createTextNode(" · " + ((mod.standard && mod.standard.summary) || "")));
-  var integ = add(host, "div", "cell");
-  add(integ, "em", "", "整合");
-  var peers = ((mod.integration && mod.integration.peers) || []).map(function (p) {
-    return p.party + ":" + p.status;
-  }).join(" · ");
-  integ.appendChild(document.createTextNode(peers || ((mod.integration && mod.integration.owner) || "")));
-}
-
-function renderModStrip(mod) {
-  if (!mod) return;
-  var host = document.querySelector('.mod-strip[data-mod="' + mod.id + '"]');
-  if (!host) return;
-  clear(host);
-  var duty = add(host, "div", "cell");
-  add(duty, "em", "", "职责");
-  add(duty, "p", "", mod.duty || "");
-  add(duty, "p", "meta", mod.position || "");
-
-  var std = add(host, "div", "cell");
-  add(std, "em", "", "达标");
-  var levelLine = add(std, "p", "", "");
-  var badge = document.createElement("span");
-  badge.className = "status " + statusClass(mod.standard && mod.standard.level);
-  badge.style.display = "inline-block";
-  badge.style.padding = "2px 7px";
-  badge.style.borderRadius = "4px";
-  badge.style.fontSize = "11px";
-  badge.style.fontWeight = "700";
-  badge.textContent = (mod.standard && mod.standard.level) || "—";
-  levelLine.appendChild(badge);
-  levelLine.appendChild(document.createTextNode("  " + ((mod.standard && mod.standard.summary) || "")));
-  add(std, "p", "meta", (mod.standard && mod.standard.detail) || "");
-
-  var integ = add(host, "div", "cell");
-  add(integ, "em", "", "整合");
-  add(integ, "p", "", (mod.integration && mod.integration.owner) || "");
-  var peers = add(integ, "div", "peers");
-  ((mod.integration && mod.integration.peers) || []).forEach(function (p) {
-    var peer = add(peers, "span", "peer", p.party + " " + p.status + (p.role ? " · " + p.role : ""));
-    peer.className = "peer " + statusClass(p.status);
-  });
-}
-
-function applyVisibility(vis) {
-  visibilityCache = vis || null;
-  if (!vis) return;
-  if ($("vis-policy") && vis.policy) {
-    $("vis-policy").textContent = vis.policy.note || "对照验收包诚实自评；不自动判竞赛通过。";
-  }
-  renderIntegration(vis.integration || []);
-  renderGaps(vis.gaps || [], vis.standards || []);
-  (vis.modules || []).forEach(function (mod) {
-    renderTriad(mod);
-    renderModStrip(mod);
-  });
-}
-
-function loadVisibility() {
-  return api("/api/visibility").then(function (data) {
-    applyVisibility(data);
-    return data;
-  }).catch(function () {
-    return null;
-  });
 }
 
 function loadMonitorStatus() {
@@ -394,33 +386,19 @@ function loadOverview() {
     clear(stats);
     var monitor = data.monitor || {};
     var team = data.team_intel || {};
-    var cov = team.coverage || {};
-    var teamBits = [];
-    if (team.reachable) {
-      teamBits.push("B 接通");
-      if (team.team_total != null) teamBits.push("AI CVE " + team.team_total);
-      if (cov.observed_ai_category_count != null) {
-        teamBits.push("类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
-      }
-    } else {
-      teamBits.push("B 不可达");
-    }
-    var running = monitor.running ? "后台正在跑一轮" : (monitor.last_run ? "最近一轮 " + monitor.last_run : "启动后自动首轮");
+    var sourceNames = (data.sources || []).slice(0, 6).map(sourceLabel);
+    var running = monitor.running ? "正在刷新" : (monitor.last_run ? "最近刷新 " + monitor.last_run : "可点监测页立即刷新");
     $("monitor-line").textContent =
-      "自动监测 · " + running +
-      " · 间隔 " + (monitor.interval_hours || 6) + "h" +
+      "监测 · " + running +
       " · 情报 " + data.items +
       " · 资料 " + ((data.library || {}).documents || 0) +
-      " · " + teamBits.join(" · ") +
-      " · LLM " + (data.llm_ready ? "接通" : "未配置");
-    if (data.visibility) applyVisibility(data.visibility);
-    else loadVisibility();
+      (sourceNames.length ? " · 来源 " + sourceNames.join(" / ") : "") +
+      " · 模型 " + (data.llm_ready ? "已配置" : "未配置");
     [
       [String(data.items), "情报条目"],
-      [String(data.source_count || 0), "漏洞来源"],
+      [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "离线", "团队 AI CVE"],
-      [String(data.latency_count || 0), "可计时效"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "团队情报 CVE"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
@@ -430,7 +408,7 @@ function loadOverview() {
     var recent = $("recent");
     clear(recent);
     if (!data.recent.length) {
-      add(recent, "p", "empty", "情报库还是空的。自动监测启动后会入库，或到「自动监测」立即刷新。");
+      add(recent, "p", "empty", "情报库还是空的。请到「情报监测」点立即刷新。");
     }
     data.recent.forEach(function (item) {
       renderItemRow(recent, item, function (id) { openDetail(id); });
@@ -440,6 +418,8 @@ function loadOverview() {
 }
 
 var monitorScope = "all";
+var monitorSourceFilter = "all";
+var lastMonitorFeed = null;
 
 function setMonitorScope(scope) {
   monitorScope = scope || "all";
@@ -449,11 +429,21 @@ function setMonitorScope(scope) {
   var detail = $("monitor-detail");
   if (detail) {
     clear(detail);
-    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可送去「情报富集」；非 CVE 资料可打开「资料库沉淀」。");
+    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可送去「情报富集」；资料可打开「资料库」。");
   }
   loadItems("monitor");
 }
 window.setMonitorScope = setMonitorScope;
+
+function setMonitorSourceFilter(filter) {
+  monitorSourceFilter = filter || "all";
+  document.querySelectorAll("[data-source-filter]").forEach(function (node) {
+    node.className = node.getAttribute("data-source-filter") === monitorSourceFilter ? "chip is-on" : "chip";
+  });
+  if (lastMonitorFeed) renderMonitorFeed(lastMonitorFeed);
+  else loadItems("monitor");
+}
+window.setMonitorSourceFilter = setMonitorSourceFilter;
 
 function monitorKeyword() {
   var keywordEl = $("keyword");
@@ -468,50 +458,59 @@ function setMonitorStatus(text) {
   if (status) status.textContent = text;
 }
 
+function renderMonitorFeed(data) {
+  var target = $("monitor-list");
+  clear(target);
+  var allItems = data.items || [];
+  var items = allItems.filter(function (item) {
+    return itemMatchesSourceFilter(item, monitorSourceFilter);
+  });
+  var counts = data.counts || {};
+  var summary = $("monitor-summary");
+  var teamTotal = (((data.team_documents || {}).total) || 0);
+  var teamMeta = data.team_documents || {};
+  if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "团队文档探测失败" });
+  if (summary) {
+    var fresh = data.freshness || {};
+    summary.textContent = "共 CVE " + (counts.cve || 0)
+      + " · 资料 " + (counts.document || 0)
+      + (teamTotal ? "（含团队文档 " + teamTotal + "）" : "")
+      + " · 近7天 " + (fresh.days_7 || 0)
+      + " · 近30天 " + (fresh.days_30 || 0)
+      + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
+      + "。按发布时间新→旧。";
+  }
+  var query = monitorKeyword();
+  if (!items.length) {
+    var empty = add(target, "p", "empty", "");
+    if (monitorSourceFilter !== "all" && allItems.length) {
+      empty.textContent = "当前来源筛选下没有条目。可点「全部来源」查看完整情报流。";
+    } else if (query) {
+      empty.textContent = "没有匹配「" + query + "」的条目。可清除关键词或换词后刷新。";
+      var clearBtn = add(target, "button", "ghost", "清除关键词并显示全部");
+      clearBtn.type = "button";
+      clearBtn.addEventListener("click", function () {
+        if ($("keyword")) $("keyword").value = "";
+        if ($("filter")) $("filter").value = "";
+        loadItems("monitor");
+      });
+    } else {
+      empty.textContent = "情报流还是空的。请点「立即刷新一轮」。若仍空，可能是未初始化演示库或外网不可达。";
+    }
+    return data;
+  }
+  items.forEach(function (item) {
+    renderItemRow(target, item, function (row) { openMonitorDetail(row); });
+  });
+  return data;
+}
+
 function loadItems(view) {
   var query = view === "monitor" ? monitorKeyword() : "";
   if (view === "monitor") {
     return api("/api/monitor/feed?kind=" + encodeURIComponent(monitorScope) + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (data) {
-      var target = $("monitor-list");
-      clear(target);
-      var items = data.items || [];
-      var counts = data.counts || {};
-      var summary = $("monitor-summary");
-      var teamTotal = (((data.team_documents || {}).total) || 0);
-      var teamMeta = data.team_documents || {};
-      if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "feed 探测失败" });
-      if (summary) {
-        var fresh = data.freshness || {};
-        summary.textContent = "情报流（按发布时间新→旧）：CVE " + (counts.cve || 0)
-          + " · 非 CVE " + (counts.document || 0)
-          + "（团队文档 " + teamTotal + "）"
-          + " · 近7天 " + (fresh.days_7 || 0)
-          + " · 近30天 " + (fresh.days_30 || 0)
-          + " · 更早 " + (fresh.older || 0)
-          + " · 演示 " + (fresh.demo || 0)
-          + (query ? " · 已按「" + query + "」收窄" : "")
-          + "。CVE 编号年份≠发布时间；「演示」合成不计入实时监测成绩。点「立即刷新一轮」拉 NVD 近30天修改窗。";
-      }
-      if (!items.length) {
-        var empty = add(target, "p", "empty", "");
-        if (query) {
-          empty.textContent = "监测流里没有匹配「" + query + "」的条目。可点「清除关键词」查看全部，或换词后「立即刷新一轮」。";
-          var clearBtn = add(target, "button", "ghost", "清除关键词并显示全部");
-          clearBtn.type = "button";
-          clearBtn.addEventListener("click", function () {
-            if ($("keyword")) $("keyword").value = "";
-            if ($("filter")) $("filter").value = "";
-            loadItems("monitor");
-          });
-        } else {
-          empty.textContent = "情报流还是空的。请点「立即刷新一轮」；若仍空，看横幅诊断（NVD/OSV/B同进程/C资料同步）。B 库缺失时 NVD/OSV 与本地资料库仍应有内容；全空多半是未 seed、外网不可达，或范围芯片不是「全部」。一键：./scripts/demo-up.sh（单进程只开 8023）";
-        }
-        return data;
-      }
-      items.forEach(function (item) {
-        renderItemRow(target, item, function (row) { openMonitorDetail(row); });
-      });
-      return data;
+      lastMonitorFeed = data;
+      return renderMonitorFeed(data);
     }).catch(function (error) {
       showError(error);
       setMonitorStatus("刷新情报流失败：" + (error.message || "请求失败"));
@@ -543,9 +542,9 @@ function openMonitorDetail(item) {
     var fields = add(panel, "div", "fields");
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
-      ["来源", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "未写明"],
-      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "资料库沉淀"],
-      ["记录类型", item.demo ? "演示合成（非比赛监测证据）" : "联网/入库资料"]
+      ["来源", itemSourceLabels(item).join("、")],
+      ["出处", item.origin === "team_documents" ? "团队情报" : "资料库"],
+      ["记录类型", item.demo ? "演示合成" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
@@ -570,11 +569,11 @@ function openMonitorDetail(item) {
     var fields = add(panel, "div", "fields");
     [
       ["类型", "漏洞 CVE"],
-      ["来源", (detail.sources || []).join("、") || "未写明"],
+      ["来源", itemSourceLabels(detail).join("、")],
       ["产品", missingText(detail.product, "未写明")],
       ["受影响版本", (detail.affected || []).length ? (detail.affected || []).join("、") : "未写明"],
       ["CVSS", scoreText(detail.cvss) + (detail.severity ? " · " + detail.severity : "")],
-      ["记录类型", isDemoItem(detail) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
+      ["记录类型", isDemoItem(detail) ? "演示合成" : "联网/入库情报"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
@@ -675,7 +674,7 @@ function renderDetail(item) {
   add(panel, "p", "desc", item.description || "");
   var fields = add(panel, "div", "fields");
   [
-    ["来源", (item.sources || []).join("、") || "未写明"],
+    ["来源", itemSourceLabels(item).join("、")],
     ["产品", missingText(item.product, "未写明")],
     ["受影响版本", (item.affected || []).length ? (item.affected || []).join("、") : "未写明"],
     ["CVSS", scoreText(item.cvss) + (item.severity ? " · " + item.severity : "")],
@@ -976,26 +975,30 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("B(经8023)", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
-  srcLine("C资料同步", diag.c_library_sync);
+  srcLine("团队情报", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("多源采集", diag.b_monitor);
+  srcLine("资料同步", diag.c_library_sync);
 
   if (diag.written === 0 || (runData && runData.count === 0)) {
     bits.push("本轮 CVE 入库 0");
   }
   if (team.reachable === false) {
-    bits.push("B 未起则团队 CVE/文档不会进流（NVD/OSV 与本地库仍应有内容）");
+    bits.push("团队情报不可用时仍应有 NVD/OSV 与本地资料");
   }
   if (teamDocs.reachable === false) {
-    bits.push("feed 探测 B 文档不可达");
+    bits.push("团队文档探测失败");
   }
   if (keyword) {
-    bits.push("当前关键词筛选「" + keyword + "」可能过窄—可清除关键词");
+    bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
   }
   if (scope && scope !== "all") {
-    bits.push("范围芯片=" + scope + "（可切回「全部」）");
+    bits.push("类型筛选=" + scope + "（可切回全部）");
+  }
+  if (monitorSourceFilter && monitorSourceFilter !== "all") {
+    bits.push("来源筛选=" + monitorSourceFilter);
   }
   if (!bits.length) {
-    bits.push("知识库/资料库可能为空；请跑 ./scripts/demo-up.sh 或查看总览编排步骤");
+    bits.push("请确认已运行 ./scripts/demo-up.sh");
   }
   return bits.join("；");
 }
@@ -1005,15 +1008,15 @@ function runMonitorRefresh(options) {
   var button = $("auto-monitor-btn");
   var keyword = monitorKeyword();
   var syncLibrary = options.sync_library !== false;
-  if (button) {
-    button.disabled = true;
-    button.classList.add("btn-busy");
-    button.textContent = "正在刷新…";
+  if (!button) {
+    showToast("找不到刷新按钮，请刷新页面后重试", "error");
+    return Promise.reject(new Error("auto-monitor-btn missing"));
   }
+  setBusyButton(button, true, "正在刷新…", "立即刷新一轮");
   clearError();
   var busyMsg = keyword
-    ? "正在按「" + keyword + "」定向刷新（自动监测的手动加速）…"
-    : "正在刷新一轮宽范围 AI 安全监测（无需先输关键词）…";
+    ? "正在按「" + keyword + "」刷新监测…"
+    : "正在刷新一轮监测（含公开源与团队情报，可能需要数十秒）…";
   setMonitorStatus(busyMsg);
   showToast(busyMsg, "busy");
   return api("/api/monitor/run", {
@@ -1024,45 +1027,39 @@ function runMonitorRefresh(options) {
     setTeamHealth(data.team);
     var lib = data.library_sync || {};
     var warns = data.warnings || [];
+    var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
     var used = data.keyword || keyword || "宽范围 AI 安全";
-    setMonitorStatus("本轮完成：CVE 入库相关 " + (data.count || 0) + " 条"
-      + "（范围：" + String(used).slice(0, 64) + (String(used).length > 64 ? "…" : "") + "）"
+    setMonitorStatus("本轮完成：相关 " + (data.count || 0) + " 条"
+      + (bmon.status ? "；多源采集 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
-      + (warns.length ? "；注意：" + warns.join(" ") : "")
       + "。正在刷新情报流…");
+    showToast("监测完成，正在刷新列表…", "busy");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
-      var done = "刷新完成：写入相关 " + (data.count || 0) + " 条；当前情报流显示 "
-        + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "（自动全部）")
-        + "。后台仍会定时自动监测。";
+      var done = "刷新完成：写入相关 " + (data.count || 0) + " 条；当前显示 "
+        + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
+        + "。";
       setMonitorStatus(done);
       showToast(done + (warns.length ? " " + warns[0] : ""), warns.length ? "error" : "ok");
       if (!total) {
         var why = diagnoseEmptyFeed(data, feed, keyword);
         showError(new Error(keyword
-          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why + "。请点「清除关键词」查看全部流。"
-          : "刷新已完成，但情报流仍为空。" + why + "。"));
+          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why
+          : "刷新已完成，但情报流仍为空。" + why));
       }
       if ($("overview") && !$("overview").hidden) loadOverview();
       return data;
     });
   }).catch(function (error) {
     showError(error);
-    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + "（不会静默；可重试或 ./scripts/demo-up.sh）");
+    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + " — 可重试");
+    showToast("刷新失败：" + (error.message || "请求失败"), "error");
     throw error;
   }).then(function (data) {
-    if (button) {
-      button.disabled = false;
-      button.classList.remove("btn-busy");
-      button.textContent = "立即刷新一轮";
-    }
+    setBusyButton(button, false, null, "立即刷新一轮");
     return data;
   }, function (error) {
-    if (button) {
-      button.disabled = false;
-      button.classList.remove("btn-busy");
-      button.textContent = "立即刷新一轮";
-    }
+    setBusyButton(button, false, null, "立即刷新一轮");
     throw error;
   });
 }
@@ -1106,37 +1103,79 @@ $("collect-form").addEventListener("submit", function (event) {
   });
 });
 
-$("auto-monitor-btn").addEventListener("click", function () {
-  runMonitorRefresh({ sync_library: true }).catch(function () {});
+function bindClick(id, handler) {
+  var el = $(id);
+  if (!el) {
+    console.warn("missing control", id);
+    return;
+  }
+  el.addEventListener("click", function (event) {
+    try {
+      var result = handler(event);
+      if (result && typeof result.catch === "function") {
+        result.catch(function (error) {
+          showError(error || new Error("操作失败"));
+        });
+      }
+    } catch (error) {
+      showError(error);
+    }
+  });
+}
+
+bindClick("auto-monitor-btn", function () {
+  return runMonitorRefresh({ sync_library: true });
 });
 
 document.addEventListener("click", function (event) {
-  var button = event.target && event.target.closest ? event.target.closest("[data-monitor-scope]") : null;
-  if (!button) return;
-  event.preventDefault();
-  event.stopPropagation();
-  setMonitorScope(button.getAttribute("data-monitor-scope") || "all");
+  var scopeBtn = event.target && event.target.closest ? event.target.closest("[data-monitor-scope]") : null;
+  if (scopeBtn) {
+    event.preventDefault();
+    setMonitorScope(scopeBtn.getAttribute("data-monitor-scope") || "all");
+    return;
+  }
+  var srcBtn = event.target && event.target.closest ? event.target.closest("[data-source-filter]") : null;
+  if (srcBtn) {
+    event.preventDefault();
+    setMonitorSourceFilter(srcBtn.getAttribute("data-source-filter") || "all");
+  }
 });
-// Direct bind as fallback (some automation clicks miss delegated handlers).
 document.querySelectorAll("[data-monitor-scope]").forEach(function (button) {
   button.addEventListener("click", function (event) {
     event.preventDefault();
-    event.stopPropagation();
     setMonitorScope(button.getAttribute("data-monitor-scope") || "all");
   });
 });
+document.querySelectorAll("[data-source-filter]").forEach(function (button) {
+  button.addEventListener("click", function (event) {
+    event.preventDefault();
+    setMonitorSourceFilter(button.getAttribute("data-source-filter") || "all");
+  });
+});
 
-$("enrich-btn").addEventListener("click", function () {
+bindClick("enrich-btn", function () {
   var button = $("enrich-btn");
-  button.disabled = true;
-  button.textContent = "正在查询公开源…";
+  var status = $("enrich-status");
+  setBusyButton(button, true, "正在查询…", "批量查询 EPSS / KEV / 论文");
+  if (status) status.textContent = "正在查询 EPSS / KEV / 论文…";
   clearError();
-  api("/api/enrich", { method: "POST" }).then(function () {
-    loadItems("enrich");
-    button.textContent = "查询完成";
-  }).catch(showError).then(function () {
-    button.disabled = false;
-    if (button.textContent !== "查询完成") button.textContent = "批量查询 EPSS / KEV / 论文";
+  showToast("正在批量富集公开源（EPSS / KEV / 论文）…", "busy");
+  return api("/api/enrich", { method: "POST" }).then(function (data) {
+    return loadItems("enrich").then(function () {
+      var msg = "富集完成"
+        + (data && data.items != null ? "：处理 " + data.items + " 条" : "")
+        + (data && data.documents != null ? "，关联资料 " + data.documents : "")
+        + "。";
+      if (status) status.textContent = msg;
+      showToast(msg, "ok");
+      setBusyButton(button, false, null, "批量查询 EPSS / KEV / 论文");
+    });
+  }).catch(function (error) {
+    if (status) status.textContent = "富集失败：" + (error.message || "请求失败");
+    showError(error);
+    showToast("富集失败：" + (error.message || "请求失败"), "error");
+    setBusyButton(button, false, null, "批量查询 EPSS / KEV / 论文");
+    throw error;
   });
 });
 
@@ -1497,25 +1536,43 @@ $("library-search-form").addEventListener("submit", function (event) {
   api("/api/library/search?q=" + encodeURIComponent($("library-query").value.trim()) + "&document_type=" + encodeURIComponent($("library-type").value)).then(renderLibraryEvidence).catch(showError);
 });
 $("library-sync").addEventListener("click", function () {
-  var button = $("library-sync"); button.disabled = true; button.textContent = "正在同步公开资料…"; clearError();
+  var button = $("library-sync");
+  var idle = "同步公开资料";
+  setBusyButton(button, true, "正在同步…", idle);
+  clearError();
+  showToast("正在同步公开资料…", "busy");
   api("/api/library/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({per_source: 3, include_seeds: true})}).then(function (data) {
-    button.textContent = "本轮入库成功 " + data.ok + "/" + data.attempted + " 份";
+    var msg = "公开资料同步完成：" + data.ok + "/" + data.attempted + " 份";
+    showToast(msg, "ok");
     clear($("library-evidence"));
     clear($("library-relations"));
     $("library-answer").textContent = "资料已更新，请重新提问。";
     add($("library-evidence"), "p", "hint", "资料已更新，请重新选择资料或检索。");
     return loadLibrary();
-  }).catch(showError).then(function () { button.disabled = false; });
+  }).catch(function (error) {
+    showError(error);
+    showToast("公开资料同步失败：" + (error.message || "请求失败"), "error");
+  }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
 $("library-team-sync").addEventListener("click", function () {
-  var button = $("library-team-sync"); button.disabled = true; button.textContent = "正在同步团队资料…"; clearError();
+  var button = $("library-team-sync");
+  var idle = "同步团队资料";
+  setBusyButton(button, true, "正在同步…", idle);
+  clearError();
+  showToast("正在同步团队资料…", "busy");
   api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
-    button.textContent = "本轮团队资料入库 " + data.ok + "/" + data.attempted + " 份";
+    var msg = data.status === "error"
+      ? "团队资料暂不可用，已有资料仍可使用"
+      : ("团队资料同步完成：" + data.ok + "/" + data.attempted + " 份");
+    showToast(msg, data.status === "error" ? "error" : "ok");
     librarySelectedDocs = []; clear($("library-evidence")); clear($("library-relations"));
-    $("library-answer").textContent = data.status === "error" ? "队友资料服务未连通，已有资料可继续使用。" : "团队资料已同步，请重新选择资料并提问。";
+    $("library-answer").textContent = data.status === "error" ? "团队资料暂不可用，已有资料可继续使用。" : "团队资料已同步，请重新选择资料并提问。";
     return loadLibrary();
-  }).catch(showError).then(function () { button.disabled = false; });
+  }).catch(function (error) {
+    showError(error);
+    showToast("团队资料同步失败：" + (error.message || "请求失败"), "error");
+  }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
 setView("overview");

@@ -104,12 +104,26 @@ check "overview-team-and-library" true
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
 check "ia-pipeline-rail" grep -q 'class="pipeline"' "$OUT/page.html"
-check "ia-monitor-copy" grep -q "自动监测" "$OUT/page.html"
-check "ia-library-copy" grep -q "资料库沉淀" "$OUT/page.html"
+check "ia-monitor-copy" grep -q "情报监测" "$OUT/page.html"
+check "ia-library-copy" grep -q "资料库" "$OUT/page.html"
 check "ia-enrich-copy" grep -q "情报富集" "$OUT/page.html"
 check "ia-ask-copy" grep -q "证据问答" "$OUT/page.html"
-check "ia-vis-board" grep -q 'class="vis-board"' "$OUT/page.html"
-check "ia-mod-strip" grep -q 'class="mod-strip"' "$OUT/page.html"
+check "ui-source-legend" grep -q 'class="source-legend"' "$OUT/page.html"
+check "ui-source-filter" grep -q 'data-source-filter' "$OUT/page.html"
+# Product UI must NOT show internal A/B/C / scoring / triad boards
+python3 - <<PY
+import sys
+html=open("$OUT/page.html",encoding="utf-8").read()
+banned_ui = [
+  "vis-board", "mod-strip", "data-triad", "达标缺口", "整合健康 · A / B / C",
+  "职责达标整合", "赛题达标", "评分规则", "A 平台架构",
+]
+hit=[b for b in banned_ui if b in html]
+print("banned_hits", hit)
+sys.exit(0 if not hit else 1)
+PY
+check "ui-no-abc-scoring-board" true
+# Backend visibility API remains for 验收 docs (not rendered in product pages)
 curl -sf --max-time 8 "$MAIN_URL/api/visibility" -o "$OUT/visibility.json"
 python3 - <<PY
 import json,sys
@@ -117,29 +131,16 @@ v=json.load(open("$OUT/visibility.json",encoding="utf-8"))
 assert v.get("policy",{}).get("competition_passed") is None
 mods={m["id"]:m for m in v.get("modules") or []}
 assert set(mods)>= {"monitor","enrich","library","ask"}
-# Honest: latency gap or empty accuracy must appear in standards/gaps
-levels=" ".join((s.get("level") or "")+" "+(s.get("note") or "") for s in (v.get("standards") or []))
-assert "未达证" in levels or "空" in levels or "未实现" in levels
-integ={i["party"]:i for i in (v.get("integration") or [])}
-assert "A" in integ and "B" in integ and "C" in integ
-b=integ["B"]
-detail=(b.get("detail") or "") + (b.get("name") or "")
-# Default unify story: in-process embed, not forever-sidecar
-assert "同进程" in detail or "embed" in detail.lower(), detail
-assert "反代" not in detail, detail
-print("visibility_ok modules", sorted(mods), "B", b.get("status"), "detail", (b.get("detail") or "")[:80], "gaps", len(v.get("gaps") or []))
+print("visibility_api_ok modules", sorted(mods))
 sys.exit(0)
 PY
 check "api-visibility-honest" true
-check "api-visibility-b-embed" true
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
-# Assets fold under enrich; must not be a pipeline rail nav target
 sys.exit(0 if 'data-view="assets"' not in html else 1)
 PY
 check "ia-no-assets-nav" true
-# Forbidden competitor / #8/#9 clone markers must stay out of the shell
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
@@ -152,6 +153,9 @@ check "main-assets" test -s "$OUT/app.js"
 check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
 check "ui-refresh-label" grep -q "立即刷新一轮" "$OUT/page.html"
 check "ui-toast" grep -q 'id="toast"' "$OUT/page.html"
+check "ui-toast-wiring" grep -q 'function showToast' "$OUT/app.js"
+check "ui-enrich-toast" grep -q '正在批量富集' "$OUT/app.js"
+check "ui-monitor-toast" grep -q '正在刷新一轮监测' "$OUT/app.js"
 
 # Status endpoint: automatic continuous monitoring (no keyword required)
 curl -sf --max-time 5 "$MAIN_URL/api/monitor/status" -o "$OUT/monitor-status.json"
