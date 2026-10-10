@@ -242,6 +242,7 @@ function setMonitorScope(scope) {
   }
   loadItems("monitor");
 }
+window.setMonitorScope = setMonitorScope;
 
 function loadItems(view) {
   var query = view === "monitor" ? $("filter").value.trim() : "";

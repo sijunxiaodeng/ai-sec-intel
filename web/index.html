@@ -74,11 +74,11 @@
           <div class="panel-head">
             <h2>情报列表</h2>
             <div class="chip-row" id="monitor-scope">
-              <button type="button" class="chip" data-monitor-scope="document">仅资料</button>
-              <button type="button" class="chip" data-monitor-scope="cve">仅漏洞</button>
-              <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
-              <button type="button" class="chip" data-monitor-scope="demo">仅演示</button>
-              <button type="button" class="chip" data-monitor-scope="live">仅联网</button>
+              <button type="button" class="chip" data-monitor-scope="document" onclick="setMonitorScope('document')">仅资料</button>
+              <button type="button" class="chip" data-monitor-scope="cve" onclick="setMonitorScope('cve')">仅漏洞</button>
+              <button type="button" class="chip is-on" data-monitor-scope="all" onclick="setMonitorScope('all')">全部</button>
+              <button type="button" class="chip" data-monitor-scope="demo" onclick="setMonitorScope('demo')">仅演示</button>
+              <button type="button" class="chip" data-monitor-scope="live" onclick="setMonitorScope('live')">仅联网</button>
             </div>
             <input id="filter" placeholder="按编号、标题或来源筛选" />
           </div>
