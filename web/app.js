@@ -1,20 +1,20 @@
 var titles = {
-  overview: "总览",
-  monitor: "情报监测",
+  overview: "架构总览",
+  monitor: "自动监测",
   enrich: "情报富集",
-  library: "安全资料库",
+  library: "资料库沉淀",
   assets: "情报富集",
-  ask: "情报问答",
+  ask: "证据问答",
   settings: "模型设置"
 };
 var eyebrows = {
-  overview: "工作流一览",
-  monitor: "自动采集的 AI 安全情报流",
-  enrich: "单条漏洞补维度 · 含影响资产",
-  library: "已沉淀、可检索的知识存档",
-  assets: "单条漏洞补维度 · 含影响资产",
-  ask: "按证据回答",
-  settings: "本机模型配置"
+  overview: "A 平台架构视图",
+  monitor: "CVE + 非 CVE 情报流",
+  enrich: "EPSS / KEV / 论文 / 影响资产",
+  library: "可检索原文与片段",
+  assets: "EPSS / KEV / 论文 / 影响资产",
+  ask: "先证据后回答",
+  settings: "本机模型接口"
 };
 
 var prompts = [
@@ -193,11 +193,11 @@ function setView(name) {
     if ($(key)) $(key).hidden = key !== name;
   });
   if ($("assets")) $("assets").hidden = true;
-  document.querySelectorAll(".nav button").forEach(function (button) {
+  document.querySelectorAll(".pipeline button").forEach(function (button) {
     button.className = button.getAttribute("data-view") === name ? "is-on" : "";
   });
   $("page-title").textContent = titles[name] || name;
-  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "智能体驱动的知识情报系统";
+  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "A 平台架构视图";
   if (name === "overview") loadOverview();
   if (name === "monitor") {
     loadMonitorStatus();
@@ -260,21 +260,16 @@ function loadOverview() {
     } else {
       teamBits.push("团队情报暂不可达");
     }
+    var running = monitor.running ? "后台正在跑一轮" : (monitor.last_run ? "最近一轮 " + monitor.last_run : "启动后自动首轮");
     $("monitor-line").textContent =
-      "默认自动持续监测宽范围 AI 安全情报，间隔 " + (monitor.interval_hours || 6) +
-      " 小时" + (monitor.last_run ? "；最近一轮 " + monitor.last_run : "；启动后会自动跑首轮") +
-      "（开始于 " + dateText(monitor.started_at) +
-      "）。可计时效 " + data.latency_count +
-      " 条。漏洞来源标签：" +
-      ((data.sources || []).join("、") || "还没有") +
-      "。" + teamBits.join("；") +
-      "。资料库已沉淀 " + ((data.library || {}).documents || 0) +
-      " 份（" +
-      (((data.library || {}).source_categories || []).join("、") || "尚无") +
-      "）。影响资产在「情报富集」里评估。";
+      "自动监测 · " + running +
+      " · 间隔 " + (monitor.interval_hours || 6) + " 小时" +
+      " · 情报 " + data.items +
+      " · 资料库 " + ((data.library || {}).documents || 0) +
+      " · " + teamBits.join(" · ");
     [
-      [String(data.items), "知识库情报"],
-      [String(data.source_count || 0), "漏洞数据库来源"],
+      [String(data.items), "情报条目"],
+      [String(data.source_count || 0), "漏洞来源"],
       [String((data.library || {}).documents || 0), "资料库文档"],
       [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "离线", "团队 AI CVE"],
       [String(data.latency_count || 0), "可计时效"],
@@ -287,7 +282,7 @@ function loadOverview() {
     var recent = $("recent");
     clear(recent);
     if (!data.recent.length) {
-      add(recent, "p", "empty", "知识库还是空的。到情报监测里运行一次。");
+      add(recent, "p", "empty", "情报库还是空的。自动监测启动后会入库，或到「自动监测」立即刷新。");
     }
     data.recent.forEach(function (item) {
       renderItemRow(recent, item, function (id) { openDetail(id); });
@@ -306,7 +301,7 @@ function setMonitorScope(scope) {
   var detail = $("monitor-detail");
   if (detail) {
     clear(detail);
-    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可去「情报富化」；论文/博客/标准等资料也可在「安全资料库」打开。");
+    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可送去「情报富集」；非 CVE 资料可打开「资料库沉淀」。");
   }
   loadItems("monitor");
 }
@@ -390,12 +385,12 @@ function openMonitorDetail(item) {
     clear(panel);
     add(panel, "h2", "", (item.category_label || "资料") + (item.demo ? "（演示）" : ""));
     add(panel, "p", "desc", item.title || "");
-    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见安全资料库）");
+    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见资料库沉淀）");
     var fields = add(panel, "div", "fields");
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
       ["来源", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "未写明"],
-      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "安全资料库"],
+      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "资料库沉淀"],
       ["记录类型", item.demo ? "演示合成（非比赛监测证据）" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
@@ -406,7 +401,7 @@ function openMonitorDetail(item) {
       var link = add(panel, "a", "meta", item.url);
       link.href = item.url; link.target = "_blank"; link.rel = "noopener";
     }
-    var goLib = add(panel, "button", "ghost", "打开安全资料库");
+    var goLib = add(panel, "button", "ghost", "打开资料库沉淀");
     goLib.type = "button";
     goLib.addEventListener("click", function () { setView("library"); });
     return;
@@ -770,13 +765,29 @@ function loadSettings() {
   }).catch(showError);
 }
 
-document.querySelectorAll(".nav button").forEach(function (button) {
+document.querySelectorAll(".pipeline button").forEach(function (button) {
   button.addEventListener("click", function () {
     setView(button.getAttribute("data-view"));
   });
 });
 
-$("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+document.querySelectorAll("#arch-stack [data-go]").forEach(function (node) {
+  node.addEventListener("click", function () {
+    setView(node.getAttribute("data-go"));
+  });
+  node.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setView(node.getAttribute("data-go"));
+    }
+  });
+  if (!node.getAttribute("tabindex")) node.setAttribute("tabindex", "0");
+  if (!node.getAttribute("role")) node.setAttribute("role", "button");
+});
+
+if ($("goto-monitor")) {
+  $("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+}
 
 if ($("keyword")) {
   $("keyword").addEventListener("input", function () {
