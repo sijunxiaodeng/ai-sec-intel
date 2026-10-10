@@ -478,7 +478,7 @@ function loadItems(view) {
             loadItems("monitor");
           });
         } else {
-          empty.textContent = "情报流还是空的。服务启动会自动采集；也可点「立即刷新一轮」。若 B :8765 宕机，仍应出现 NVD/OSV/本地资料。";
+          empty.textContent = "情报流还是空的。请点「立即刷新一轮」；若仍空，看横幅诊断（NVD/OSV/B:8765/C资料同步）。B 宕机时 NVD/OSV 与本地资料库仍应有内容；全空多半是未 seed、外网不可达，或范围芯片不是「全部」。一键环境：./scripts/demo-up.sh";
         }
         return data;
       }
@@ -936,6 +936,44 @@ if ($("clear-keyword-btn")) {
   });
 }
 
+function diagnoseEmptyFeed(runData, feed, keyword) {
+  var bits = [];
+  var diag = (runData && runData.source_diag) || {};
+  var team = (runData && runData.team) || {};
+  var teamDocs = (feed && feed.team_documents) || {};
+  var scope = monitorScope || "all";
+
+  function srcLine(label, row) {
+    if (!row) return;
+    var st = row.status || "未知";
+    bits.push(label + ":" + st);
+  }
+  srcLine("NVD", diag.nvd);
+  srcLine("OSV", diag.osv);
+  srcLine("B(:8765)", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("C资料同步", diag.c_library_sync);
+
+  if (diag.written === 0 || (runData && runData.count === 0)) {
+    bits.push("本轮 CVE 入库 0");
+  }
+  if (team.reachable === false) {
+    bits.push("B 未起则团队 CVE/文档不会进流（NVD/OSV 与本地库仍应有内容）");
+  }
+  if (teamDocs.reachable === false) {
+    bits.push("feed 探测 B 文档不可达");
+  }
+  if (keyword) {
+    bits.push("当前关键词筛选「" + keyword + "」可能过窄—可清除关键词");
+  }
+  if (scope && scope !== "all") {
+    bits.push("范围芯片=" + scope + "（可切回「全部」）");
+  }
+  if (!bits.length) {
+    bits.push("知识库/资料库可能为空；请跑 ./scripts/demo-up.sh 或查看总览编排步骤");
+  }
+  return bits.join("；");
+}
+
 function runMonitorRefresh(options) {
   options = options || {};
   var button = $("auto-monitor-btn");
@@ -974,9 +1012,10 @@ function runMonitorRefresh(options) {
       setMonitorStatus(done);
       showToast(done + (warns.length ? " " + warns[0] : ""), warns.length ? "error" : "ok");
       if (!total) {
+        var why = diagnoseEmptyFeed(data, feed, keyword);
         showError(new Error(keyword
-          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。请点「清除关键词」查看全部流。"
-          : "刷新已完成，但情报流仍为空。请查看总览步骤或确认外网/NVD 可达。"));
+          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why + "。请点「清除关键词」查看全部流。"
+          : "刷新已完成，但情报流仍为空。" + why + "。"));
       }
       if ($("overview") && !$("overview").hidden) loadOverview();
       return data;

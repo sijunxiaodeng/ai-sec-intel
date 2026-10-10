@@ -800,18 +800,59 @@ def monitor_run(body: MonitorRunBody):
             except Exception as exc:
                 library = {"status": "error", "error": type(exc).__name__}
                 warnings.append("团队资料同步失败，CVE/公开源结果仍已刷新。")
+    steps = result.get("steps") or []
     team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
-                      for s in (result.get("steps") or []))
+                      for s in steps)
     if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
         warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+
+    def _step_status(name):
+        for step in steps:
+            action = step.get("action") or ""
+            if name not in action:
+                continue
+            if "失败" in action:
+                return {"status": "失败", "detail": (step.get("detail") or "")[:200]}
+            if "跳过" in action:
+                return {"status": "跳过", "detail": (step.get("detail") or "")[:200]}
+            return {"status": "成功", "detail": (step.get("detail") or "")[:200]}
+        return {"status": "未跑", "detail": ""}
+
+    nvd = _step_status("NVD")
+    osv = _step_status("OSV")
+    b_step = _step_status("团队情报")
+    if not team.get("reachable"):
+        b_src = {"status": "不可达", "detail": team.get("error") or team.get("base_url") or ":8765"}
+    elif b_step["status"] == "失败":
+        b_src = b_step
+    else:
+        b_src = {"status": b_step["status"] if b_step["status"] != "未跑" else "接通",
+                 "detail": b_step.get("detail") or team.get("base_url") or ""}
+    if library is None:
+        c_sync = {"status": "未请求", "detail": "sync_library=false"}
+    elif isinstance(library, dict) and library.get("status") == "skipped":
+        c_sync = {"status": "跳过", "detail": library.get("error") or "team unreachable"}
+    elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
+        c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
+    else:
+        c_sync = {"status": "成功", "detail": "已尽力同步团队/公开资料到资料库"}
+
+    source_diag = {
+        "nvd": nvd,
+        "osv": osv,
+        "b_team": b_src,
+        "c_library_sync": c_sync,
+        "written": len(result["records"]),
+    }
     return {
         "mode": "auto",
         "keyword": keyword,
         "count": len(result["records"]),
-        "steps": result["steps"],
+        "steps": steps,
         "library_sync": library,
         "team": team,
         "warnings": warnings,
+        "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
         "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步非 CVE 资料；列表见 /api/monitor/feed。",
     }
