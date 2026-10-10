@@ -73,6 +73,15 @@ python intelligence/deployment/actions_state.py restore-file \
 
 恢复命令校验来源和文件哈希，保留原始时间戳。之后可以按 B 的 README 启动本地 API，提供新数据给 A/C。Actions 负责定时采集和备份，**不托管常驻 API、网页、问答模型或 A/C 的后台服务**。
 
+### 自动同步到本机 / 部署 8023（推荐）
+
+仅手工 `restore-file` **不会**让正在运行的演示库自动更新。仓库现提供真实同步通道（须配置 Token/Secret，未配置则跳过、不假装成功）：
+
+- **本机拉取最新 artifact**：`ACTIONS_SYNC_PULL=1 GITHUB_TOKEN=… ./scripts/demo-pull-actions.sh`（或 `demo-up` 前同环境变量）
+- **Actions 推送到部署**：设置仓库 Secret `DEPLOY_INGEST_URL` + `DEPLOY_INGEST_TOKEN`，部署侧设置相同 `ACTIONS_INGEST_TOKEN`，工作流在上传 artifact 后 POST `/api/admin/actions-sync`
+
+实现入口：`intelligence/deployment/actions_sync.py`、`api/actions_ingest.py`、`scripts/demo-pull-actions.sh`。配置说明见协作文档 `actions-api-sync`（agent store：`docs/actions-api-sync.md`）。
+
 ## 时效边界
 
 每 15 分钟是调度目标，GitHub 明确可能延迟或丢弃繁忙时的定时任务；公开仓库长期没有活动时也可能自动停用 schedule。任务启动频率、上游 API 的收录延迟、分页补采、GitHub 网络和来源失败均影响实际时效。此版本消除了个人电脑关机的依赖，但不能仅凭部署成功认定严格 `<6h` 指标通过。已有超限数据应保留，后续通过 Summary 和真实时间戳验证改进。

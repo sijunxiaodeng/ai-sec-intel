@@ -21,6 +21,19 @@ app = FastAPI(title="AI 安全知识情报")
 
 @app.on_event("startup")
 def _startup():
+    # Optional: pull latest Actions intelligence snapshot before the monitor loop.
+    try:
+        from api.actions_ingest import maybe_pull_on_startup
+
+        result = maybe_pull_on_startup()
+        if result and result.get("status") == "ok":
+            print("Actions sync on start: installed run_id=%s" % (
+                (result.get("marker") or {}).get("run_id"),
+            ), flush=True)
+        elif result and result.get("status") == "error":
+            print("Actions sync on start failed: %s" % result.get("error"), flush=True)
+    except Exception as exc:
+        print("Actions sync on start skipped: %s" % exc, flush=True)
     start_schedule()
 
 
@@ -1242,6 +1255,11 @@ def test_settings():
 def index():
     return FileResponse(os.path.join(WEB, "index.html"))
 
+
+# Secure Actions → deploy ingest (must NOT live under /api/intelligence — that is B).
+from api.actions_ingest import router as actions_ingest_router  # noqa: E402
+
+app.include_router(actions_ingest_router)
 
 # --- B integration on :8023 ---
 # Default: ASGI-embed B in this process (TEAM_INTEL_MODE=embed).

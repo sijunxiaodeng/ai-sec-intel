@@ -74,6 +74,12 @@ services:
       B_MONITOR_OVERALL_TIMEOUT: "180"
       # Stable demo default: skip long network ingest on every collect.
       AUTO_INGEST_ON_COLLECT: ${AUTO_INGEST_ON_COLLECT:-0}
+      # Actions → deploy ingest (optional). Set on host to enable POST /api/admin/actions-sync.
+      ACTIONS_INGEST_TOKEN: ${ACTIONS_INGEST_TOKEN:-}
+      ACTIONS_SYNC_ON_START: ${ACTIONS_SYNC_ON_START:-0}
+      ACTIONS_SYNC_TOKEN: ${ACTIONS_SYNC_TOKEN:-${GITHUB_TOKEN:-}}
+      ACTIONS_SYNC_REPOSITORY: ${ACTIONS_SYNC_REPOSITORY:-sijunxiaodeng/ai-sec-intel}
+      ACTIONS_SYNC_BRANCH: ${ACTIONS_SYNC_BRANCH:-main}
       PYTHONUTF8: "1"
     volumes:
       - main-data:/app/data

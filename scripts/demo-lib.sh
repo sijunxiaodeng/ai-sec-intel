@@ -68,9 +68,44 @@ ensure_venvs() {
   fi
 }
 
+pull_actions_state_if_configured() {
+  # Real Actions → local DB sync (artifact download). Opt-in.
+  # ACTIONS_SYNC_PULL=1 or ACTIONS_SYNC_ON_START=1 + GITHUB_TOKEN/GH_TOKEN/ACTIONS_SYNC_TOKEN
+  local want="${ACTIONS_SYNC_PULL:-${ACTIONS_SYNC_ON_START:-0}}"
+  case "$want" in
+    1|true|yes|on) ;;
+    *) return 1 ;;
+  esac
+  local token="${ACTIONS_SYNC_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
+  if [[ -z "$token" ]]; then
+    log "ACTIONS_SYNC_PULL set but no GITHUB_TOKEN/GH_TOKEN/ACTIONS_SYNC_TOKEN — skip pull"
+    return 1
+  fi
+  ensure_venvs
+  mkdir -p "$ROOT/intelligence/data"
+  log "pulling latest GitHub Actions intelligence snapshot into intelligence/data …"
+  if (
+    cd "$ROOT"
+    PYTHONPATH="$ROOT/intelligence" \
+      "$ROOT/.venv/bin/python" "$ROOT/intelligence/deployment/actions_sync.py" pull \
+        --directory "$ROOT/intelligence/data" \
+        --repository "${ACTIONS_SYNC_REPOSITORY:-${GITHUB_REPOSITORY:-sijunxiaodeng/ai-sec-intel}}" \
+        --branch "${ACTIONS_SYNC_BRANCH:-main}" \
+        --token "$token"
+  ); then
+    log "Actions snapshot installed (skip synthetic seed)"
+    return 0
+  fi
+  log "Actions pull failed — will fall back to seed if needed"
+  return 1
+}
+
 seed_local_db() {
   ensure_venvs
   mkdir -p "$ROOT/intelligence/data"
+  if pull_actions_state_if_configured; then
+    return 0
+  fi
   if [[ ! -f "$ROOT/intelligence/data/intelligence.db" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
     log "seeding offline B demo DB (root .venv)"
     (
@@ -79,6 +114,6 @@ seed_local_db() {
         "$ROOT/.venv/bin/python" seed_demo_db.py --force
     )
   else
-    log "B demo DB already present (set DEMO_FORCE_SEED=1 to recreate)"
+    log "B demo DB already present (set DEMO_FORCE_SEED=1 to recreate; ACTIONS_SYNC_PULL=1 to pull Actions)"
   fi
 }
