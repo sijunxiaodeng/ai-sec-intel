@@ -112,12 +112,69 @@ def _team_intel_snapshot():
     import urllib.error
     import urllib.request
 
+    from api.b_embed import embed_enabled, inprocess_health, list_team_page, public_b_base
     from collectors.intelligence import team_base_url
+
+    if embed_enabled():
+        health = inprocess_health()
+        out = {
+            "reachable": bool(health.get("reachable")),
+            "base_url": health.get("public_base") or public_b_base(),
+            "public_base": health.get("public_base") or public_b_base(),
+            "mode": "embed",
+            "via_proxy": False,
+            "database_available": health.get("database_available"),
+            "knowledge_documents_available": health.get("knowledge_documents_available"),
+            "team_total": None,
+            "document_total": None,
+            "coverage": None,
+            "error": health.get("error"),
+        }
+        if not out["reachable"]:
+            return out
+        try:
+            out["team_total"] = list_team_page("", limit=1, ai_only=True).get("total")
+        except Exception:
+            pass
+        try:
+            from api.b_embed import ensure_intelligence_path, db_path, INTEL_ROOT
+            ensure_intelligence_path()
+            from api_v6.document_repository import DocumentRepository
+            from api_v6.repository import IntelligenceRepository, current_classifier_version
+            from monitoring.coverage import coverage_report
+            from monitoring.source_registry import get_sources
+
+            docs = DocumentRepository(db_path(), INTEL_ROOT)
+            stats = docs.stats()
+            out["document_total"] = stats.get("total_documents")
+            cat_counts = stats.get("source_category_counts") or stats.get("source_record_counts")
+            if isinstance(cat_counts, dict):
+                out["document_categories"] = list(cat_counts.keys())
+            repo = IntelligenceRepository(db_path(), INTEL_ROOT)
+            with repo.read() as con:
+                cov = coverage_report(
+                    con, get_sources(),
+                    poll_minutes=15, source_timeout_seconds=120, worker_count=4,
+                    classifier_version=current_classifier_version(INTEL_ROOT),
+                )
+            out["coverage"] = {
+                "configured_category_count": cov.get("configured_category_count"),
+                "observed_ai_category_count": cov.get("observed_ai_category_count"),
+                "observed_ai_categories": cov.get("observed_ai_categories"),
+                "required_categories_observed": cov.get("required_categories_observed"),
+                "sla_evidence": cov.get("sla_evidence"),
+            }
+        except Exception as exc:
+            out["error"] = "%s: %s" % (type(exc).__name__, exc)[:160]
+        return out
 
     base = team_base_url()
     out = {
         "reachable": False,
         "base_url": base,
+        "public_base": public_b_base(),
+        "mode": "sidecar",
+        "via_proxy": True,
         "database_available": None,
         "team_total": None,
         "document_total": None,
@@ -237,15 +294,17 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     b_reachable = bool((team or {}).get("reachable"))
     b_status = "接通" if b_reachable else "不可达"
     try:
-        from api.b_proxy import public_b_base, team_intel_upstream, proxy_enabled
+        from api.b_embed import embed_enabled, public_b_base, sidecar_enabled
+        from api.b_proxy import team_intel_upstream
         b_public = public_b_base()
-        b_up = team_intel_upstream()
-        if proxy_enabled():
-            b_detail = "经 8023 反代 · %s/api/intelligence/* → %s" % (b_public, b_up)
+        if embed_enabled() or (team or {}).get("mode") == "embed":
+            b_detail = "同进程嵌入 · %s/api/intelligence/*（无需 :8765）" % b_public
+        elif sidecar_enabled():
+            b_detail = "遗留 sidecar · %s/api/intelligence/* → %s" % (b_public, team_intel_upstream())
         else:
-            b_detail = (team or {}).get("base_url") or b_up
+            b_detail = (team or {}).get("base_url") or "TEAM_INTEL_MODE=off"
     except Exception:
-        b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_UPSTREAM"
+        b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_MODE"
     if b_reachable:
         b_detail += f" · AI CVE {(team or {}).get('team_total') if (team or {}).get('team_total') is not None else '—'} · 文档 {(team or {}).get('document_total') if (team or {}).get('document_total') is not None else '—'}"
     elif (team or {}).get("error"):
@@ -279,7 +338,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
                 "owner": "A 编排 · monitor 角色",
                 "peers": [
                     {"party": "A", "role": "调度 / feed / status", "status": "接通"},
-                    {"party": "B", "role": "团队情报（经 8023）", "status": b_status, "detail": b_detail},
+                    {"party": "B", "role": "团队情报（同进程）", "status": b_status, "detail": b_detail},
                     {"party": "C", "role": "不经监测入口", "status": "跳过"},
                 ],
             },
@@ -369,7 +428,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
 
     integration = [
         {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · 对外只开 :8023"},
-        {"party": "B", "name": "团队情报（反代）", "status": b_status, "detail": b_detail},
+        {"party": "B", "name": "团队情报（同进程嵌入）", "status": b_status, "detail": b_detail},
         {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
         {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
     ]
@@ -781,16 +840,19 @@ AUTO_MONITOR_KEYWORDS = (
 
 
 def _team_reachable_probe():
-    """Fast probe so UI can warn when B upstream is down without freezing."""
+    """Fast probe so UI can warn when B is unavailable without freezing."""
     import json
     import urllib.error
     import urllib.request
 
+    from api.b_embed import embed_enabled, inprocess_health, public_b_base, sidecar_enabled
     from collectors.intelligence import team_base_url
-    from api.b_proxy import public_b_base, proxy_enabled
+
+    if embed_enabled():
+        return inprocess_health()
 
     base = team_base_url()
-    public = public_b_base() if proxy_enabled() else base
+    public = public_b_base()
     try:
         with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
             payload = json.load(resp)
@@ -798,7 +860,8 @@ def _team_reachable_probe():
             "reachable": True,
             "base_url": base,
             "public_base": public,
-            "via_proxy": proxy_enabled(),
+            "mode": "sidecar",
+            "via_proxy": sidecar_enabled(),
             "database_available": bool(payload.get("database_available")),
         }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
@@ -806,7 +869,8 @@ def _team_reachable_probe():
             "reachable": False,
             "base_url": base,
             "public_base": public,
-            "via_proxy": proxy_enabled(),
+            "mode": "sidecar",
+            "via_proxy": sidecar_enabled(),
             "error": str(exc)[:160],
         }
 
@@ -836,7 +900,11 @@ def monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        warnings.append("团队情报服务暂不可达（8023 反代后端），已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+        mode = (team or {}).get("mode") or "embed"
+        if mode == "embed":
+            warnings.append("团队情报库暂不可用（同进程嵌入），已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+        else:
+            warnings.append("团队情报 sidecar 暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
     try:
         result = run_collect(keyword)
     except Exception as exc:
@@ -863,7 +931,7 @@ def monitor_run(body: MonitorRunBody):
     steps = result.get("steps") or []
     team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
                       for s in steps)
-    if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
+    if team_failed and "团队情报" not in " ".join(warnings):
         warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
 
     def _step_status(name):
@@ -882,12 +950,17 @@ def monitor_run(body: MonitorRunBody):
     osv = _step_status("OSV")
     b_step = _step_status("团队情报")
     if not team.get("reachable"):
-        b_src = {"status": "不可达", "detail": team.get("error") or team.get("base_url") or ":8765"}
+        b_src = {
+            "status": "不可达",
+            "detail": team.get("error") or team.get("base_url") or "embed/db",
+        }
     elif b_step["status"] == "失败":
         b_src = b_step
     else:
-        b_src = {"status": b_step["status"] if b_step["status"] != "未跑" else "接通",
-                 "detail": b_step.get("detail") or team.get("base_url") or ""}
+        b_src = {
+            "status": b_step["status"] if b_step["status"] != "未跑" else "接通",
+            "detail": b_step.get("detail") or team.get("mode") or team.get("base_url") or "embed",
+        }
     if library is None:
         c_sync = {"status": "未请求", "detail": "sync_library=false"}
     elif isinstance(library, dict) and library.get("status") == "skipped":
@@ -1123,12 +1196,15 @@ def index():
     return FileResponse(os.path.join(WEB, "index.html"))
 
 
-# --- B reverse proxy (single public port :8023) ---
-# A keeps POST /api/documents for CVE-linked ingest; only GET document routes proxy to B.
-from api.b_proxy import forward_async, proxy_enabled  # noqa: E402
+# --- B integration on :8023 ---
+# Default: ASGI-embed B in this process (TEAM_INTEL_MODE=embed).
+# Legacy: TEAM_INTEL_MODE=sidecar keeps HTTP reverse-proxy to :8765.
+from api.b_embed import EmbedBMiddleware, embed_enabled, sidecar_enabled  # noqa: E402
+from api.b_proxy import forward_async  # noqa: E402
 
-
-if proxy_enabled():
+if embed_enabled():
+    app.add_middleware(EmbedBMiddleware)
+elif sidecar_enabled():
     @app.api_route("/api/intelligence", methods=["GET", "HEAD", "OPTIONS"])
     async def _proxy_intelligence_root(request: Request):
         return await forward_async(request, "/api/intelligence")

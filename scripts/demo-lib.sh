@@ -10,10 +10,11 @@ B_PORT="${B_PORT:-8765}"
 MAIN_PORT="${MAIN_PORT:-8023}"
 B_URL="http://127.0.0.1:${B_PORT}"
 MAIN_URL="http://127.0.0.1:${MAIN_PORT}"
-# Public single entry: all demo/smoke client traffic uses MAIN_URL (B proxied under 8023).
-# TEAM_INTEL_UPSTREAM is the localhost-only B process (avoid A↔8023 self-proxy deadlock).
+# Default: B embedded in the main :8023 process (no separate :8765).
+export TEAM_INTEL_MODE="${TEAM_INTEL_MODE:-embed}"
+# Legacy sidecar vars (only used when TEAM_INTEL_MODE=sidecar).
 export TEAM_INTEL_UPSTREAM="${TEAM_INTEL_UPSTREAM:-http://127.0.0.1:${B_PORT}}"
-export TEAM_INTEL_PROXY="${TEAM_INTEL_PROXY:-1}"
+export TEAM_INTEL_PROXY="${TEAM_INTEL_PROXY:-0}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-ai-sec-intel-demo}"
 
 # Broader AI-security keyword set for demos (comma-separated for multi-pass collect).
@@ -53,8 +54,9 @@ ensure_venvs() {
     "$ROOT/.venv/bin/python" -m pip install -U pip -q
     "$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/requirements.txt"
   fi
+  # Seed script still uses intelligence/.venv (B lockfile); not required at runtime for embed.
   if [[ ! -x "$ROOT/intelligence/.venv/bin/python" ]]; then
-    log "creating intelligence/.venv"
+    log "creating intelligence/.venv (for seed / legacy sidecar only)"
     python3 -m venv "$ROOT/intelligence/.venv"
     "$ROOT/intelligence/.venv/bin/python" -m pip install -U pip -q
     "$ROOT/intelligence/.venv/bin/python" -m pip install -q -r "$ROOT/intelligence/requirements.lock.txt"

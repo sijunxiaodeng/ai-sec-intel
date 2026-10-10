@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     APP_HOST=0.0.0.0 \
     APP_PORT=8023 \
-    TEAM_INTEL_BASE_URL=http://b-api:8765 \
+    TEAM_INTEL_MODE=embed \
+    INTELLIGENCE_DB_PATH=/app/intelligence/data/intelligence.db \
     AUTO_INGEST_ON_COLLECT=0 \
     PYTHONUTF8=1
 

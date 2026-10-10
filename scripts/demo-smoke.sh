@@ -25,9 +25,9 @@ check() {
   fi
 }
 
-log "smoke against single entry main=$MAIN_URL keyword=$KEYWORD (B proxied; upstream=$TEAM_INTEL_UPSTREAM)"
+log "smoke against single entry main=$MAIN_URL keyword=$KEYWORD (TEAM_INTEL_MODE=${TEAM_INTEL_MODE:-embed}; no :8765 required)"
 
-# Full chain via :8023 only — do not require clients to open :8765
+# Full chain via :8023 only — B is in-process; do not require :8765
 curl -sf --max-time 5 "$MAIN_URL/api/intelligence/health" -o "$OUT/b-health.json"
 check "b-health-via-8023" test -s "$OUT/b-health.json"
 python3 - <<PY
@@ -120,12 +120,18 @@ assert set(mods)>= {"monitor","enrich","library","ask"}
 # Honest: latency gap or empty accuracy must appear in standards/gaps
 levels=" ".join((s.get("level") or "")+" "+(s.get("note") or "") for s in (v.get("standards") or []))
 assert "未达证" in levels or "空" in levels or "未实现" in levels
-integ={i["party"]:i["status"] for i in (v.get("integration") or [])}
+integ={i["party"]:i for i in (v.get("integration") or [])}
 assert "A" in integ and "B" in integ and "C" in integ
-print("visibility_ok modules", sorted(mods), "B", integ.get("B"), "gaps", len(v.get("gaps") or []))
+b=integ["B"]
+detail=(b.get("detail") or "") + (b.get("name") or "")
+# Default unify story: in-process embed, not forever-sidecar
+assert "同进程" in detail or "embed" in detail.lower(), detail
+assert "反代" not in detail, detail
+print("visibility_ok modules", sorted(mods), "B", b.get("status"), "detail", (b.get("detail") or "")[:80], "gaps", len(v.get("gaps") or []))
 sys.exit(0)
 PY
 check "api-visibility-honest" true
+check "api-visibility-b-embed" true
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
