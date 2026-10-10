@@ -104,6 +104,39 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 6
+      - name: Push snapshot to deploy ingest API (optional)
+        # Real sync path: artifact alone never reaches a running 8023 DB.
+        # When DEPLOY_INGEST_URL + DEPLOY_INGEST_TOKEN secrets are set, POST the
+        # verified snapshot zip to the main app's /api/admin/actions-sync.
+        if: ${{ always() && steps.snapshot.outcome == 'success' && secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
+        env:
+          DEPLOY_INGEST_URL: ${{ secrets.DEPLOY_INGEST_URL }}
+          DEPLOY_INGEST_TOKEN: ${{ secrets.DEPLOY_INGEST_TOKEN }}
+        run: |
+          set -euo pipefail
+          STAGE="${RUNNER_TEMP}/intelligence-state"
+          test -f "$STAGE/intelligence.db"
+          test -f "$STAGE/manifest.json"
+          ZIP="${RUNNER_TEMP}/intelligence-state-${GITHUB_RUN_ID}.zip"
+          (cd "$STAGE" && zip -qr "$ZIP" .)
+          ENDPOINT="${DEPLOY_INGEST_URL%/}"
+          case "$ENDPOINT" in
+            */api/admin/actions-sync) ;;
+            *) ENDPOINT="${ENDPOINT}/api/admin/actions-sync" ;;
+          esac
+          echo "Pushing Actions snapshot to ${ENDPOINT}"
+          curl -fsS --max-time 120 \
+            -X POST "$ENDPOINT" \
+            -H "Authorization: Bearer ${DEPLOY_INGEST_TOKEN}" \
+            -H "Content-Type: application/zip" \
+            -H "X-Actions-Repository: ${GITHUB_REPOSITORY}" \
+            -H "X-Actions-Branch: main" \
+            -H "X-Actions-Run-Id: ${GITHUB_RUN_ID}" \
+            --data-binary @"$ZIP" \
+            -o "${RUNNER_TEMP}/deploy-ingest-response.json"
+          echo "Deploy ingest response:"
+          cat "${RUNNER_TEMP}/deploy-ingest-response.json"
+          echo
       - name: Retain the latest eight trusted snapshots
         if: ${{ always() && steps.upload.outcome == 'success' }}
         env:
