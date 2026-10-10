@@ -200,6 +200,161 @@ def items(q: str = ""):
     return {"items": [_summary(record) for record in records]}
 
 
+_CATEGORY_LABELS = {
+    "academic_paper": "学术论文",
+    "security_blog": "安全博客",
+    "security_community": "安全社区",
+    "technical_standard": "技术标准",
+    "policy_regulation": "政策法规",
+    "vendor_advisory": "厂商公告",
+    "government_alert": "政府告警",
+    "vulnerability_database": "漏洞数据库",
+    "academic": "学术",
+    "policy": "政策",
+    "research": "研究",
+    "standard": "标准",
+    "vendor": "厂商",
+    "research_article": "研究文章",
+    "vendor_guidance": "厂商指引",
+}
+
+
+def _fetch_team_documents(q="", limit=40):
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    from collectors.intelligence import team_base_url
+
+    base = team_base_url()
+    query = urllib.parse.urlencode({"q": q or "", "limit": min(limit, 100), "offset": 0})
+    try:
+        with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
+            payload = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return [], {"reachable": False, "total": 0}
+    rows = payload.get("items") or []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        category = row.get("source_category") or row.get("category") or ""
+        title = row.get("title") or ""
+        desc = row.get("description") or ""
+        out.append({
+            "kind": "document",
+            "id": row.get("document_id") or row.get("id") or title,
+            "document_id": row.get("document_id") or "",
+            "title": title,
+            "description": desc,
+            "source": row.get("source") or "",
+            "sources": [row.get("source")] if row.get("source") else [],
+            "category": category,
+            "category_label": _CATEGORY_LABELS.get(category, category or "资料"),
+            "content_type": row.get("content_type") or "",
+            "url": row.get("url") or "",
+            "published_at": row.get("published_at") or row.get("first_seen_at") or "",
+            "demo": bool((row.get("raw_data") or {}).get("demo_fixture"))
+                or title.startswith("【演示】") or desc.startswith("演示用"),
+            "origin": "team_documents",
+        })
+    return out, {"reachable": True, "total": payload.get("total", len(out))}
+
+
+def _library_documents(q="", limit=40):
+    from rag.library import documents as library_documents
+
+    rows = library_documents()
+    needle = (q or "").strip().lower()
+    out = []
+    for row in rows:
+        title = row.get("title") or ""
+        dtype = row.get("document_type") or ""
+        blob = " ".join([title, dtype, row.get("publisher") or "", row.get("url") or ""]).lower()
+        if needle and needle not in blob:
+            continue
+        out.append({
+            "kind": "document",
+            "id": row.get("document_id") or title,
+            "document_id": row.get("document_id") or "",
+            "title": title,
+            "description": row.get("summary") or row.get("description") or "",
+            "source": row.get("publisher") or row.get("source_id") or "",
+            "sources": [row.get("publisher") or row.get("source_id") or "资料库"],
+            "category": dtype,
+            "category_label": _CATEGORY_LABELS.get(dtype, dtype or "资料"),
+            "content_type": dtype,
+            "url": row.get("url") or "",
+            "published_at": row.get("published_at") or row.get("retrieved_at") or "",
+            "demo": title.startswith("【演示】"),
+            "origin": "library",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get("/api/monitor/feed")
+def monitor_feed(q: str = "", kind: str = "all"):
+    """Monitor feed: CVE cards + non-CVE documents (B team docs + C library)."""
+    kind = (kind or "all").strip().lower()
+    if kind not in {"all", "cve", "document", "demo", "live"}:
+        raise HTTPException(status_code=422, detail="kind 仅支持 all/cve/document/demo/live")
+
+    cve_items = []
+    if kind in {"all", "cve", "demo", "live"}:
+        records = search(q, top_k=50) if q else knowledge_records()
+        for record in records:
+            summary = _summary(record)
+            summary["kind"] = "cve"
+            title = summary.get("title") or ""
+            desc = summary.get("description") or ""
+            summary["demo"] = bool(
+                (summary.get("cve_id") or "").startswith("CVE-2099-")
+                or title.startswith("【演示】")
+                or "Demo offline" in (title + desc)
+                or "合成" in (title + desc)
+            )
+            cve_items.append(summary)
+
+    doc_items = []
+    team_meta = {"reachable": False, "total": 0}
+    if kind in {"all", "document", "demo", "live"}:
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=40)
+        lib_docs = _library_documents(q=q, limit=40)
+        # Prefer team docs; add library docs not already present by URL/title.
+        seen = set()
+        for row in team_docs + lib_docs:
+            key = (row.get("url") or "") + "|" + (row.get("title") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            doc_items.append(row)
+
+    if kind == "demo":
+        cve_items = [row for row in cve_items if row.get("demo")]
+        doc_items = [row for row in doc_items if row.get("demo")]
+    elif kind == "live":
+        cve_items = [row for row in cve_items if not row.get("demo")]
+        doc_items = [row for row in doc_items if not row.get("demo")]
+    elif kind == "cve":
+        doc_items = []
+    elif kind == "document":
+        cve_items = []
+
+    return {
+        "kind": kind,
+        "counts": {
+            "cve": len(cve_items),
+            "document": len(doc_items),
+            "total": len(cve_items) + len(doc_items),
+        },
+        "team_documents": team_meta,
+        "items": cve_items + doc_items,
+    }
+
+
 @app.get("/api/items/{cve_id}")
 def item_detail(cve_id: str):
     record = get_record(cve_id)

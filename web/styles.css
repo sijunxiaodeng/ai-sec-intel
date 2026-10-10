@@ -159,6 +159,20 @@ button.row {
   vertical-align: middle;
 }
 .row.is-demo { background: linear-gradient(90deg, #fbf6ea 0, transparent 48%); }
+.row.is-doc { background: linear-gradient(90deg, #eef5f2 0, transparent 48%); }
+.kind-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #5a8f7b;
+  color: #2f5d4c;
+  background: #e7f3ee;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.score.kind-score { color: #2f5d4c; font-size: 12px; font-weight: 600; }
 .chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .chip {
   border: 1px solid var(--line);

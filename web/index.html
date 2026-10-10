@@ -68,23 +68,25 @@
             <input id="keyword" value="llm" title="多个词用英文逗号分隔，例如 llm,vllm,langchain" />
           </label>
           <button type="submit" class="primary" id="collect-btn">开始监测</button>
-          <p class="hint">默认词 <code>llm</code>：NVD/OSV 用该词联网查；团队情报 B 也可填逗号多词（如 <code>llm,vllm,langchain,ollama</code>）。某一源失败其余继续；列表是历史+新结果合并，不会每次清空。非 CVE 资料请到「安全资料库」同步。</p>
+          <p class="hint">「开始监测」拉取 NVD/OSV/团队 <b>CVE</b>。列表同时展示 B 文档与资料库里的<strong>非 CVE</strong>情报（论文、博客、标准、政策、厂商公告等），可用下方筛选切换。</p>
         </form>
         <div class="panel">
           <div class="panel-head">
             <h2>情报列表</h2>
             <div class="chip-row" id="monitor-scope">
               <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
+              <button type="button" class="chip" data-monitor-scope="cve">仅漏洞</button>
+              <button type="button" class="chip" data-monitor-scope="document">仅资料</button>
               <button type="button" class="chip" data-monitor-scope="demo">仅演示</button>
               <button type="button" class="chip" data-monitor-scope="live">仅联网</button>
             </div>
-            <input id="filter" placeholder="按编号或产品筛选" />
+            <input id="filter" placeholder="按编号、标题或来源筛选" />
           </div>
           <p id="monitor-summary" class="hint"></p>
           <div class="split enrich-layout">
             <div id="monitor-list"></div>
             <article class="panel" id="monitor-detail">
-              <p class="empty">点左侧一条情报，在此查看摘要。演示种子会标明「演示」。完整富化仍可到「情报富化」。</p>
+              <p class="empty">点左侧一条情报查看摘要。漏洞可去「情报富化」；论文/博客/标准等资料也可在「安全资料库」打开。</p>
             </article>
           </div>
         </div>

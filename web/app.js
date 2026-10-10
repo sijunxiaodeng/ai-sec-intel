@@ -65,8 +65,10 @@ function isDemoItem(item) {
   var cve = item.cve_id || "";
   var title = item.title || "";
   var desc = item.description || "";
-  return /^CVE-2099-/.test(cve) || title.indexOf("【演示】") === 0
-    || /demo_fixture|Synthetic |合成/.test(desc + title);
+  var blob = title + " " + desc;
+  var sample = item.sample_mode || ((item.raw_data || {}).sample_mode);
+  return !!sample || /^CVE-2099-/.test(cve) || title.indexOf("【演示】") === 0
+    || /demo_fixture|Demo offline|Synthetic |【演示】|合成/.test(blob);
 }
 
 function dateText(value) {
@@ -117,26 +119,37 @@ function renderSteps(target, steps) {
 }
 
 function renderItemRow(parent, item, onPick) {
-  var row = add(parent, "button", "row");
+  var isDoc = item.kind === "document";
+  var row = add(parent, "button", "row" + (isDoc ? " is-doc" : ""));
   row.type = "button";
-  if (isDemoItem(item)) row.className += " is-demo";
-  row.addEventListener("click", function () { onPick(item.cve_id); });
+  if (isDemoItem(item) || item.demo) row.className += " is-demo";
+  row.addEventListener("click", function () { onPick(item); });
   var id = add(row, "div");
-  var titleLine = add(id, "div", "title", item.cve_id);
-  if (isDemoItem(item)) {
+  var primary = isDoc ? (item.category_label || "资料") : (item.cve_id || item.id || "");
+  var titleLine = add(id, "div", "title", primary);
+  if (isDemoItem(item) || item.demo) {
     var badge = document.createElement("span");
     badge.className = "demo-badge";
     badge.textContent = "演示";
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(badge);
   }
-  add(id, "div", "meta", (item.sources || [item.source || ""]).join("、") || "来源未写明");
-  add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
+  if (isDoc) {
+    var kindBadge = document.createElement("span");
+    kindBadge.className = "kind-badge";
+    kindBadge.textContent = "非CVE";
+    titleLine.appendChild(document.createTextNode(" "));
+    titleLine.appendChild(kindBadge);
+  }
+  add(id, "div", "meta", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明");
+  if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
+  else add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
   var text = add(row, "div");
   var headline = item.title && item.title !== item.cve_id ? item.title : (item.description || "");
-  add(text, "div", "desc", headline.slice(0, 140));
+  add(text, "div", "desc", (headline || "").slice(0, 140));
   var product = item.product ? (" · " + item.product) : "";
-  add(text, "div", "meta", dateText(item.published_at) + " · " + ((item.sources || [item.source || ""]).join("、") || "来源未写明") + product);
+  var origin = item.origin === "team_documents" ? " · 团队文档" : item.origin === "library" ? " · 资料库" : "";
+  add(text, "div", "meta", dateText(item.published_at) + " · " + ((item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明") + product + origin);
 }
 
 function setPill(ready) {
@@ -219,48 +232,84 @@ var monitorScope = "all";
 
 function loadItems(view) {
   var query = view === "monitor" ? $("filter").value.trim() : "";
-  api("/api/items" + (query ? "?q=" + encodeURIComponent(query) : "")).then(function (data) {
-    var target = view === "monitor" ? $("monitor-list") : $("enrich-list");
-    clear(target);
-    if (view === "monitor") {
+  if (view === "monitor") {
+    api("/api/monitor/feed?kind=" + encodeURIComponent(monitorScope) + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (data) {
+      var target = $("monitor-list");
+      clear(target);
       var items = data.items || [];
-      if (monitorScope === "demo") items = items.filter(isDemoItem);
-      if (monitorScope === "live") items = items.filter(function (item) { return !isDemoItem(item); });
-      data = Object.assign({}, data, {items: items});
+      var counts = data.counts || {};
       var summary = $("monitor-summary");
       if (summary) {
-        summary.textContent = "当前列表 " + items.length + " 条"
-          + (monitorScope === "demo" ? "（仅演示种子）" : monitorScope === "live" ? "（已排除演示种子）" : "（含历史入库；演示种子带「演示」标记）")
-          + "。点「开始监测」会合并 NVD/OSV/团队情报，不会清空旧记录。";
+        summary.textContent = "漏洞 CVE " + (counts.cve || 0) + " 条 · 非 CVE 资料 " + (counts.document || 0) + " 份"
+          + "（团队文档 " + (((data.team_documents || {}).total) || 0) + "）"
+          + "。筛选不会清空数据；「开始监测」只新增/合并漏洞卡片。";
       }
-    }
+      if (!items.length) {
+        add(target, "p", "empty", "没有匹配的情报。可切换「仅资料」或先同步安全资料库。");
+        return;
+      }
+      items.forEach(function (item) {
+        renderItemRow(target, item, function (row) { openMonitorDetail(row); });
+      });
+    }).catch(showError);
+    return;
+  }
+  api("/api/items" + (query ? "?q=" + encodeURIComponent(query) : "")).then(function (data) {
+    var target = $("enrich-list");
+    clear(target);
     if (!data.items.length) {
       add(target, "p", "empty", "没有匹配的情报。");
       return;
     }
     data.items.forEach(function (item) {
-      renderItemRow(target, item, function (id) {
-        if (view === "monitor") openMonitorDetail(id);
-        else openDetail(id);
-      });
+      renderItemRow(target, item, function (row) { openDetail(row.cve_id || row.id); });
     });
   }).catch(showError);
 }
 
-function openMonitorDetail(cveId) {
-  api("/api/items/" + encodeURIComponent(cveId)).then(function (item) {
+function openMonitorDetail(item) {
+  if (!item) return;
+  if (item.kind === "document") {
     var panel = $("monitor-detail");
     clear(panel);
-    add(panel, "h2", "", item.cve_id + (isDemoItem(item) ? "（演示）" : ""));
+    add(panel, "h2", "", (item.category_label || "资料") + (item.demo ? "（演示）" : ""));
     add(panel, "p", "desc", item.title || "");
-    add(panel, "p", "desc", item.description || "");
+    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见安全资料库）");
     var fields = add(panel, "div", "fields");
     [
-      ["来源", (item.sources || []).join("、") || "未写明"],
-      ["产品", missingText(item.product, "未写明")],
-      ["受影响版本", (item.affected || []).length ? (item.affected || []).join("、") : "未写明"],
-      ["CVSS", scoreText(item.cvss) + (item.severity ? " · " + item.severity : "")],
-      ["记录类型", isDemoItem(item) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
+      ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
+      ["来源", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "未写明"],
+      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "安全资料库"],
+      ["记录类型", item.demo ? "演示合成（非比赛监测证据）" : "联网/入库资料"]
+    ].forEach(function (pair) {
+      var field = add(fields, "div", "field");
+      add(field, "span", "", pair[0]);
+      add(field, "b", "", pair[1]);
+    });
+    if (item.url) {
+      var link = add(panel, "a", "meta", item.url);
+      link.href = item.url; link.target = "_blank"; link.rel = "noopener";
+    }
+    var goLib = add(panel, "button", "ghost", "打开安全资料库");
+    goLib.type = "button";
+    goLib.addEventListener("click", function () { setView("library"); });
+    return;
+  }
+  var cveId = item.cve_id || item.id;
+  api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+    var panel = $("monitor-detail");
+    clear(panel);
+    add(panel, "h2", "", detail.cve_id + (isDemoItem(detail) || detail.demo ? "（演示）" : ""));
+    add(panel, "p", "desc", detail.title || "");
+    add(panel, "p", "desc", detail.description || "");
+    var fields = add(panel, "div", "fields");
+    [
+      ["类型", "漏洞 CVE"],
+      ["来源", (detail.sources || []).join("、") || "未写明"],
+      ["产品", missingText(detail.product, "未写明")],
+      ["受影响版本", (detail.affected || []).length ? (detail.affected || []).join("、") : "未写明"],
+      ["CVSS", scoreText(detail.cvss) + (detail.severity ? " · " + detail.severity : "")],
+      ["记录类型", isDemoItem(detail) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
