@@ -25,7 +25,8 @@ from pathlib import Path
 ARTIFACT_PREFIX = "intelligence-state-"
 BOOTSTRAP_ASSET = "intelligence-bootstrap-state.zip"
 COLLECTION_STEP = "Collect public intelligence"
-STATE_FILES = {"intelligence.db", "monitoring_baseline.json", "monitoring_status.json", "classification_status.json"}
+STATE_FILES = {"intelligence.db", "monitoring_baseline.json", "monitoring_status.json", "classification_status.json",
+               "deepseek_status.json", "actions_report.json"}
 REQUIRED_FILES = {"intelligence.db", "monitoring_baseline.json"}
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 
