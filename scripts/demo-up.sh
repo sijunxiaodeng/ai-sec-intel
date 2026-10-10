@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-click unified demo: B :8765 + main :8023
+# One-click unified demo: public entry ONLY http://127.0.0.1:8023
+# B still runs on localhost :8765 (proxied under 8023); users never open 8765.
 # Prefer Docker Compose; fall back to local fixed-port processes if daemon unavailable.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,25 +10,30 @@ source "$SCRIPT_DIR/demo-lib.sh"
 MODE="${DEMO_MODE:-auto}"
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
 export AUTO_INGEST_ON_COLLECT
-export TEAM_INTEL_BASE_URL="${TEAM_INTEL_BASE_URL:-http://127.0.0.1:${B_PORT}}"
+# Server-side A→B: direct upstream (not via 8023 proxy).
+export TEAM_INTEL_UPSTREAM="${TEAM_INTEL_UPSTREAM:-http://127.0.0.1:${B_PORT}}"
+export TEAM_INTEL_BASE_URL="${TEAM_INTEL_BASE_URL:-$TEAM_INTEL_UPSTREAM}"
+export TEAM_INTEL_PROXY="${TEAM_INTEL_PROXY:-1}"
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 
 start_compose() {
   log "starting via docker compose (project=$COMPOSE_PROJECT)"
   docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" up -d --build
-  wait_http "$B_URL/api/intelligence/health" "B API" 90
+  wait_http "$B_URL/api/intelligence/health" "B upstream" 90
   wait_http "$MAIN_URL/api/overview" "main app" 90
-  # Verify B has a database
+  wait_http "$MAIN_URL/api/intelligence/health" "B via 8023 proxy" 30
+  # Verify B has a database (through the single public port)
   local health
-  health="$(curl -sf "$B_URL/api/intelligence/health")"
+  health="$(curl -sf "$MAIN_URL/api/intelligence/health")"
   echo "$health" | grep -q '"database_available": *true' \
-    || die "B health reports database_available != true: $health"
+    || die "B health (via 8023) reports database_available != true: $health"
   printf '%s\n' compose >"$DEMO_DIR/mode"
-  log "URLs:"
-  log "  Main UI / API: $MAIN_URL"
-  log "  B health:      $B_URL/api/intelligence/health"
-  log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "URLs (single entry):"
+  log "  Open only:     $MAIN_URL"
+  log "  B health:      $MAIN_URL/api/intelligence/health"
+  log "  B team:        $MAIN_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "  (B upstream localhost:$B_PORT — do not open in browser)"
   log "Next: multi-source collect + library team-sync"
   "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
   log "Triggering one automatic monitor cycle (no keyword required)…"
@@ -62,11 +68,13 @@ start_local() {
   if [[ -f "$DEMO_DIR/main.pid" ]] && kill -0 "$(cat "$DEMO_DIR/main.pid")" 2>/dev/null; then
     log "main already running pid=$(cat "$DEMO_DIR/main.pid")"
   else
-    log "starting main on $MAIN_URL (AUTO_INGEST_ON_COLLECT=$AUTO_INGEST_ON_COLLECT)"
+    log "starting main on $MAIN_URL (proxy B ← $TEAM_INTEL_UPSTREAM)"
     (
       cd "$ROOT"
       export APP_HOST=127.0.0.1 APP_PORT="$MAIN_PORT"
-      export TEAM_INTEL_BASE_URL="http://127.0.0.1:${B_PORT}"
+      export TEAM_INTEL_UPSTREAM="http://127.0.0.1:${B_PORT}"
+      export TEAM_INTEL_BASE_URL="$TEAM_INTEL_UPSTREAM"
+      export TEAM_INTEL_PROXY=1
       export AUTO_INGEST_ON_COLLECT
       # Prepare historical sample once (best-effort)
       "$ROOT/.venv/bin/python" -m rag.prepare >/dev/null 2>&1 || true
@@ -75,17 +83,19 @@ start_local() {
       echo $! >"$DEMO_DIR/main.pid"
     )
   fi
-  wait_http "$B_URL/api/intelligence/health" "B API" 60
+  wait_http "$B_URL/api/intelligence/health" "B upstream" 60
   wait_http "$MAIN_URL/api/overview" "main app" 60
+  wait_http "$MAIN_URL/api/intelligence/health" "B via 8023 proxy" 30
   local health
-  health="$(curl -sf "$B_URL/api/intelligence/health")"
+  health="$(curl -sf "$MAIN_URL/api/intelligence/health")"
   echo "$health" | grep -q '"database_available": *true' \
-    || die "B health reports database_available != true: $health"
+    || die "B health (via 8023) reports database_available != true: $health"
   printf '%s\n' local >"$DEMO_DIR/mode"
-  log "URLs:"
-  log "  Main UI / API: $MAIN_URL"
-  log "  B health:      $B_URL/api/intelligence/health"
-  log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "URLs (single entry):"
+  log "  Open only:     $MAIN_URL"
+  log "  B health:      $MAIN_URL/api/intelligence/health"
+  log "  B team:        $MAIN_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
+  log "  (B upstream localhost:$B_PORT — do not open in browser)"
   log "Next: multi-source collect + library team-sync"
   "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
   log "Triggering one automatic monitor cycle (no keyword required)…"

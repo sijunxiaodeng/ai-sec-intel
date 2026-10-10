@@ -239,9 +239,9 @@ function setTeamHealth(team) {
   if (!el) return;
   if (team && team.reachable === false) {
     el.hidden = false;
-    el.textContent = "团队情报服务（:8765）暂不可达"
+    el.textContent = "团队情报暂不可达（8023 反代后端）"
       + (team.error ? "：" + team.error : "")
-      + "。自动监测仍会采集 NVD/OSV 并刷新本地资料流；B 源已跳过。";
+      + "。请用 ./scripts/demo-up.sh 起演示；自动监测仍会采集 NVD/OSV；B 源已跳过。";
   } else {
     el.hidden = true;
     el.textContent = "";
@@ -504,7 +504,7 @@ function loadItems(view) {
             loadItems("monitor");
           });
         } else {
-          empty.textContent = "情报流还是空的。请点「立即刷新一轮」；若仍空，看横幅诊断（NVD/OSV/B:8765/C资料同步）。B 宕机时 NVD/OSV 与本地资料库仍应有内容；全空多半是未 seed、外网不可达，或范围芯片不是「全部」。一键环境：./scripts/demo-up.sh";
+          empty.textContent = "情报流还是空的。请点「立即刷新一轮」；若仍空，看横幅诊断（NVD/OSV/B反代/C资料同步）。B 后端宕机时 NVD/OSV 与本地资料库仍应有内容；全空多半是未 seed、外网不可达，或范围芯片不是「全部」。一键：./scripts/demo-up.sh（只开 8023）";
         }
         return data;
       }
@@ -976,7 +976,7 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("B(:8765)", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("B(经8023)", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
   srcLine("C资料同步", diag.c_library_sync);
 
   if (diag.written === 0 || (runData && runData.count === 0)) {
@@ -1048,7 +1048,7 @@ function runMonitorRefresh(options) {
     });
   }).catch(function (error) {
     showError(error);
-    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + "（不会静默；可重试或查看 :8765 是否已启动）");
+    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + "（不会静默；可重试或 ./scripts/demo-up.sh）");
     throw error;
   }).then(function (data) {
     if (button) {

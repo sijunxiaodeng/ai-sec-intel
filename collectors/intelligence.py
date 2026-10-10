@@ -14,7 +14,18 @@ DEFAULT_TEAM_BASE_URL = "http://127.0.0.1:8765"
 
 
 def team_base_url(override=""):
-    return (override or os.environ.get("TEAM_INTEL_BASE_URL") or DEFAULT_TEAM_BASE_URL).rstrip("/")
+    """Server-side B base URL.
+
+    Prefer TEAM_INTEL_UPSTREAM (localhost :8765) so collectors never HTTP-loop
+    through the :8023 reverse proxy (single-worker deadlock). TEAM_INTEL_BASE_URL
+    remains a legacy alias when UPSTREAM is unset.
+    """
+    return (
+        override
+        or os.environ.get("TEAM_INTEL_UPSTREAM")
+        or os.environ.get("TEAM_INTEL_BASE_URL")
+        or DEFAULT_TEAM_BASE_URL
+    ).rstrip("/")
 
 
 class IntelligenceCollector:

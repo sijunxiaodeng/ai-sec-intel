@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -236,7 +236,16 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
 
     b_reachable = bool((team or {}).get("reachable"))
     b_status = "接通" if b_reachable else "不可达"
-    b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_URL"
+    try:
+        from api.b_proxy import public_b_base, team_intel_upstream, proxy_enabled
+        b_public = public_b_base()
+        b_up = team_intel_upstream()
+        if proxy_enabled():
+            b_detail = "经 8023 反代 · %s/api/intelligence/* → %s" % (b_public, b_up)
+        else:
+            b_detail = (team or {}).get("base_url") or b_up
+    except Exception:
+        b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_UPSTREAM"
     if b_reachable:
         b_detail += f" · AI CVE {(team or {}).get('team_total') if (team or {}).get('team_total') is not None else '—'} · 文档 {(team or {}).get('document_total') if (team or {}).get('document_total') is not None else '—'}"
     elif (team or {}).get("error"):
@@ -270,7 +279,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
                 "owner": "A 编排 · monitor 角色",
                 "peers": [
                     {"party": "A", "role": "调度 / feed / status", "status": "接通"},
-                    {"party": "B", "role": "团队情报 :8765", "status": b_status, "detail": b_detail},
+                    {"party": "B", "role": "团队情报（经 8023）", "status": b_status, "detail": b_detail},
                     {"party": "C", "role": "不经监测入口", "status": "跳过"},
                 ],
             },
@@ -359,8 +368,8 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     ]
 
     integration = [
-        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · :8023"},
-        {"party": "B", "name": "团队情报服务", "status": b_status, "detail": b_detail},
+        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · 对外只开 :8023"},
+        {"party": "B", "name": "团队情报（反代）", "status": b_status, "detail": b_detail},
         {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
         {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
     ]
@@ -772,24 +781,34 @@ AUTO_MONITOR_KEYWORDS = (
 
 
 def _team_reachable_probe():
-    """Fast probe so UI can warn when B :8765 is down without freezing."""
+    """Fast probe so UI can warn when B upstream is down without freezing."""
     import json
     import urllib.error
     import urllib.request
 
     from collectors.intelligence import team_base_url
+    from api.b_proxy import public_b_base, proxy_enabled
 
     base = team_base_url()
+    public = public_b_base() if proxy_enabled() else base
     try:
         with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
             payload = json.load(resp)
         return {
             "reachable": True,
             "base_url": base,
+            "public_base": public,
+            "via_proxy": proxy_enabled(),
             "database_available": bool(payload.get("database_available")),
         }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        return {"reachable": False, "base_url": base, "error": str(exc)[:160]}
+        return {
+            "reachable": False,
+            "base_url": base,
+            "public_base": public,
+            "via_proxy": proxy_enabled(),
+            "error": str(exc)[:160],
+        }
 
 
 @app.get("/api/monitor/status")
@@ -817,7 +836,7 @@ def monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        warnings.append("团队情报服务（:8765）暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+        warnings.append("团队情报服务暂不可达（8023 反代后端），已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
     try:
         result = run_collect(keyword)
     except Exception as exc:
@@ -1102,6 +1121,33 @@ def test_settings():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(WEB, "index.html"))
+
+
+# --- B reverse proxy (single public port :8023) ---
+# A keeps POST /api/documents for CVE-linked ingest; only GET document routes proxy to B.
+from api.b_proxy import forward_async, proxy_enabled  # noqa: E402
+
+
+if proxy_enabled():
+    @app.api_route("/api/intelligence", methods=["GET", "HEAD", "OPTIONS"])
+    async def _proxy_intelligence_root(request: Request):
+        return await forward_async(request, "/api/intelligence")
+
+    @app.api_route("/api/intelligence/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+    async def _proxy_intelligence(path: str, request: Request):
+        return await forward_async(request, "/api/intelligence/" + path)
+
+    @app.get("/api/documents/stats")
+    async def _proxy_documents_stats(request: Request):
+        return await forward_async(request, "/api/documents/stats")
+
+    @app.get("/api/documents/{document_id}")
+    async def _proxy_documents_one(document_id: str, request: Request):
+        return await forward_async(request, "/api/documents/" + document_id)
+
+    @app.get("/api/documents")
+    async def _proxy_documents_list(request: Request):
+        return await forward_async(request, "/api/documents")
 
 
 app.mount("/assets", StaticFiles(directory=WEB), name="assets")

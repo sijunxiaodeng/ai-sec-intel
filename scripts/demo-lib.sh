@@ -10,6 +10,10 @@ B_PORT="${B_PORT:-8765}"
 MAIN_PORT="${MAIN_PORT:-8023}"
 B_URL="http://127.0.0.1:${B_PORT}"
 MAIN_URL="http://127.0.0.1:${MAIN_PORT}"
+# Public single entry: all demo/smoke client traffic uses MAIN_URL (B proxied under 8023).
+# TEAM_INTEL_UPSTREAM is the localhost-only B process (avoid A↔8023 self-proxy deadlock).
+export TEAM_INTEL_UPSTREAM="${TEAM_INTEL_UPSTREAM:-http://127.0.0.1:${B_PORT}}"
+export TEAM_INTEL_PROXY="${TEAM_INTEL_PROXY:-1}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-ai-sec-intel-demo}"
 
 # Broader AI-security keyword set for demos (comma-separated for multi-pass collect).

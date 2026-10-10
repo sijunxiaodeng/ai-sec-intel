@@ -25,10 +25,11 @@ check() {
   fi
 }
 
-log "smoke against B=$B_URL main=$MAIN_URL keyword=$KEYWORD"
+log "smoke against single entry main=$MAIN_URL keyword=$KEYWORD (B proxied; upstream=$TEAM_INTEL_UPSTREAM)"
 
-curl -sf --max-time 5 "$B_URL/api/intelligence/health" -o "$OUT/b-health.json"
-check "b-health" test -s "$OUT/b-health.json"
+# Full chain via :8023 only — do not require clients to open :8765
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/health" -o "$OUT/b-health.json"
+check "b-health-via-8023" test -s "$OUT/b-health.json"
 python3 - <<PY
 import json,sys
 h=json.load(open("$OUT/b-health.json"))
@@ -37,7 +38,7 @@ PY
 check "b-database_available" true
 
 # Multi-source seed / live: expect more than one AI CVE when fixtures present
-curl -sf --max-time 5 "$B_URL/api/intelligence/team?q=&ai_only=true&limit=20" -o "$OUT/b-team-all.json"
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/team?q=&ai_only=true&limit=20" -o "$OUT/b-team-all.json"
 python3 - <<PY
 import json,sys
 t=json.load(open("$OUT/b-team-all.json"))
@@ -57,7 +58,7 @@ check "b-team-multi-cve" true
 # Broader keyword hits (at least one of the AI set returns items)
 python3 - <<PY
 import json,urllib.parse,urllib.request,sys
-base="$B_URL"
+base="$MAIN_URL"
 keys=[k.strip() for k in "$AI_SECURITY_KEYWORDS".split(",") if k.strip()]
 hits=[]
 for kw in keys:
@@ -74,7 +75,7 @@ sys.exit(0 if len(hits)>=3 else 1)
 PY
 check "b-team-keyword-breadth" true
 
-curl -sf --max-time 5 "$B_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" || echo '{}' >"$OUT/b-documents-stats.json"
+curl -sf --max-time 5 "$MAIN_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" || echo '{}' >"$OUT/b-documents-stats.json"
 python3 - <<PY
 import json,sys
 s=json.load(open("$OUT/b-documents-stats.json"))
@@ -84,7 +85,7 @@ sys.exit(0 if total>=1 else 1)
 PY
 check "b-documents-present" true
 
-curl -sf --max-time 5 "$B_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" || echo '{}' >"$OUT/b-coverage.json"
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" || echo '{}' >"$OUT/b-coverage.json"
 
 curl -sf --max-time 5 "$MAIN_URL/api/overview" -o "$OUT/overview.json"
 check "main-overview" test -s "$OUT/overview.json"
@@ -268,7 +269,7 @@ check "ask-demo-cve" true
 # Secondary demo CVEs from multi-source seed (best-effort presence in B)
 python3 - <<PY
 import json,urllib.request,sys
-base="$B_URL"
+base="$MAIN_URL"
 need=["CVE-2099-90002","CVE-2099-90003"]
 ok=0
 for cve in need:
