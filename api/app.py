@@ -338,7 +338,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
                 "owner": "A 编排 · monitor 角色",
                 "peers": [
                     {"party": "A", "role": "调度 / feed / status", "status": "接通"},
-                    {"party": "B", "role": "团队情报（同进程）", "status": b_status, "detail": b_detail},
+                    {"party": "B", "role": "多源情报（同进程）", "status": b_status, "detail": b_detail},
                     {"party": "C", "role": "不经监测入口", "status": "跳过"},
                 ],
             },
@@ -385,7 +385,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
                 "owner": "A 壳 · C 资料检索",
                 "peers": [
                     {"party": "A", "role": "资料库页 / 同步触发", "status": "接通"},
-                    {"party": "B", "role": "团队文档同步", "status": b_status if b_reachable else "不可达", "detail": "可选 team-sync"},
+                    {"party": "B", "role": "多源文档同步", "status": b_status if b_reachable else "不可达", "detail": "可选 team-sync"},
                     {"party": "C", "role": "library / chunks / RAG 底座", "status": c_local},
                 ],
             },
@@ -428,7 +428,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
 
     integration = [
         {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · 对外只开 :8023"},
-        {"party": "B", "name": "团队情报（同进程嵌入）", "status": b_status, "detail": b_detail},
+        {"party": "B", "name": "多源情报（同进程嵌入）", "status": b_status, "detail": b_detail},
         {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
         {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
     ]
@@ -920,12 +920,12 @@ def monitor_run(body: MonitorRunBody):
     if not team.get("reachable"):
         mode = (team or {}).get("mode") or "embed"
         if mode == "embed":
-            warnings.append("团队情报库暂不可用（同进程嵌入），已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+            warnings.append("多源情报库暂不可用（同进程嵌入），已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
         else:
-            warnings.append("团队情报 sidecar 暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+            warnings.append("多源情报 sidecar 暂不可达，已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
-            "B 多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
+            "多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
             % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
         )
     try:
@@ -941,7 +941,7 @@ def monitor_run(body: MonitorRunBody):
     if body.sync_library:
         if not team.get("reachable"):
             library = {"status": "skipped", "error": "team unreachable"}
-            warnings.append("已跳过团队资料同步。")
+            warnings.append("已跳过多源资料同步。")
         else:
             try:
                 from rag.library import sync_team
@@ -950,12 +950,15 @@ def monitor_run(body: MonitorRunBody):
                 library = {"status": "busy", "error": str(exc)}
             except Exception as exc:
                 library = {"status": "error", "error": type(exc).__name__}
-                warnings.append("团队资料同步失败，CVE/公开源结果仍已刷新。")
+                warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
     steps = result.get("steps") or []
-    team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
-                      for s in steps)
-    if team_failed and "团队情报" not in " ".join(warnings):
-        warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    team_failed = any(
+        ("多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
+        and "失败" in (s.get("action") or "")
+        for s in steps
+    )
+    if team_failed and "多源情报" not in " ".join(warnings) and "团队情报" not in " ".join(warnings):
+        warnings.append("多源情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
 
     def _step_status(name):
         for step in steps:
@@ -971,7 +974,9 @@ def monitor_run(body: MonitorRunBody):
 
     nvd = _step_status("NVD")
     osv = _step_status("OSV")
-    b_step = _step_status("团队情报")
+    b_step = _step_status("多源情报")
+    if b_step["status"] == "未跑":
+        b_step = _step_status("团队情报")
     if not team.get("reachable"):
         b_src = {
             "status": "不可达",
@@ -991,7 +996,7 @@ def monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
         c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步团队/公开资料到资料库"}
+        c_sync = {"status": "成功", "detail": "已尽力同步多源/公开资料到资料库"}
 
     if b_cycle is None:
         b_mon = {"status": "未请求", "detail": "B_MONITOR_ON_REFRESH=0 或非 embed"}
@@ -1029,7 +1034,7 @@ def monitor_run(body: MonitorRunBody):
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮含同进程 B 多源刷新（可 partial）+ NVD/OSV + 团队库读取；列表见 /api/monitor/feed。",
+        "notice": "本轮含同进程多源刷新（可 partial）+ NVD/OSV + 多源库读取；列表见 /api/monitor/feed。",
     }
 
 

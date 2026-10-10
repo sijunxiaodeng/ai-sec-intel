@@ -1,8 +1,8 @@
-"""A 监测智能体：NVD + OSV + 团队情报（B）。
+"""监测智能体：NVD + OSV + 多源情报（同进程嵌入）。
 
 默认主关键词为 llm（不再只盯 ollama）。
 逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-团队情报对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
+多源情报对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
 """
 from collectors.intelligence import IntelligenceCollector, team_base_url
 from collectors.nvd import NVDCollector
@@ -80,7 +80,7 @@ def run(keyword="llm"):
     team_timeout = 5
     for kw in team_keys:
         items, step = _safe(
-            "团队情报服务(%s)" % kw,
+            "多源情报(%s)" % kw,
             lambda k=kw: IntelligenceCollector(
                 keyword=k, base_url=team_base_url(), timeout=team_timeout, max_pages=5
             ).collect(),
@@ -101,7 +101,7 @@ def run(keyword="llm"):
     if team_err and not team_items:
         team_step = {
             "role": "监测",
-            "action": "调用 团队情报服务 失败",
+            "action": "调用 多源情报 失败",
             "detail": "已跳过，其他来源继续。%s" % team_err,
         }
     else:
@@ -112,7 +112,7 @@ def run(keyword="llm"):
             detail += "；部分关键词失败已跳过"
         team_step = {
             "role": "监测",
-            "action": "调用 团队情报服务",
+            "action": "调用 多源情报",
             "detail": detail,
         }
 

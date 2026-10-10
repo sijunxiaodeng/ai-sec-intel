@@ -11,7 +11,7 @@ from rag.library import LIBRARY_DB, detail, search
 
 KINDS = {"voluntary_risk_framework": "自愿风险管理框架", "recommended_national_standard": "推荐性国家标准（仅目录）",
          "published_policy_text": "政策发布正文"}
-SCOPES = {"team_summary": "队友接口的题名/描述字段，非原始全文", "abstract": "仅摘要", "full_text_html": "HTML 可提取全文", "full_text_pdf": "PDF 各页文字",
+SCOPES = {"team_summary": "多源接口的题名/描述字段，非原始全文", "abstract": "仅摘要", "full_text_html": "HTML 可提取全文", "full_text_pdf": "PDF 各页文字",
           "policy_articles": "政策条文", "catalog_only": "仅目录", "article_body": "文章正文", "advisory_fields": "公告字段"}
 
 

@@ -118,7 +118,7 @@ function sourceLabel(raw) {
     osv: "OSV",
     github: "GitHub Advisory",
     kev: "CISA KEV",
-    team: "团队情报",
+    team: "多源情报",
     library: "资料库",
     paper: "论文",
     community: "安全社区",
@@ -143,8 +143,8 @@ function itemSourceLabels(item) {
     var label = sourceLabel(r);
     if (!seen[label]) { seen[label] = true; labels.push(label); }
   });
-  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["团队情报"]) {
-    labels.unshift("团队情报");
+  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["多源情报"]) {
+    labels.unshift("多源情报");
   }
   return labels.length ? labels : ["来源未写明"];
 }
@@ -295,7 +295,7 @@ function renderItemRow(parent, item, onPick) {
     else if (label === "OSV") fam = "osv";
     else if (label.indexOf("GitHub") === 0) fam = "gh";
     else if (label.indexOf("KEV") >= 0) fam = "kev";
-    else if (label.indexOf("团队") >= 0) fam = "team";
+    else if (label.indexOf("多源") >= 0) fam = "team";
     else if (label.indexOf("资料") >= 0) fam = "lib";
     else if (label.indexOf("论文") >= 0) fam = "paper";
     else if (label.indexOf("社区") >= 0) fam = "comm";
@@ -344,7 +344,7 @@ function setTeamHealth(team) {
   if (!el) return;
   if (team && team.reachable === false) {
     el.hidden = false;
-    el.textContent = "团队情报库暂不可用"
+    el.textContent = "多源情报库暂不可用"
       + (team.error ? "：" + team.error : "")
       + "。仍会采集 NVD/OSV；请确认已运行 ./scripts/demo-up.sh。";
   } else {
@@ -398,7 +398,7 @@ function loadOverview() {
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "团队情报 CVE"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源情报 CVE"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
@@ -469,12 +469,12 @@ function renderMonitorFeed(data) {
   var summary = $("monitor-summary");
   var teamTotal = (((data.team_documents || {}).total) || 0);
   var teamMeta = data.team_documents || {};
-  if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "团队文档探测失败" });
+  if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "多源资料探测失败" });
   if (summary) {
     var fresh = data.freshness || {};
     summary.textContent = "共 CVE " + (counts.cve || 0)
       + " · 资料 " + (counts.document || 0)
-      + (teamTotal ? "（含团队文档 " + teamTotal + "）" : "")
+      + (teamTotal ? "（含多源资料 " + teamTotal + "）" : "")
       + " · 近7天 " + (fresh.days_7 || 0)
       + " · 近30天 " + (fresh.days_30 || 0)
       + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
@@ -543,7 +543,7 @@ function openMonitorDetail(item) {
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
       ["来源", itemSourceLabels(item).join("、")],
-      ["出处", item.origin === "team_documents" ? "团队情报" : "资料库"],
+      ["出处", item.origin === "team_documents" ? "多源情报" : "资料库"],
       ["记录类型", item.demo ? "演示合成" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
@@ -975,7 +975,7 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("团队情报", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("多源情报", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
   srcLine("多源采集", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
@@ -983,10 +983,10 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
     bits.push("本轮 CVE 入库 0");
   }
   if (team.reachable === false) {
-    bits.push("团队情报不可用时仍应有 NVD/OSV 与本地资料");
+    bits.push("多源情报不可用时仍应有 NVD/OSV 与本地资料");
   }
   if (teamDocs.reachable === false) {
-    bits.push("团队文档探测失败");
+    bits.push("多源资料探测失败");
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
@@ -1016,7 +1016,7 @@ function runMonitorRefresh(options) {
   clearError();
   var busyMsg = keyword
     ? "正在按「" + keyword + "」刷新监测…"
-    : "正在刷新一轮监测（含公开源与团队情报，可能需要数十秒）…";
+    : "正在刷新一轮监测（含公开源与多源情报库，可能需要数十秒）…";
   setMonitorStatus(busyMsg);
   showToast(busyMsg, "busy");
   return api("/api/monitor/run", {
@@ -1297,7 +1297,7 @@ $("test-llm").addEventListener("click", function () {
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
-var libraryScopes = {team_summary: "队友接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryScopes = {team_summary: "多源接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
 
@@ -1441,10 +1441,20 @@ function loadLibrary() {
       add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : source.status === "partial" ? "部分资料同步失败" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
       if (typeof source.remaining === "number" && source.remaining) add(sources, "p", "hint", "本轮只处理最近更新的 " + source.discovered + " 份，还有 " + source.remaining + " 份不在本轮窗口内。");
     });
-    (data.overview.failed_documents || []).forEach(function (row) {
+    var failedRows = data.overview.failed_documents || [];
+    var moduleShown = false;
+    failedRows.forEach(function (row) {
+      var err = row.error || "";
+      var isModule = row.collapsed || /collectors\.team_documents|No module named/.test(err) || err.indexOf("多源资料模块暂不可用") >= 0;
+      if (isModule) {
+        if (moduleShown) return;
+        moduleShown = true;
+        add(sources, "p", "hint", "多源资料同步暂不可用，请稍后重试；已保留上次成功入库的资料。");
+        return;
+      }
       var block = add(sources, "div", "meta");
-      add(block, "p", "", "资料抓取失败" + (row.retained_previous ? "，保留上次成功证据" : "，尚未入库") + "：" + row.error);
-      libraryLink(block, row.url, "查看失败来源");
+      add(block, "p", "", "资料抓取失败" + (row.retained_previous ? "，保留上次成功证据" : "，尚未入库") + "：" + err);
+      if (row.url) libraryLink(block, row.url, "查看失败来源");
     });
     var target = $("library-list"); clear(target);
     if (!data.items.length) add(target, "p", "empty", "此类型尚未收录资料。");
@@ -1456,10 +1466,10 @@ function loadLibrary() {
         api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
       });
       add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-      var discoveryLabels = {team_api: "队友接口存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+      var discoveryLabels = {team_api: "多源情报存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
       add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
       if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
-      if (doc.team_document_id) add(block, "p", "meta", "队友记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
+      if (doc.team_document_id) add(block, "p", "meta", "多源记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
       if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
       if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
       var selection = add(block, "label", "library-selection");
@@ -1557,21 +1567,21 @@ $("library-sync").addEventListener("click", function () {
 
 $("library-team-sync").addEventListener("click", function () {
   var button = $("library-team-sync");
-  var idle = "同步团队资料";
+  var idle = "同步多源资料";
   setBusyButton(button, true, "正在同步…", idle);
   clearError();
-  showToast("正在同步团队资料…", "busy");
+  showToast("正在同步多源资料…", "busy");
   api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
     var msg = data.status === "error"
-      ? "团队资料暂不可用，已有资料仍可使用"
-      : ("团队资料同步完成：" + data.ok + "/" + data.attempted + " 份");
+      ? "多源资料暂不可用，已有资料仍可使用"
+      : ("多源资料同步完成：" + data.ok + "/" + data.attempted + " 份");
     showToast(msg, data.status === "error" ? "error" : "ok");
     librarySelectedDocs = []; clear($("library-evidence")); clear($("library-relations"));
-    $("library-answer").textContent = data.status === "error" ? "团队资料暂不可用，已有资料可继续使用。" : "团队资料已同步，请重新选择资料并提问。";
+    $("library-answer").textContent = data.status === "error" ? "多源资料暂不可用，已有资料可继续使用。" : "多源资料已同步，请重新选择资料并提问。";
     return loadLibrary();
   }).catch(function (error) {
     showError(error);
-    showToast("团队资料同步失败：" + (error.message || "请求失败"), "error");
+    showToast("多源资料同步失败：" + (error.message || "请求失败"), "error");
   }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
