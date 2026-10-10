@@ -713,6 +713,46 @@ button[aria-busy="true"] { pointer-events: none; }
 .step .role { color: var(--signal); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .flow { display: none; }
 
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.pager-info {
+  flex: 1 1 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.pager-btn {
+  padding: 4px 10px !important;
+  font-size: 12px !important;
+}
+.list-group {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  margin-bottom: 10px;
+  padding: 0 12px 10px;
+}
+.list-group-sum {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 0;
+  list-style: none;
+}
+.list-group-sum::-webkit-details-marker { display: none; }
+.list-group-sum::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+.list-group[open] > .list-group-sum::before { content: "▾ "; }
+.list-group-body { padding-bottom: 4px; }
+
 @media (max-width: 900px) {
   .shell { flex-direction: column; }
   .rail { width: 100%; }

@@ -57,6 +57,9 @@ function api(path, options) {
       if (!response.ok) {
         var detail = data && data.detail ? data.detail : ("请求失败 HTTP " + response.status);
         if (Array.isArray(detail)) detail = "字段校验未通过：" + detail.slice(0, 3).map(function (row) { return (row.loc || []).slice(1).join(".") + "：" + row.msg; }).join("；");
+        if (typeof detail === "string" && /^Internal Server Error$/i.test(detail.trim())) {
+          detail = "服务端错误（HTTP " + response.status + "）。打开情报详情时若反复失败，请安装 lxml_html_clean 并重启服务。";
+        }
         throw new Error(typeof detail === "string" ? detail : "请求失败");
       }
       return data;
@@ -67,6 +70,55 @@ function api(path, options) {
     }
     throw error;
   });
+}
+
+var LIST_PAGE_SIZE = 20;
+var OVERVIEW_PAGE_SIZE = 8;
+var listPages = { monitor: 1, enrich: 1, library: 1, recent: 1, steps: 1 };
+
+function pageSlice(items, key, pageSize) {
+  var total = (items || []).length;
+  var size = pageSize || LIST_PAGE_SIZE;
+  var pages = Math.max(1, Math.ceil(total / size) || 1);
+  var page = listPages[key] || 1;
+  if (page > pages) page = pages;
+  if (page < 1) page = 1;
+  listPages[key] = page;
+  var start = (page - 1) * size;
+  return {
+    page: page,
+    pages: pages,
+    total: total,
+    size: size,
+    items: (items || []).slice(start, start + size),
+  };
+}
+
+function renderPager(parent, key, meta, onChange) {
+  if (!parent || !meta || meta.total <= meta.size) return;
+  var bar = add(parent, "div", "pager");
+  bar.setAttribute("role", "navigation");
+  bar.setAttribute("aria-label", "分页");
+  var info = add(bar, "span", "pager-info", "第 " + meta.page + "/" + meta.pages + " 页 · 共 " + meta.total + " 条");
+  var prev = add(bar, "button", "ghost pager-btn", "上一页");
+  prev.type = "button";
+  prev.disabled = meta.page <= 1;
+  var next = add(bar, "button", "ghost pager-btn", "下一页");
+  next.type = "button";
+  next.disabled = meta.page >= meta.pages;
+  prev.addEventListener("click", function () {
+    if (listPages[key] > 1) {
+      listPages[key] -= 1;
+      onChange();
+    }
+  });
+  next.addEventListener("click", function () {
+    if (listPages[key] < meta.pages) {
+      listPages[key] += 1;
+      onChange();
+    }
+  });
+  return info;
 }
 
 function showError(error) {
@@ -489,10 +541,16 @@ function loadOverview() {
     if (!data.recent.length) {
       add(recent, "p", "empty", "情报库还是空的。请到「情报监测」点立即刷新。");
     }
-    data.recent.forEach(function (item) {
-      renderItemRow(recent, item, function (id) { openDetail(id); });
+    var recentMeta = pageSlice(data.recent || [], "recent", OVERVIEW_PAGE_SIZE);
+    recentMeta.items.forEach(function (item) {
+      renderItemRow(recent, item, function (row) { openDetail(row.cve_id || row.id); });
     });
-    renderSteps($("steps"), data.steps);
+    renderPager(recent, "recent", recentMeta, function () { loadOverview(); });
+    var stepsTarget = $("steps");
+    var stepRows = data.steps || [];
+    var stepsMeta = pageSlice(stepRows, "steps", OVERVIEW_PAGE_SIZE);
+    renderSteps(stepsTarget, stepsMeta.items);
+    renderPager(stepsTarget, "steps", stepsMeta, function () { loadOverview(); });
   }).catch(showError);
 }
 
@@ -502,6 +560,7 @@ var lastMonitorFeed = null;
 
 function setMonitorScope(scope) {
   monitorScope = scope || "all";
+  listPages.monitor = 1;
   document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
     node.className = node.getAttribute("data-monitor-scope") === monitorScope ? "chip is-on" : "chip";
   });
@@ -516,6 +575,7 @@ window.setMonitorScope = setMonitorScope;
 
 function setMonitorSourceFilter(filter) {
   monitorSourceFilter = filter || "all";
+  listPages.monitor = 1;
   document.querySelectorAll("[data-source-filter]").forEach(function (node) {
     node.className = node.getAttribute("data-source-filter") === monitorSourceFilter ? "chip is-on" : "chip";
   });
@@ -583,8 +643,12 @@ function renderMonitorFeed(data) {
     }
     return data;
   }
-  items.forEach(function (item) {
+  var meta = pageSlice(items, "monitor", LIST_PAGE_SIZE);
+  meta.items.forEach(function (item) {
     renderItemRow(target, item, function (row) { openMonitorDetail(row); });
+  });
+  renderPager(target, "monitor", meta, function () {
+    if (lastMonitorFeed) renderMonitorFeed(lastMonitorFeed);
   });
   return data;
 }
@@ -613,9 +677,11 @@ function loadItems(view) {
       add(target, "p", "empty", "没有匹配的情报。");
       return data;
     }
-    data.items.forEach(function (item) {
+    var meta = pageSlice(data.items, "enrich", LIST_PAGE_SIZE);
+    meta.items.forEach(function (item) {
       renderItemRow(target, item, function (row) { openDetail(row.cve_id || row.id); });
     });
+    renderPager(target, "enrich", meta, function () { loadItems("enrich"); });
     return data;
   }).catch(showError);
 }
@@ -649,6 +715,8 @@ function openMonitorDetail(item) {
     return;
   }
   var cveId = item.cve_id || item.id;
+  clearError();
+  showToast("正在加载「" + cveId + "」…", "busy");
   api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
     var panel = $("monitor-detail");
     clear(panel);
@@ -671,12 +739,24 @@ function openMonitorDetail(item) {
     var go = add(panel, "button", "primary", "送去富集（含影响资产）");
     go.type = "button";
     go.addEventListener("click", function () { openDetail(cveId); });
-  }).catch(showError);
+    showToast("已打开 " + detail.cve_id, "ok");
+  }).catch(function (error) {
+    showError(error);
+    showToast("加载详情失败：" + (error.message || "请求失败"), "error");
+  });
 }
 
 function openDetail(cveId) {
   setView("enrich");
-  api("/api/items/" + encodeURIComponent(cveId)).then(renderDetail).catch(showError);
+  clearError();
+  showToast("正在加载「" + cveId + "」详情…", "busy");
+  api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+    renderDetail(detail);
+    showToast("已打开 " + cveId, "ok");
+  }).catch(function (error) {
+    showError(error);
+    showToast("加载详情失败：" + (error.message || "请求失败"), "error");
+  });
 }
 
 function renderAssessment(panel, report) {
@@ -1315,9 +1395,12 @@ bindClick("enrich-btn", function () {
   showToast("正在批量富集公开源（EPSS / KEV / 论文）…", "busy");
   return api("/api/enrich", { method: "POST" }).then(function (data) {
     return loadItems("enrich").then(function () {
+      var docCount = Array.isArray(data && data.documents)
+        ? data.documents.length
+        : (typeof (data && data.documents) === "number" ? data.documents : 0);
       var msg = "富集完成"
         + (data && data.items != null ? "：处理 " + data.items + " 条" : "")
-        + (data && data.documents != null ? "，关联资料 " + data.documents : "")
+        + (docCount ? "，关联资料 " + docCount + " 条" : "（本轮无新增关联资料）")
         + "。";
       if (status) status.textContent = msg;
       showToast(msg, "ok");
@@ -1612,63 +1695,97 @@ function loadLibrary() {
       if (row.url) libraryLink(block, row.url, "查看失败来源");
     });
     var target = $("library-list"); clear(target);
-    if (!data.items.length) add(target, "p", "empty", "此类型尚未收录资料。");
+    if (!data.items.length) {
+      add(target, "p", "empty", "此类型尚未收录资料。");
+      return;
+    }
+    var byType = {};
     data.items.forEach(function (doc) {
-      var block = add(target, "div", "evidence-chunk");
-      var button = add(block, "button", "text-btn", doc.title);
-      button.type = "button";
-      button.addEventListener("click", function () {
-        api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
-      });
-      add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-      var discoveryLabels = {team_api: "多源情报存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
-      add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
-      if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
-      if (doc.team_document_id) add(block, "p", "meta", "多源记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
-      if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
-      if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
-      var selection = add(block, "label", "library-selection");
-      var check = add(selection, "input", ""); check.type = "checkbox"; check.checked = librarySelectedDocs.indexOf(doc.document_id) >= 0;
-      selection.appendChild(document.createTextNode(" 用于资料问答或文章关系提取"));
-      check.addEventListener("change", function () {
-        if (check.checked && librarySelectedDocs.length >= 4) { check.checked = false; showError(new Error("最多选择 4 份资料")); return; }
-        librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
-        if (check.checked) librarySelectedDocs.push(doc.document_id);
-      });
-      if ((doc.content_scope === "abstract" || doc.content_scope === "team_summary") && doc.document_type === "academic_paper" && /^https:\/\/arxiv\.org\/abs\//.test(doc.url)) {
-        var fullLabel = data.items.some(function (r) { return r.parent_document_id === doc.document_id; }) ? "刷新论文全文" : "获取论文全文";
-        var fullButton = add(block, "button", "ghost", fullLabel);
-        fullButton.type = "button";
-        fullButton.addEventListener("click", function () {
-          fullButton.disabled = true; fullButton.textContent = "正在获取官方全文…";
-          api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
-            if (result.status !== "ok") throw new Error("全文未获取成功，保留摘要：" + (result.error || "来源暂时不可用"));
-            librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
-            $("library-answer").textContent = "全文已更新，请重新选择资料并提问。";
-            clear($("library-relations")); clear($("library-evidence"));
-            return loadLibrary();
-          }).catch(showError).then(function () { fullButton.disabled = false; fullButton.textContent = fullLabel; });
-        });
+      var kind = doc.document_type || "other";
+      (byType[kind] = byType[kind] || []).push(doc);
+    });
+    var typeKeys = Object.keys(byType);
+    typeKeys.forEach(function (kind, idx) {
+      var rows = byType[kind];
+      var host = target;
+      if (typeKeys.length > 1) {
+        var group = add(target, "details", "list-group");
+        group.open = idx === 0;
+        add(group, "summary", "list-group-sum", (libraryKinds[kind] || kind) + " · " + rows.length + " 份");
+        host = add(group, "div", "list-group-body");
       }
-      if (doc.content_scope === "team_summary" && ["research_article", "vendor_advisory"].indexOf(doc.document_type) >= 0) {
-        var sourceButton = add(block, "button", "ghost", "获取来源原文"); sourceButton.type = "button";
-        sourceButton.addEventListener("click", function () {
-          sourceButton.disabled = true; sourceButton.textContent = "正在获取来源原文…";
-          api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
-            if (result.status !== "ok") throw new Error("来源原文未获取成功，描述存档仍可使用：" + (result.error || "来源暂时不可用"));
-            librarySelectedDocs = [result.document_id]; clear($("library-evidence")); clear($("library-relations"));
-            $("library-answer").textContent = "来源原文已入库并选中，可以按证据提问。";
-            return loadLibrary();
-          }).catch(showError).then(function () { sourceButton.disabled = false; sourceButton.textContent = "获取来源原文"; });
-        });
-      }
-      add(block, "p", "meta", "主题：" + (doc.topic_tags || []).map(function (tag) { return libraryTopics[tag] || tag; }).join("、"));
-      libraryLink(block, doc.url, "打开来源");
+      var pageKey = "library-" + kind;
+      if (listPages[pageKey] == null) listPages[pageKey] = 1;
+      var meta = pageSlice(rows, pageKey, LIST_PAGE_SIZE);
+      meta.items.forEach(function (doc) { renderLibraryDocRow(host, doc, data.items); });
+      renderPager(host, pageKey, meta, loadLibrary);
     });
   }).catch(showError);
 }
 
-on("library-type", "change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); clear($("library-relations")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
+function renderLibraryDocRow(target, doc, allItems) {
+  var block = add(target, "div", "evidence-chunk");
+  var button = add(block, "button", "text-btn", doc.title);
+  button.type = "button";
+  button.addEventListener("click", function () {
+    api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
+  });
+  add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
+  var discoveryLabels = {team_api: "多源情报存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+  add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
+  if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
+  if (doc.team_document_id) add(block, "p", "meta", "多源记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
+  if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
+  if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
+  var selection = add(block, "label", "library-selection");
+  var check = add(selection, "input", ""); check.type = "checkbox"; check.checked = librarySelectedDocs.indexOf(doc.document_id) >= 0;
+  selection.appendChild(document.createTextNode(" 用于资料问答或文章关系提取"));
+  check.addEventListener("change", function () {
+    if (check.checked && librarySelectedDocs.length >= 4) { check.checked = false; showError(new Error("最多选择 4 份资料")); return; }
+    librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
+    if (check.checked) librarySelectedDocs.push(doc.document_id);
+  });
+  if ((doc.content_scope === "abstract" || doc.content_scope === "team_summary") && doc.document_type === "academic_paper" && /^https:\/\/arxiv\.org\/abs\//.test(doc.url)) {
+    var fullLabel = (allItems || []).some(function (r) { return r.parent_document_id === doc.document_id; }) ? "刷新论文全文" : "获取论文全文";
+    var fullButton = add(block, "button", "ghost", fullLabel);
+    fullButton.type = "button";
+    fullButton.addEventListener("click", function () {
+      fullButton.disabled = true; fullButton.textContent = "正在获取官方全文…";
+      api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
+        if (result.status !== "ok") throw new Error("全文未获取成功，保留摘要：" + (result.error || "来源暂时不可用"));
+        librarySelectedDocs = librarySelectedDocs.filter(function (id) { return id !== doc.document_id; });
+        $("library-answer").textContent = "全文已更新，请重新选择资料并提问。";
+        clear($("library-relations")); clear($("library-evidence"));
+        return loadLibrary();
+      }).catch(showError).then(function () { fullButton.disabled = false; fullButton.textContent = fullLabel; });
+    });
+  }
+  if (doc.content_scope === "team_summary" && ["research_article", "vendor_advisory"].indexOf(doc.document_type) >= 0) {
+    var sourceButton = add(block, "button", "ghost", "获取来源原文"); sourceButton.type = "button";
+    sourceButton.addEventListener("click", function () {
+      sourceButton.disabled = true; sourceButton.textContent = "正在获取来源原文…";
+      api("/api/library/" + doc.document_id + "/full-text", {method: "POST"}).then(function (result) {
+        if (result.status !== "ok") throw new Error("来源原文未获取成功，描述存档仍可使用：" + (result.error || "来源暂时不可用"));
+        librarySelectedDocs = [result.document_id]; clear($("library-evidence")); clear($("library-relations"));
+        $("library-answer").textContent = "来源原文已入库并选中，可以按证据提问。";
+        return loadLibrary();
+      }).catch(showError).then(function () { sourceButton.disabled = false; sourceButton.textContent = "获取来源原文"; });
+    });
+  }
+  add(block, "p", "meta", "主题：" + (doc.topic_tags || []).map(function (tag) { return libraryTopics[tag] || tag; }).join("、"));
+  libraryLink(block, doc.url, "打开来源");
+}
+
+on("library-type", "change", function () {
+  librarySelectedDocs = [];
+  Object.keys(listPages).forEach(function (key) {
+    if (key.indexOf("library-") === 0) listPages[key] = 1;
+  });
+  loadLibrary();
+  clear($("library-evidence"));
+  clear($("library-relations"));
+  $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。";
+});
 on("library-mode", "change", function () { clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "回答方式已切换，请重新提问。"; });
 on("library-example", "click", function () { $("library-mode").value = "excerpt"; clear($("library-relations")); clear($("library-evidence")); $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; $("library-answer").textContent = "已填入政策示例，请选择对应政策并提问。"; });
 on("library-relations-example", "click", function () {

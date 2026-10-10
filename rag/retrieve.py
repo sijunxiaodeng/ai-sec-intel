@@ -23,10 +23,45 @@ def knowledge_records(db_path=DEFAULT_DB):
     return enrich_view(records, db_path)
 
 
+def _empty_guidance(cve_id, detail=""):
+    limitations = [
+        "来源声明不等于本项目验证；研究建议不能转称厂商确认。",
+        "正文按规则抽取，有遗漏与语义误判可能；未完成全部自由文本语义审核。",
+    ]
+    if detail:
+        limitations.append(detail)
+    return {
+        "cve_id": (cve_id or "").upper(),
+        "sources": [],
+        "facets": {"versions": [], "remediation": [], "conditions": []},
+        "evidence": [],
+        "status": "empty",
+        "vendor_patched_ranges": [],
+        "limitations": limitations,
+    }
+
+
 def _attach_guidance(record, db_path, library_db=None):
+    """Attach related_guidance; never fail the whole item detail on extract deps."""
     library = library_db if library_db is not None else library_for(db_path)
-    if library is not None:
-        record["item"].setdefault("raw_data", {})["related_guidance"] = guidance_report(record["item"]["cve_id"], record["item"].get("product", ""), library)
+    raw = record["item"].setdefault("raw_data", {})
+    if library is None:
+        return record
+    try:
+        raw["related_guidance"] = guidance_report(
+            record["item"]["cve_id"], record["item"].get("product", ""), library
+        )
+    except Exception as exc:
+        # Common on lxml 6.x without lxml_html_clean (trafilatura → justext → lxml.html.clean).
+        msg = "%s: %s" % (type(exc).__name__, exc)
+        if "lxml.html.clean" in msg or "lxml_html_clean" in msg:
+            detail = (
+                "关联建议抽取依赖不可用（缺少 lxml_html_clean）。"
+                "请安装：pip install lxml_html_clean 或 lxml[html-clean]，然后重启服务。"
+            )
+        else:
+            detail = "关联建议暂不可用（%s）。情报正文与 EPSS/KEV 仍可查看。" % msg[:160]
+        raw["related_guidance"] = _empty_guidance(record["item"].get("cve_id"), detail)
     return record
 
 
