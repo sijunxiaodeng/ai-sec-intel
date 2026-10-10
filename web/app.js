@@ -35,6 +35,15 @@ function $(id) {
   return document.getElementById(id);
 }
 
+function on(id, event, handler) {
+  var el = $(id);
+  if (!el) {
+    console.warn("missing control", id);
+    return;
+  }
+  el.addEventListener(event, handler);
+}
+
 function api(path, options) {
   return fetch(path, options).then(function (response) {
     var ctype = (response.headers.get("content-type") || "").toLowerCase();
@@ -908,20 +917,20 @@ function evaluateSavedAssets() {
   catch (error) { showError(error); return Promise.resolve(); }
 }
 
-$("asset-demo").addEventListener("click", function () {
+on("asset-demo", "click", function () {
   api("/api/assets/demo").then(function (data) {
     $("asset-json").value = JSON.stringify(data, null, 2);
     $("asset-message").textContent = "已填入 3 条虚构演示资产，尚未保存。选择 CVE-2024-37032 后可预览。";
     $("asset-cve").value = "CVE-2024-37032";
   }).catch(showError);
 });
-$("asset-file").addEventListener("change", function () {
+on("asset-file", "change", function () {
   var file = this.files[0];
   if (!file) return;
   if (file.size > 1024 * 1024) { showError(new Error("JSON 文件不能超过 1 MB。")); return; }
   file.text().then(function (text) { $("asset-json").value = text.replace(/^\uFEFF/, ""); $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。"; }).catch(showError);
 });
-$("asset-preview").addEventListener("click", function () {
+on("asset-preview", "click", function () {
   clearError();
   var button = $("asset-preview");
   try {
@@ -931,7 +940,7 @@ $("asset-preview").addEventListener("click", function () {
     api("/api/assets/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(renderAssetImpact).catch(showError).then(function () { button.disabled = false; });
   } catch (error) { showError(error); }
 });
-$("asset-save").addEventListener("click", function () {
+on("asset-save", "click", function () {
   clearError();
   var button = $("asset-save");
   try {
@@ -945,8 +954,8 @@ $("asset-save").addEventListener("click", function () {
     }).catch(showError).then(function () { button.disabled = false; });
   } catch (error) { showError(error); }
 });
-$("asset-evaluate").addEventListener("click", function () { clearError(); evaluateSavedAssets().catch(showError); });
-$("asset-cve").addEventListener("change", function () { clear($("asset-impact")); add($("asset-impact"), "p", "empty", "情报已切换，请重新预览或评估。"); });
+on("asset-evaluate", "click", function () { clearError(); evaluateSavedAssets().catch(showError); });
+on("asset-cve", "change", function () { clear($("asset-impact")); add($("asset-impact"), "p", "empty", "情报已切换，请重新预览或评估。"); });
 
 function fillFocus(items) {
   var select = $("focus");
@@ -967,7 +976,7 @@ function loadAsk() {
   }).catch(showError);
 }
 
-$("sample-btn").addEventListener("click", function () {
+on("sample-btn", "click", function () {
   var button = $("sample-btn");
   button.disabled = true;
   clearError();
@@ -1011,28 +1020,19 @@ document.querySelectorAll("#arch-stack [data-go]").forEach(function (node) {
   if (!node.getAttribute("role")) node.setAttribute("role", "button");
 });
 
-if ($("goto-monitor")) {
-  $("goto-monitor").addEventListener("click", function () { setView("monitor"); });
-}
-
-if ($("keyword")) {
-  $("keyword").addEventListener("input", function () {
-    monitorKeyword();
-    loadItems("monitor");
-  });
-}
-if ($("filter")) {
-  $("filter").addEventListener("input", function () { loadItems("monitor"); });
-}
-if ($("clear-keyword-btn")) {
-  $("clear-keyword-btn").addEventListener("click", function () {
-    if ($("keyword")) $("keyword").value = "";
-    if ($("filter")) $("filter").value = "";
-    clearError();
-    setMonitorStatus("已清除关键词，正在显示全部情报流。");
-    loadItems("monitor");
-  });
-}
+on("goto-monitor", "click", function () { setView("monitor"); });
+on("keyword", "input", function () {
+  monitorKeyword();
+  loadItems("monitor");
+});
+on("filter", "input", function () { loadItems("monitor"); });
+on("clear-keyword-btn", "click", function () {
+  if ($("keyword")) $("keyword").value = "";
+  if ($("filter")) $("filter").value = "";
+  clearError();
+  setMonitorStatus("已清除关键词，正在显示全部情报流。");
+  loadItems("monitor");
+});
 
 function diagnoseEmptyFeed(runData, feed, keyword) {
   var bits = [];
@@ -1190,18 +1190,22 @@ function runMonitorRefresh(options) {
   });
 }
 
-$("collect-form").addEventListener("submit", function (event) {
+on("collect-form", "submit", function (event) {
   event.preventDefault();
   var button = $("collect-btn");
-  button.disabled = true;
-  button.textContent = "正在按关键词补采…";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在按关键词补采…";
+  }
   clearError();
   var keyword = monitorKeyword();
   if (!keyword) {
     setMonitorStatus("未填关键词：默认已是自动宽范围监测；点「立即刷新一轮」即可，或先填写关键词再补采。");
     showToast("未填关键词 — 请用「立即刷新一轮」做自动宽范围刷新", "busy");
-    button.disabled = false;
-    button.textContent = "按关键词补采 CVE";
+    if (button) {
+      button.disabled = false;
+      button.textContent = "按关键词补采 CVE";
+    }
     loadItems("monitor");
     return;
   }
@@ -1224,8 +1228,10 @@ $("collect-form").addEventListener("submit", function (event) {
     showError(error);
     setMonitorStatus("补采失败：" + (error.message || "请求失败"));
   }).then(function () {
-    button.disabled = false;
-    button.textContent = "按关键词补采 CVE";
+    if (button) {
+      button.disabled = false;
+      button.textContent = "按关键词补采 CVE";
+    }
   });
 });
 
@@ -1249,12 +1255,34 @@ function bindClick(id, handler) {
   });
 }
 
+/* 委托兜底：即使个别控件缺失导致后续绑定中断，监测 CTA 仍可点 */
+document.addEventListener("click", function (event) {
+  var btn = event.target && event.target.closest
+    ? event.target.closest("#auto-monitor-btn, #overview-monitor-btn")
+    : null;
+  if (!btn || btn.getAttribute("data-bound") === "1") return;
+  event.preventDefault();
+  try {
+    if (btn.id === "overview-monitor-btn") setView("monitor");
+    var result = runMonitorRefresh({ sync_library: true });
+    if (result && typeof result.catch === "function") {
+      result.catch(function (error) { showError(error || new Error("操作失败")); });
+    }
+  } catch (error) {
+    showError(error);
+  }
+});
+
 bindClick("auto-monitor-btn", function () {
   return runMonitorRefresh({ sync_library: true });
 });
 bindClick("overview-monitor-btn", function () {
   setView("monitor");
   return runMonitorRefresh({ sync_library: true });
+});
+["auto-monitor-btn", "overview-monitor-btn"].forEach(function (id) {
+  var el = $(id);
+  if (el) el.setAttribute("data-bound", "1");
 });
 
 document.addEventListener("click", function (event) {
@@ -1269,18 +1297,6 @@ document.addEventListener("click", function (event) {
     event.preventDefault();
     setMonitorSourceFilter(srcBtn.getAttribute("data-source-filter") || "all");
   }
-});
-document.querySelectorAll("[data-monitor-scope]").forEach(function (button) {
-  button.addEventListener("click", function (event) {
-    event.preventDefault();
-    setMonitorScope(button.getAttribute("data-monitor-scope") || "all");
-  });
-});
-document.querySelectorAll("[data-source-filter]").forEach(function (button) {
-  button.addEventListener("click", function (event) {
-    event.preventDefault();
-    setMonitorSourceFilter(button.getAttribute("data-source-filter") || "all");
-  });
 });
 
 bindClick("enrich-btn", function () {
@@ -1310,15 +1326,17 @@ bindClick("enrich-btn", function () {
 });
 
 var promptBox = $("prompts");
-prompts.forEach(function (text) {
-  var button = add(promptBox, "button", "", text);
-  button.type = "button";
-  button.addEventListener("click", function () {
-    $("question").value = text;
+if (promptBox) {
+  prompts.forEach(function (text) {
+    var button = add(promptBox, "button", "", text);
+    button.type = "button";
+    button.addEventListener("click", function () {
+      $("question").value = text;
+    });
   });
-});
+}
 
-$("new-session").addEventListener("click", function () {
+on("new-session", "click", function () {
   askSessionId = "";
   $("focus").value = "";
   $("question").value = "";
@@ -1328,7 +1346,7 @@ $("new-session").addEventListener("click", function () {
   clearError();
 });
 
-$("ask-form").addEventListener("submit", function (event) {
+on("ask-form", "submit", function (event) {
   event.preventDefault();
   var button = $("ask-btn");
   button.disabled = true;
@@ -1399,7 +1417,7 @@ $("ask-form").addEventListener("submit", function (event) {
   });
 });
 
-$("settings-form").addEventListener("submit", function (event) {
+on("settings-form", "submit", function (event) {
   event.preventDefault();
   clearError();
   api("/api/settings", {
@@ -1417,7 +1435,7 @@ $("settings-form").addEventListener("submit", function (event) {
   }).catch(showError);
 });
 
-$("test-llm").addEventListener("click", function () {
+on("test-llm", "click", function () {
   $("test-result").textContent = "正在测试…";
   api("/api/settings/test", { method: "POST" }).then(function (data) {
     $("test-result").textContent = data.reply || "连接成功";
@@ -1545,15 +1563,15 @@ function loadCandidates() {
   var topic = $("candidate-topic").value;
   return api("/api/library/relations/candidates?topic=" + encodeURIComponent(topic)).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(showError);
 }
-$("candidate-refresh").addEventListener("click", loadCandidates);
-$("candidate-graph").addEventListener("click", function () {
+on("candidate-refresh", "click", loadCandidates);
+on("candidate-graph", "click", function () {
   var topic = $("candidate-topic").value;
   api("/api/library/relations/graph?topic=" + encodeURIComponent(topic)).then(function (data) {
     if (topic === $("candidate-topic").value) renderLibraryRelations(data);
   }).catch(showError);
 });
-$("candidate-topic").addEventListener("change", function () { clear($("candidate-list")); loadCandidates(); });
-$("candidate-generate").addEventListener("click", function () {
+on("candidate-topic", "change", function () { clear($("candidate-list")); loadCandidates(); });
+on("candidate-generate", "click", function () {
   var button = $("candidate-generate"), topic = $("candidate-topic").value;
   var ids = topic === "article_relations" ? librarySelectedDocs.slice() : [];
   if (topic === "article_relations" && !ids.length) { $("candidate-status").textContent = "请先在下方资料列表勾选 1 至 4 份资料，再提取文章关系。"; return; }
@@ -1643,20 +1661,20 @@ function loadLibrary() {
   }).catch(showError);
 }
 
-$("library-type").addEventListener("change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); clear($("library-relations")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
-$("library-mode").addEventListener("change", function () { clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "回答方式已切换，请重新提问。"; });
-$("library-example").addEventListener("click", function () { $("library-mode").value = "excerpt"; clear($("library-relations")); clear($("library-evidence")); $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; $("library-answer").textContent = "已填入政策示例，请选择对应政策并提问。"; });
-$("library-relations-example").addEventListener("click", function () {
+on("library-type", "change", function () { librarySelectedDocs = []; loadLibrary(); clear($("library-evidence")); clear($("library-relations")); $("library-answer").textContent = "资料类型已切换，请重新选择资料并提问。"; });
+on("library-mode", "change", function () { clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "回答方式已切换，请重新提问。"; });
+on("library-example", "click", function () { $("library-mode").value = "excerpt"; clear($("library-relations")); clear($("library-evidence")); $("library-question").value = "管理暂行办法对训练数据有什么规定？适用范围是什么？"; $("library-answer").textContent = "已填入政策示例，请选择对应政策并提问。"; });
+on("library-relations-example", "click", function () {
   $("library-mode").value = "relations"; $("library-type").value = ""; librarySelectedDocs = [];
   $("library-question").value = "比较论文和 NIST 对间接提示注入的机制解释、防护建议及局限。";
   clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "已填入关系示例，将使用已核对的论文全文与 NIST 框架。"; loadLibrary();
 });
-$("library-supply-example").addEventListener("click", function () {
+on("library-supply-example", "click", function () {
   $("library-mode").value = "relations"; $("library-type").value = ""; librarySelectedDocs = [];
   $("library-question").value = "比较 HF 和 NIST 对模型供应链的加载风险、防护建议与扫描局限。";
   clear($("library-relations")); clear($("library-evidence")); $("library-answer").textContent = "已填入供应链示例，将使用 HF 文档存档与 NIST 框架。"; loadLibrary();
 });
-$("library-ask-form").addEventListener("submit", function (event) {
+on("library-ask-form", "submit", function (event) {
   event.preventDefault(); clearError();
   var button = $("library-ask"); button.disabled = true; button.textContent = "正在检索原文…";
   $("library-answer").textContent = "正在按资料证据处理…"; clear($("library-evidence")); clear($("library-relations"));
@@ -1671,11 +1689,11 @@ $("library-ask-form").addEventListener("submit", function (event) {
     renderLibraryEvidence({evidence: rows, notice: requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
   }).catch(showError).then(function () { button.disabled = false; button.textContent = "按证据回答"; });
 });
-$("library-search-form").addEventListener("submit", function (event) {
+on("library-search-form", "submit", function (event) {
   event.preventDefault(); clearError();
   api("/api/library/search?q=" + encodeURIComponent($("library-query").value.trim()) + "&document_type=" + encodeURIComponent($("library-type").value)).then(renderLibraryEvidence).catch(showError);
 });
-$("library-sync").addEventListener("click", function () {
+on("library-sync", "click", function () {
   var button = $("library-sync");
   var idle = "同步公开资料";
   setBusyButton(button, true, "正在同步…", idle);
@@ -1695,7 +1713,7 @@ $("library-sync").addEventListener("click", function () {
   }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
-$("library-team-sync").addEventListener("click", function () {
+on("library-team-sync", "click", function () {
   var button = $("library-team-sync");
   var idle = "同步多源资料";
   setBusyButton(button, true, "正在同步…", idle);
