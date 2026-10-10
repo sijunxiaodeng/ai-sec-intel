@@ -102,15 +102,26 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
-check "ia-monitor-copy" grep -q "情报监测 = 自动持续采集" "$OUT/page.html"
-check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
-check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
+check "ia-pipeline-rail" grep -q 'class="pipeline"' "$OUT/page.html"
+check "ia-monitor-copy" grep -q "自动监测" "$OUT/page.html"
+check "ia-library-copy" grep -q "资料库沉淀" "$OUT/page.html"
+check "ia-enrich-copy" grep -q "情报富集" "$OUT/page.html"
+check "ia-ask-copy" grep -q "证据问答" "$OUT/page.html"
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
+# Assets fold under enrich; must not be a pipeline rail nav target
 sys.exit(0 if 'data-view="assets"' not in html else 1)
 PY
 check "ia-no-assets-nav" true
+# Forbidden competitor / #8/#9 clone markers must stay out of the shell
+python3 - <<PY
+import sys
+html=open("$OUT/page.html",encoding="utf-8").read()
+banned = ["START HERE", "任务工作台", "今日优先处置", "赛题九宫格", "一键流水线"]
+sys.exit(0 if not any(b in html for b in banned) else 1)
+PY
+check "ia-no-competitor-clone" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"
 check "main-assets" test -s "$OUT/app.js"
 check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
