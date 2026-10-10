@@ -1,15 +1,25 @@
-# 定时监测。启动时不立刻抓取，避免把历史漏洞算进时效。
+# 定时监测：默认持续自动采集宽范围 AI 安全情报；启动后立即跑一轮（后台），之后按间隔重复。
 
 import json
+import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_PATH = ROOT / "data" / "monitor.json"
 LOG_PATH = ROOT / "data" / "collect.log"
-INTERVAL_HOURS = 6
+INTERVAL_HOURS = int(os.environ.get("MONITOR_INTERVAL_HOURS", "6") or "6")
+AUTO_ON_START = os.environ.get("AUTO_MONITOR_ON_START", "1").strip().lower() not in {
+    "0", "false", "no", "off",
+}
+# Broad AI-security scope (comma-separated); matches api AUTO_MONITOR_KEYWORDS.
+DEFAULT_KEYWORDS = os.environ.get(
+    "AUTO_MONITOR_KEYWORDS",
+    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection",
+)
 _STARTED = False
+_RUN_LOCK = threading.Lock()
 
 
 def _now():
@@ -36,9 +46,13 @@ def ensure_state():
     if not data.get("started_at"):
         data["started_at"] = _now()
     data["interval_hours"] = INTERVAL_HOURS
+    data["auto_on_start"] = AUTO_ON_START
     data.setdefault("last_run", "")
     data.setdefault("last_error", "")
     data.setdefault("last_count", 0)
+    data.setdefault("last_keyword", "")
+    data.setdefault("running", False)
+    data.setdefault("mode", "automatic")
     _write_state(data)
     return data
 
@@ -84,18 +98,43 @@ def log_line(text):
         handle.write("%s %s\n" % (_now(), text))
 
 
-def run_once(keyword="ollama"):
+def mark_run(*, count=0, keyword="", error=""):
+    """Update monitor state after a manual /api/monitor/run (or other external cycle)."""
+    data = ensure_state()
+    data["last_run"] = _now()
+    data["last_count"] = int(count or 0)
+    data["last_keyword"] = keyword or data.get("last_keyword") or ""
+    data["last_error"] = error or ""
+    data["running"] = False
+    _write_state(data)
+    return data
+
+
+def run_once(keyword=None):
     from agents.orchestrator import run_collect
     from rag.library import sync as sync_library
-    # 两条采集路径分别执行，漏洞源故障不能阻止通用资料同步。
+
+    keyword = (keyword or "").strip() or DEFAULT_KEYWORDS
+    if not _RUN_LOCK.acquire(blocking=False):
+        data = ensure_state()
+        data["last_error"] = "上一轮自动监测仍在进行"
+        _write_state(data)
+        log_line("跳过重叠的自动监测请求")
+        return ensure_state()
+
     collect_error = None
     try:
+        data = ensure_state()
+        data["running"] = True
+        data["last_error"] = ""
+        _write_state(data)
         result = run_collect(keyword)
         data = ensure_state()
         data["last_run"] = _now()
         data["last_error"] = ""
         data["last_count"] = len(result.get("records") or [])
         data["last_keyword"] = keyword
+        data["running"] = False
         _write_state(data)
         log_line("自动监测完成，关键词 %s，库内 %d 条" % (keyword, data["last_count"]))
     except Exception as exc:
@@ -103,8 +142,12 @@ def run_once(keyword="ollama"):
         data = ensure_state()
         data["last_run"] = _now()
         data["last_error"] = str(exc)
+        data["running"] = False
         _write_state(data)
         log_line("自动监测失败：%s" % exc)
+    finally:
+        _RUN_LOCK.release()
+
     try:
         library = sync_library(include_seeds=False)
         data = ensure_state()
@@ -113,13 +156,15 @@ def run_once(keyword="ollama"):
         data["library_last_error"] = ""
         data["library_source_errors"] = [r["source_id"] for r in library["sources"] if r["status"] == "error"]
         _write_state(data)
-        log_line("资料同步完成：成功 %d/%d，来源失败 %d" % (library["ok"], library["attempted"], len(data["library_source_errors"])))
+        log_line("资料同步完成：成功 %d/%d，来源失败 %d" % (
+            library["ok"], library["attempted"], len(data["library_source_errors"])))
     except Exception as exc:
         data = ensure_state()
         data["library_last_run"] = _now()
         data["library_last_error"] = str(exc)
         _write_state(data)
         log_line("资料同步失败：%s" % exc)
+
     if collect_error:
         raise collect_error
     return ensure_state()
@@ -127,11 +172,20 @@ def run_once(keyword="ollama"):
 
 def _loop():
     ensure_state()
-    log_line("定时监测已启动，间隔 %d 小时。启动这一轮不立即抓取。" % INTERVAL_HOURS)
-    while True:
-        threading.Event().wait(INTERVAL_HOURS * 3600)
+    # Brief delay so uvicorn is accepting before the first collect hits NVD/OSV/B.
+    threading.Event().wait(2.0)
+    if AUTO_ON_START:
+        log_line("定时监测已启动：启动后立即自动跑一轮，之后每 %d 小时。范围：宽范围 AI 安全。" % INTERVAL_HOURS)
         try:
-            run_once("ollama")
+            run_once(DEFAULT_KEYWORDS)
+        except Exception:
+            pass
+    else:
+        log_line("定时监测已启动，间隔 %d 小时。AUTO_MONITOR_ON_START 已关闭，启动不立即抓取。" % INTERVAL_HOURS)
+    while True:
+        threading.Event().wait(max(INTERVAL_HOURS, 1) * 3600)
+        try:
+            run_once(DEFAULT_KEYWORDS)
         except Exception:
             continue
 
@@ -142,6 +196,5 @@ def start():
         return
     _STARTED = True
     ensure_state()
-    thread = threading.Thread(target=_loop, name="monitor-schedule")
-    thread.daemon = True
+    thread = threading.Thread(target=_loop, name="monitor-schedule", daemon=True)
     thread.start()

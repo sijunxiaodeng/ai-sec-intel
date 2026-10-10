@@ -1,5 +1,106 @@
 window.CARDS = [
   {
+    "id": "CVE-2026-103663",
+    "cve_id": "CVE-2026-103663",
+    "title": "Path Traversal leading to Remote Code Execution in Ollama",
+    "description": "Ollama is vulnerable to path traversal in the `/api/pull` endpoint due to insufficient validation of layer digests by the `digestToPath` function. An unauthenticated remote attacker can specify a path traversal sequence as a layer digest, causing a malicious binary to be written outside the model store. \n\nCritically if the server process has write access to `/usr/lib/ollama` (the default in most Ollama Docker images), an attacker can write the malicious file to that directory. On the next server restart, the file is loaded and executed, resulting in remote code execution as root.\n\n\nThis issue was fixed in version 0.35.0.",
+    "source": "OSV",
+    "url": "https://osv.dev/vulnerability/CVE-2026-103663",
+    "published_at": "2026-10-08T13:19:04.819Z",
+    "collected_at": "2026-10-09T14:27:41Z",
+    "product": "ollama",
+    "affected": [
+      "ollama，修复于 0.35.0"
+    ],
+    "cvss": null,
+    "references": [
+      "https://osv.dev/vulnerability/CVE-2026-103663",
+      "https://cert.pl/en/posts/2026/10/CVE-2026-103663/",
+      "https://github.com/CVEProject/cvelistV5/tree/main/cves/2026/103xxx/CVE-2026-103663.json",
+      "https://github.com/ollama/ollama",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-103663",
+      "https://ollama.com/"
+    ]
+  },
+  {
+    "id": "CVE-2099-90001",
+    "cve_id": "CVE-2099-90001",
+    "title": "【演示】Ollama 智能体授权绕过（合成）",
+    "description": "演示用合成记录：模拟 Ollama / LLM 智能体工具链相关漏洞。关键词：ollama、llm、agent。非真实 NVD 公告。",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2099-90001",
+    "published_at": "2026-10-08T01:00:00Z",
+    "collected_at": "2026-10-09T14:54:18.698891+00:00",
+    "product": "ollama",
+    "affected": [
+      "ollama < 0.1.34"
+    ],
+    "cvss": 9.8,
+    "references": [
+      "https://example.com/demo-ollama-advisory",
+      "https://nvd.nist.gov/vuln/detail/CVE-2099-90001",
+      "https://example.com/demo/cve-2099-90001"
+    ]
+  },
+  {
+    "id": "CVE-2099-90002",
+    "cve_id": "CVE-2099-90002",
+    "title": "【演示】vLLM 推理服务提示注入（合成）",
+    "description": "演示用合成记录：模拟 vLLM / Hugging Face 推理场景的提示注入风险。关键词：vllm、huggingface、prompt injection、llm。",
+    "source": "GITHUB_ADVISORY、NVD",
+    "url": "https://example.com/demo/cve-2099-90002",
+    "published_at": "2026-10-08T01:00:00Z",
+    "collected_at": "2026-10-09T15:19:56.848624+00:00",
+    "product": "vllm",
+    "affected": [
+      "vllm < 0.6.0",
+      "pip:vllm < 0.6.0（修复版本 0.6.0）"
+    ],
+    "cvss": 8.1,
+    "references": [
+      "https://example.com/demo/cve-2099-90002",
+      "https://nvd.nist.gov/vuln/detail/CVE-2099-90002",
+      "https://github.com/advisories/GHSA-demo-90002"
+    ]
+  },
+  {
+    "id": "CVE-2099-90004",
+    "cve_id": "CVE-2099-90004",
+    "title": "【演示】Hugging Face 模型供应链 pickle 风险（合成）",
+    "description": "演示用合成记录：模拟模型权重 / pickle 反序列化供应链风险。关键词：huggingface、pickle、supply chain。",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2099-90004",
+    "published_at": "2026-10-08T01:00:00Z",
+    "collected_at": "2026-10-09T15:19:56.854170+00:00",
+    "product": "transformers",
+    "affected": [
+      "transformers < 4.40.0"
+    ],
+    "cvss": 8.8,
+    "references": [
+      "https://example.com/demo/cve-2099-90004",
+      "https://nvd.nist.gov/vuln/detail/CVE-2099-90004"
+    ]
+  },
+  {
+    "id": "CVE-2099-90003",
+    "cve_id": "CVE-2099-90003",
+    "title": "【演示】LangChain 工具调用越狱链（合成）",
+    "description": "演示用合成记录：模拟 LangChain / OpenAI 兼容智能体的越狱与对抗利用。关键词：langchain、openai、jailbreak、adversarial。",
+    "source": "CISA_KEV、NVD",
+    "url": "https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+    "published_at": "2026-10-08T01:00:00Z",
+    "collected_at": "2026-10-09T15:19:56.851380+00:00",
+    "product": "langchain",
+    "affected": [
+      "langchain < 0.2.10"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://nvd.nist.gov/vuln/detail/CVE-2099-90003"
+    ]
+  },
+  {
     "id": "CVE-2026-102697",
     "cve_id": "CVE-2026-102697",
     "title": "Ollama 0.14.0 before 0.31.2 Experimental Agent Bash Approval Bypass via Prefix-Based Authorization",
@@ -645,6 +746,215 @@ window.CARDS = [
       "https://osv.dev/vulnerability/CVE-2024-28224",
       "https://github.com/CVEProject/cvelistV5/tree/main/cves/2024/28xxx/CVE-2024-28224.json",
       "https://nvd.nist.gov/vuln/detail/CVE-2024-28224"
+    ]
+  },
+  {
+    "id": "CVE-2024-22422",
+    "cve_id": "CVE-2024-22422",
+    "title": "CVE-2024-22422",
+    "description": "AnythingLLM is an application that turns any document, resource, or piece of content into context that any LLM can use as references during chatting. In versions prior to commit `08d33cfd8` an unauthenticated API route (file export) can allow attacker to crash the server resulting in a denial of service attack. The “data-export” endpoint is used to export files using the filename parameter as user input. The endpoint takes the user input, filters it to avoid directory traversal attacks, fetches the file from the server, and afterwards deletes it. An attacker can trick the input filter mechanism to point to the current directory, and while attempting to delete it the server will crash as there is no error-handling wrapper around it. Moreover, the endpoint is public and does not require any form of authentication, resulting in an unauthenticated Denial of Service issue, which crashes the instance using a single HTTP packet. This issue has been addressed in commit `08d33cfd8`. Users are advised to upgrade. There are no known workarounds for this vulnerability.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-22422",
+    "published_at": "2024-01-19T01:15:09.123",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "anythingllm 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://github.com/Mintplex-Labs/anything-llm/commit/08d33cfd8fc47c5052b6ea29597c964a9da641e2",
+      "https://github.com/Mintplex-Labs/anything-llm/security/advisories/GHSA-xmj6-g32r-fc5q"
+    ]
+  },
+  {
+    "id": "CVE-2023-29062",
+    "cve_id": "CVE-2023-29062",
+    "title": "CVE-2023-29062",
+    "description": "The Operating System hosting the FACSChorus application is configured to allow transmission of hashed user credentials upon user action without adequately validating the identity of the requested resource. This is possible through the use of LLMNR, MBT-NS, or MDNS and will result in NTLMv2 hashes being sent to a malicious entity position on the local network. These hashes can subsequently be attacked through brute force and cracked if a weak password is used. This attack would only apply to domain joined systems.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-29062",
+    "published_at": "2023-11-28T21:15:07.440",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "facschorus 5.0",
+      "facschorus 5.1",
+      "hp_z2_tower_g9 -",
+      "facschorus 3.0",
+      "facschorus 3.1"
+    ],
+    "cvss": 3.8,
+    "references": [
+      "https://www.bd.com/en-us/about-bd/cybersecurity/bulletin/bd-facschorus-software"
+    ]
+  },
+  {
+    "id": "CVE-2023-37275",
+    "cve_id": "CVE-2023-37275",
+    "title": "CVE-2023-37275",
+    "description": "Auto-GPT is an experimental open-source application showcasing the capabilities of the GPT-4 language model. The Auto-GPT command line UI makes heavy use of color-coded print statements to signify different types of system messages to the user, including messages that are crucial for the user to review and control which commands should be executed. Before v0.4.3, it was possible for a malicious external resource (such as a website browsed by Auto-GPT) to cause misleading messages to be printed to the console by getting the LLM to regurgitate JSON encoded ANSI escape sequences (`\\u001b[`). These escape sequences were JSON decoded and printed to the console as part of the model's \"thinking process\". The issue has been patched in release version 0.4.3.\n",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-37275",
+    "published_at": "2023-07-13T23:15:10.890",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "autogpt_classic 见原文"
+    ],
+    "cvss": 3.1,
+    "references": [
+      "https://github.com/Significant-Gravitas/Auto-GPT/pull/4810",
+      "https://github.com/Significant-Gravitas/Auto-GPT/security/advisories/GHSA-r7f7-qrrv-3fjh"
+    ]
+  },
+  {
+    "id": "CVE-2023-37274",
+    "cve_id": "CVE-2023-37274",
+    "title": "CVE-2023-37274",
+    "description": "Auto-GPT is an experimental open-source application showcasing the capabilities of the GPT-4 language model. When Auto-GPT is executed directly on the host system via the provided run.sh or run.bat files, custom Python code execution is sandboxed using a temporary dedicated docker container which should not have access to any files outside of the Auto-GPT workspace directory.\nBefore v0.4.3, the `execute_python_code` command (introduced in v0.4.1) does not sanitize the `basename` arg before writing LLM-supplied code to a file with an LLM-supplied name. This allows for a path traversal attack that can overwrite any .py file outside the workspace directory by specifying a `basename` such as `../../../main.py`. This can further be abused to achieve arbitrary code execution on the host running Auto-GPT by e.g. overwriting autogpt/main.py which will be executed outside of the docker environment meant to sandbox custom python code execution the next time Auto-GPT is started. The issue has been patched in version 0.4.3. As a workaround, the risk introduced by this vulnerability can be remediated by running Auto-GPT in a virtual machine, or another environment in which damage to files or corruption of the program is not a critical problem.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-37274",
+    "published_at": "2023-07-13T23:15:10.820",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "autogpt_classic 见原文"
+    ],
+    "cvss": 7.5,
+    "references": [
+      "https://github.com/Significant-Gravitas/Auto-GPT/pull/4756",
+      "https://github.com/Significant-Gravitas/Auto-GPT/security/advisories/GHSA-5h38-mgp9-rj5f"
+    ]
+  },
+  {
+    "id": "CVE-2023-29374",
+    "cve_id": "CVE-2023-29374",
+    "title": "CVE-2023-29374",
+    "description": "In LangChain through 0.0.131, the LLMMathChain chain allows prompt injection attacks that can execute arbitrary code via the Python exec method.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-29374",
+    "published_at": "2023-04-05T02:15:37.340",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "langchain 见原文"
+    ],
+    "cvss": 9.8,
+    "references": [
+      "https://github.com/hwchase17/langchain/issues/1026",
+      "https://github.com/hwchase17/langchain/issues/814",
+      "https://github.com/hwchase17/langchain/pull/1119",
+      "https://twitter.com/rharang/status/1641899743608463365/photo/1"
+    ]
+  },
+  {
+    "id": "CVE-2021-3942",
+    "cve_id": "CVE-2021-3942",
+    "title": "CVE-2021-3942",
+    "description": "Certain HP Print products and Digital Sending products may be vulnerable to potential remote code execution and buffer overflow with use of Link-Local Multicast Name Resolution or LLMNR.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-3942",
+    "published_at": "2022-12-12T13:15:11.860",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "color_laserjet_cm4540_mfp_cc419a_firmware 见原文",
+      "color_laserjet_cm4540_mfp_cc419a -",
+      "color_laserjet_cm4540_mfp_cc420a_firmware 见原文",
+      "color_laserjet_cm4540_mfp_cc420a -",
+      "color_laserjet_cm4540_mfp_cc421a_firmware 见原文"
+    ],
+    "cvss": 9.8,
+    "references": [
+      "https://support.hp.com/us-en/document/ish_5948778-5949142-16/hpsbpi03780"
+    ]
+  },
+  {
+    "id": "CVE-2021-21960",
+    "cve_id": "CVE-2021-21960",
+    "title": "CVE-2021-21960",
+    "description": "A stack-based buffer overflow vulnerability exists in both the LLMNR functionality of Sealevel Systems, Inc. SeaConnect 370W v1.3.34. A specially-crafted network packet can lead to remote code execution. An attacker can send a malicious packet to trigger this vulnerability.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-21960",
+    "published_at": "2022-02-04T23:15:10.483",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "seaconnect_370w_firmware 1.3.34",
+      "seaconnect_370w -"
+    ],
+    "cvss": 10.0,
+    "references": [
+      "https://talosintelligence.com/vulnerability_reports/TALOS-2021-1389"
+    ]
+  },
+  {
+    "id": "CVE-2021-30348",
+    "cve_id": "CVE-2021-30348",
+    "title": "CVE-2021-30348",
+    "description": "Improper validation of LLM utility timers availability can lead to denial of service in Snapdragon Auto, Snapdragon Compute, Snapdragon Connectivity, Snapdragon Consumer Electronics Connectivity, Snapdragon Consumer IOT, Snapdragon Industrial IOT, Snapdragon Mobile, Snapdragon Voice & Music",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-30348",
+    "published_at": "2022-01-03T08:15:09.020",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "pq8009_firmware -",
+      "pq8009 -",
+      "apq8017_firmware -",
+      "apq8017 -",
+      "apq8064au_firmware -"
+    ],
+    "cvss": 6.5,
+    "references": [
+      "https://www.qualcomm.com/company/product-security/bulletins/december-2021-bulletin"
+    ]
+  },
+  {
+    "id": "CVE-2020-17467",
+    "cve_id": "CVE-2020-17467",
+    "title": "CVE-2020-17467",
+    "description": "An issue was discovered in FNET through 4.6.4. The code for processing the hostname from an LLMNR request doesn't check for '\\0' termination. Therefore, the deduced length of the hostname doesn't reflect the correct length of the actual data. This may lead to Information Disclosure in _fnet_llmnr_poll in fnet_llmnr.c during a response to a malicious request of the DNS class IN.",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2020-17467",
+    "published_at": "2020-12-11T23:15:13.557",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "fnet 见原文"
+    ],
+    "cvss": 9.1,
+    "references": [
+      "http://fnet.sourceforge.net/manual/fnet_history.html",
+      "https://us-cert.cisa.gov/ics/advisories/icsa-20-343-01",
+      "https://www.kb.cert.org/vuls/id/815128"
+    ]
+  },
+  {
+    "id": "CVE-2011-0657",
+    "cve_id": "CVE-2011-0657",
+    "title": "CVE-2011-0657",
+    "description": "DNSAPI.dll in the DNS client in Microsoft Windows XP SP2 and SP3, Windows Server 2003 SP2, Windows Vista SP1 and SP2, Windows Server 2008 Gold, SP2, R2, and R2 SP1, and Windows 7 Gold and SP1 does not properly process DNS queries, which allows remote attackers to execute arbitrary code via (1) a crafted LLMNR broadcast query or (2) a crafted application, aka \"DNS Query Vulnerability.\"",
+    "source": "NVD",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2011-0657",
+    "published_at": "2011-04-13T18:55:01.390",
+    "collected_at": "2026-10-09T15:21:13Z",
+    "product": "llm",
+    "affected": [
+      "windows_2003_server 见原文",
+      "windows_7 -",
+      "windows_server_2003 见原文",
+      "windows_server_2008 见原文",
+      "windows_server_2008 -"
+    ],
+    "cvss": 9.8,
+    "references": [
+      "http://osvdb.org/71780",
+      "http://secunia.com/advisories/44161",
+      "http://www.securityfocus.com/bid/47242",
+      "http://www.securitytracker.com/id?1025332",
+      "http://www.us-cert.gov/cas/techalerts/TA11-102A.html"
     ]
   }
 ];

@@ -13,45 +13,49 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>AI 安全知识情报</strong>
-          <em>赛题九 · 监测 / 富化 / 问答</em>
+          <em>监测流 · 资料库 · 富集 · 问答</em>
         </div>
       </div>
       <nav class="nav" aria-label="功能">
         <button type="button" data-view="overview" class="is-on">总览</button>
         <button type="button" data-view="monitor">情报监测</button>
-        <button type="button" data-view="enrich">情报富化</button>
         <button type="button" data-view="library">安全资料库</button>
-        <button type="button" data-view="assets">资产影响</button>
+        <button type="button" data-view="enrich">情报富集</button>
         <button type="button" data-view="ask">情报问答</button>
         <button type="button" data-view="settings">模型设置</button>
       </nav>
-      <p class="side-note">同一条工作流：发现漏洞，补齐公开字段，再按证据回答。</p>
+      <div class="side-ia">
+        <p><b>监测</b> 默认自动持续采集（CVE + 非 CVE）</p>
+        <p><b>资料库</b> 已沉淀、可检索的知识存档</p>
+        <p><b>富集</b> 对单条漏洞补维度（含影响资产）</p>
+      </div>
     </aside>
     <div class="main">
       <header class="top">
         <div>
-          <p class="eyebrow">智能体驱动的知识情报系统</p>
+          <p class="eyebrow" id="page-eyebrow">智能体驱动的知识情报系统</p>
           <h1 id="page-title">总览</h1>
         </div>
         <div id="llm-pill" class="pill">正在读取配置</div>
       </header>
       <div id="banner" class="banner" hidden></div>
+      <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
 
       <section id="overview" class="view">
         <div class="stats" id="stats"></div>
         <p id="monitor-line" class="hint"></p>
         <ol class="flow" id="flow">
-          <li><b>监测</b><span>NVD、OSV 与团队情报（B），按编号合并；资料库另同步</span></li>
-          <li><b>富化</b><span>查询风险指标，抓取关联资料与修复记录</span></li>
-          <li><b>入库</b><span>同一编号合并成一条情报</span></li>
-          <li><b>问答</b><span>先检索，再组织回答</span></li>
+          <li><b>监测</b><span>默认自动持续采集宽范围 AI 安全情报（CVE + 非 CVE）；无需先输关键词</span></li>
+          <li><b>资料库</b><span>沉淀可检索原文与片段，供查阅与问答</span></li>
+          <li><b>富集</b><span>对单条漏洞补 EPSS/KEV、关联资料与影响资产</span></li>
+          <li><b>问答</b><span>先检索证据，再组织回答</span></li>
           <li><b>核对</b><span>编号和分数必须来自证据</span></li>
         </ol>
         <div class="split">
           <article class="panel">
             <header class="panel-head">
-              <h2>最近入库</h2>
-              <button type="button" class="text-btn" id="goto-monitor">去监测</button>
+              <h2>最近情报</h2>
+              <button type="button" class="text-btn" id="goto-monitor">打开监测流</button>
             </header>
             <div id="recent"></div>
           </article>
@@ -63,106 +67,176 @@
       </section>
 
       <section id="monitor" class="view" hidden>
-        <form id="collect-form" class="toolbar">
-          <label>监测关键词
-            <input id="keyword" value="llm,vllm,langchain,huggingface,openai,ollama,jailbreak" />
+        <div class="ia-banner">
+          <div>
+            <h2 class="ia-title">情报监测 = 自动持续采集</h2>
+            <p class="hint">默认<strong>自动</strong>监测宽范围 AI 安全情报（CVE + 告警/博客/论文/标准/政策等）。服务启动与定时任务会自己跑；关键词只是可选收窄，不是入口。</p>
+          </div>
+          <div class="ia-actions">
+            <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
+            <p id="auto-monitor-status" class="hint">正在读取自动监测状态…</p>
+          </div>
+        </div>
+        <p id="team-health" class="hint team-health" hidden></p>
+
+        <form id="collect-form" class="toolbar monitor-keyword-bar">
+          <label class="grow">可选关键词（筛选列表；刷新时也可定向采集）
+            <input id="keyword" value="" placeholder="留空=自动宽范围；例如 llm,ollama,vllm" title="多个词用英文逗号分隔，任一匹配即可" />
           </label>
-          <button type="submit" class="primary" id="collect-btn">开始监测</button>
-          <p class="hint">同时询问 NVD、OSV（用第一个词）与团队情报 B（可逗号多词）。某一源失败时其余继续；同一编号合并。非 CVE 资料见「安全资料库」同步。</p>
+          <button type="button" class="ghost" id="clear-keyword-btn">清除关键词</button>
+          <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
         </form>
+        <input id="filter" type="hidden" value="" />
+
         <div class="panel">
           <div class="panel-head">
-            <h2>情报列表</h2>
-            <input id="filter" placeholder="按编号或产品筛选" />
+            <h2>情报流</h2>
+            <div class="chip-row" id="monitor-scope">
+              <button type="button" class="chip is-on" data-monitor-scope="all" onclick="setMonitorScope('all')">全部类型</button>
+              <button type="button" class="chip" data-monitor-scope="document" onclick="setMonitorScope('document')">非 CVE 资料</button>
+              <button type="button" class="chip" data-monitor-scope="cve" onclick="setMonitorScope('cve')">漏洞 CVE</button>
+              <button type="button" class="chip" data-monitor-scope="live" onclick="setMonitorScope('live')">联网结果</button>
+              <button type="button" class="chip" data-monitor-scope="demo" onclick="setMonitorScope('demo')">演示种子</button>
+            </div>
           </div>
-          <div id="monitor-list"></div>
-        </div>
-      </section>
-
-      <section id="enrich" class="view" hidden>
-        <div class="toolbar">
-          <button type="button" class="primary" id="enrich-btn">查询 EPSS、KEV 与论文</button>
-          <p class="hint">CVSS 保留公开记录中的评分提供者。抓取关联资料后，可查看版本范围、攻击条件与技术影响；具体资产影响需要部署信息。</p>
-        </div>
-        <div class="split enrich-layout">
-          <div class="panel" id="enrich-list"></div>
-          <article class="panel" id="enrich-detail">
-            <p class="empty">从左侧选择一条情报，查看富化结果。</p>
-          </article>
+          <p id="monitor-summary" class="hint"></p>
+          <div class="split enrich-layout">
+            <div id="monitor-list"></div>
+            <article class="panel" id="monitor-detail">
+              <p class="empty">点左侧一条查看摘要。漏洞可「送去富集」；非 CVE 资料可打开资料库。</p>
+            </article>
+          </div>
         </div>
       </section>
 
       <section id="library" class="view" hidden>
-        <div class="toolbar">
-          <button type="button" class="primary" id="library-sync">同步公开资料</button>
-          <button type="button" class="ghost" id="library-team-sync">同步团队资料</button>
-          <p class="hint">公开资料可获取原文；团队同步导入队友已采集的题名/描述，单独标注范围。arXiv 论文可显式获取 HTML 全文；摘要、目录与正文分别保留。</p>
+        <div class="ia-banner">
+          <div>
+            <h2 class="ia-title">安全资料库 = 已沉淀知识</h2>
+            <p class="hint">这里存放可检索的原文与片段。与「监测」不同：监测是自动采集流；资料库是沉淀后的查阅与问答底座。</p>
+          </div>
+          <div class="ia-actions toolbar">
+            <button type="button" class="primary" id="library-sync">同步公开资料</button>
+            <button type="button" class="ghost" id="library-team-sync">同步团队资料</button>
+          </div>
         </div>
         <p id="library-summary" class="hint"></p>
         <form id="library-search-form" class="toolbar">
-          <label for="library-query">检索资料<input id="library-query" placeholder="例如：提示注入、模型供应链、vLLM 或 CVE 编号" /></label>
-          <label for="library-type">资料类型<select id="library-type">
-            <option value="">全部</option><option value="vendor_advisory">项目安全公告</option>
-            <option value="vendor_guidance">厂商安全文档</option><option value="research_article">安全研究文章</option>
-            <option value="academic_paper">学术论文</option><option value="standard">标准 / 风险框架</option><option value="policy">政策法规</option>
+          <label for="library-query">检索<input id="library-query" placeholder="提示注入、供应链、vLLM、CVE…" /></label>
+          <label for="library-type">类别<select id="library-type">
+            <option value="">全部类别</option>
+            <option value="vendor_advisory">项目安全公告</option>
+            <option value="vendor_guidance">厂商安全文档</option>
+            <option value="research_article">安全研究文章</option>
+            <option value="academic_paper">学术论文</option>
+            <option value="standard">标准 / 风险框架</option>
+            <option value="policy">政策法规</option>
           </select></label>
-          <button type="submit" class="ghost">检索原文</button>
+          <button type="submit" class="ghost">检索</button>
         </form>
-        <form id="library-ask-form" class="panel library-ask">
-          <h2>资料问答与关系分析</h2>
-          <p class="hint">原文摘录支持各类资料，最多勾选 4 份。关系分析覆盖间接提示注入、模型供应链；区分来源事实、文献建议与项目综合。自动候选须复核后才能进入补充关系摘录。</p>
-          <label for="library-mode">回答方式</label>
-          <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析（按问题识别主题）</option></select>
-          <label for="library-question">问题</label>
-          <textarea id="library-question" rows="2" placeholder="例如：管理暂行办法对训练数据有什么规定？适用范围是什么？"></textarea>
-          <div class="toolbar"><button type="submit" class="primary" id="library-ask">按证据回答</button><button type="button" class="ghost" id="library-example">填入政策示例</button><button type="button" class="ghost" id="library-relations-example">填入关系示例</button><button type="button" class="ghost" id="library-supply-example">填入供应链示例</button></div>
-          <div id="library-answer" class="answer" aria-live="polite">填写问题后查看按来源组织的原文与引用。</div>
-          <div id="library-relations"></div>
-        </form>
-        <article class="panel">
-          <h2>关系候选审核</h2>
-          <p class="hint">所选文章模式从勾选资料提出主语、关系、宾语和条件，保留整句原文；模型不可用时提出句子供核对。需检查分类、指代、否定词和条件后再通过。队列包含此前生成的候选；通过项不自动成为因果推理前提。开发复核不计为独立验收。</p>
-          <div class="toolbar"><label for="candidate-topic">候选主题</label><select id="candidate-topic"><option value="model_supply_chain">模型供应链</option><option value="indirect_prompt_injection">间接提示注入</option><option value="article_relations">所选文章（先在资料列表勾选）</option></select><button type="button" class="ghost" id="candidate-generate">自动提取候选</button><button type="button" class="ghost" id="candidate-refresh">刷新审核队列</button><button type="button" class="ghost" id="candidate-graph">查看已复核关系</button></div>
-          <p id="candidate-status" class="hint" aria-live="polite">点击刷新查看本机审核队列。</p>
-          <div id="candidate-list"></div>
-        </article>
         <div class="split enrich-layout">
-          <article class="panel"><h2>资料与同步状态</h2><div id="library-sources"></div><div id="library-list"></div></article>
-          <article class="panel"><h2>原文证据</h2><div id="library-evidence"><p class="empty">选择一份资料查看片段，或输入主题检索。</p></div></article>
+          <article class="panel">
+            <header class="panel-head"><h2>资料列表</h2></header>
+            <div id="library-sources" class="meta-block"></div>
+            <div id="library-list"></div>
+          </article>
+          <article class="panel">
+            <header class="panel-head"><h2>原文证据</h2></header>
+            <div id="library-evidence"><p class="empty">选择一份资料，或先检索主题。</p></div>
+          </article>
         </div>
+        <details class="filter-drawer">
+          <summary>高级：资料问答与关系审核（可选）</summary>
+          <form id="library-ask-form" class="panel library-ask">
+            <p class="hint">基于已沉淀资料做摘录或限定主题关系分析；不是监测采集入口。</p>
+            <label for="library-mode">回答方式</label>
+            <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析</option></select>
+            <label for="library-question">问题</label>
+            <textarea id="library-question" rows="2" placeholder="例如：训练数据有哪些规定？"></textarea>
+            <div class="toolbar">
+              <button type="submit" class="primary" id="library-ask">按证据回答</button>
+              <button type="button" class="ghost" id="library-example">政策示例</button>
+              <button type="button" class="ghost" id="library-relations-example">关系示例</button>
+              <button type="button" class="ghost" id="library-supply-example">供应链示例</button>
+            </div>
+            <div id="library-answer" class="answer" aria-live="polite">填写问题后查看引用。</div>
+            <div id="library-relations"></div>
+          </form>
+          <article class="panel">
+            <h2>关系候选审核</h2>
+            <div class="toolbar">
+              <label for="candidate-topic">主题</label>
+              <select id="candidate-topic">
+                <option value="model_supply_chain">模型供应链</option>
+                <option value="indirect_prompt_injection">间接提示注入</option>
+                <option value="article_relations">所选文章</option>
+              </select>
+              <button type="button" class="ghost" id="candidate-generate">提取候选</button>
+              <button type="button" class="ghost" id="candidate-refresh">刷新队列</button>
+              <button type="button" class="ghost" id="candidate-graph">已复核关系</button>
+            </div>
+            <p id="candidate-status" class="hint">点击刷新查看审核队列。</p>
+            <div id="candidate-list"></div>
+          </article>
+        </details>
       </section>
 
-      <section id="assets" class="view" hidden>
-        <div class="panel asset-import">
-          <h2>登记 AI 组件</h2>
-          <p class="hint">每条资产填写编号、名称、确切厂商/产品标识及实际版本。先预览，再按需保存。资产留在本机，版本匹配不连接目标。</p>
-          <div class="toolbar">
-            <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
-            <label for="asset-file">读取 JSON 文件</label><input id="asset-file" type="file" accept=".json,application/json" />
+      <section id="enrich" class="view" hidden>
+        <div class="ia-banner">
+          <div>
+            <h2 class="ia-title">情报富集 = 补齐单条维度</h2>
+            <p class="hint">对已监测到的<strong>漏洞</strong>补充 EPSS、KEV、关联资料，并评估<strong>影响资产</strong>（资产匹配是富集输出，不是独立监测入口）。</p>
           </div>
-          <label for="asset-json">资产 JSON</label>
-          <textarea id="asset-json" rows="6" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
-          <div class="ask-row">
-            <label for="asset-cve">匹配这条情报</label><select id="asset-cve"></select>
-            <button type="button" class="primary" id="asset-preview">预览匹配</button>
-            <button type="button" class="ghost" id="asset-save">保存清单</button>
+          <div class="ia-actions">
+            <button type="button" class="primary" id="enrich-btn">批量查询 EPSS / KEV / 论文</button>
           </div>
-          <p id="asset-message" class="hint">演示清单为虚构组件；填入或预览不会自动保存。</p>
         </div>
-        <article class="panel asset-results">
-          <header class="panel-head"><h2>匹配结果</h2><button type="button" class="text-btn" id="asset-evaluate">评估已保存清单</button></header>
-          <div id="asset-impact"><p class="empty">选择一条情报，预览输入内容或评估已保存清单。</p></div>
-        </article>
-        <article class="panel asset-results">
-          <header class="panel-head"><h2>已保存资产</h2><span id="asset-count"></span></header>
-          <div id="asset-list"></div>
-        </article>
+        <div class="split enrich-layout">
+          <div class="panel" id="enrich-list"></div>
+          <article class="panel" id="enrich-detail">
+            <p class="empty">从左侧选择一条漏洞，查看富集结果与影响资产。</p>
+          </article>
+        </div>
+        <details class="filter-drawer" id="asset-drawer" open>
+          <summary>影响资产（富集维度）</summary>
+          <div class="panel asset-import">
+            <p class="hint">登记本机 AI 组件清单，与当前选中的漏洞做版本匹配。不扫描互联网、不连接目标主机。</p>
+            <div class="toolbar">
+              <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
+              <label for="asset-file">读取 JSON</label>
+              <input id="asset-file" type="file" accept=".json,application/json" />
+            </div>
+            <label for="asset-json">资产 JSON</label>
+            <textarea id="asset-json" rows="5" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
+            <div class="ask-row">
+              <label for="asset-cve">匹配漏洞</label>
+              <select id="asset-cve"></select>
+              <button type="button" class="primary" id="asset-preview">预览匹配</button>
+              <button type="button" class="ghost" id="asset-save">保存清单</button>
+              <button type="button" class="ghost" id="asset-evaluate">评估已保存清单</button>
+            </div>
+            <p id="asset-message" class="hint">演示清单为虚构组件；预览不会自动保存。</p>
+            <div class="split">
+              <div>
+                <h3 class="subhead">匹配结果</h3>
+                <div id="asset-impact"><p class="empty">选择漏洞后预览或评估。</p></div>
+              </div>
+              <div>
+                <h3 class="subhead">已保存资产 <span id="asset-count"></span></h3>
+                <div id="asset-list"></div>
+              </div>
+            </div>
+          </div>
+        </details>
       </section>
+
+      <!-- Kept for compatibility; not in nav — assets live under 富集 -->
+      <section id="assets" class="view" hidden aria-hidden="true"></section>
 
       <section id="ask" class="view" hidden>
         <div class="toolbar">
           <button type="button" id="sample-btn" class="ghost">载入历史演示样例</button>
-          <p class="hint">载入人工核对的 Ollama 案例，用于查看跨文档证据。它不计入实时监测成绩。</p>
+          <p class="hint">载入人工核对的案例用于查看跨文档证据；不计入实时监测成绩。</p>
         </div>
         <form id="ask-form" class="ask-box">
           <label>问题
@@ -175,7 +249,7 @@
             <button type="submit" class="primary" id="ask-btn">提问</button>
             <button type="button" class="ghost" id="new-session">开始新会话</button>
           </div>
-          <p id="conversation-context" class="hint">可以连续追问「那应该怎么修复？」。问题中明确写出的编号优先；比较时写出两个 CVE。</p>
+          <p id="conversation-context" class="hint">可以连续追问。问题中的编号优先。</p>
           <div class="prompts" id="prompts"></div>
         </form>
         <div class="split">
@@ -194,7 +268,7 @@
       <section id="settings" class="view" hidden>
         <form id="settings-form" class="panel settings">
           <h2>国产大模型接口</h2>
-          <p class="hint">填写兼容接口地址和实际模型名。DeepSeek 可使用 https://api.deepseek.com/v1；通义千问请使用账号地域对应的兼容地址。本机 Ollama 可使用 http://127.0.0.1:11434/v1，模型名须已安装，API Key 填 ollama 占位。真实密钥只保存在本机。</p>
+          <p class="hint">填写兼容接口地址和实际模型名。真实密钥只保存在本机。</p>
           <label>API 地址
             <input id="base-url" placeholder="https://api.deepseek.com/v1" />
           </label>

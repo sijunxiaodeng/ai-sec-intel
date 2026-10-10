@@ -10,7 +10,7 @@ from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich,
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
-from rag.retrieve import get_record, knowledge_records, search
+from rag.retrieve import get_record, knowledge_records
 from enrichment.assets import AssetImport, AssetPreview, import_assets, load_assets, impact_report
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +27,13 @@ def _startup():
 class CollectBody(BaseModel):
     # Broader AI-security default; comma-separated multi-keyword supported by monitor_agent.
     keyword: str = "llm"
+
+
+class MonitorRunBody(BaseModel):
+    """One-click auto monitor cycle. Empty keyword uses the built-in AI-security set."""
+    keyword: str = ""
+    sync_library: bool = True
+    max_documents: int = Field(30, ge=1, le=200)
 
 
 class AskBody(BaseModel):
@@ -194,10 +201,208 @@ def overview():
     }
 
 
+def _text_match(needle: str, *parts: str) -> bool:
+    """Simple case-insensitive substring match for list filters (not RAG search)."""
+    text = (needle or "").strip().lower()
+    if not text:
+        return True
+    blob = " ".join(str(part or "") for part in parts).lower()
+    # Support comma-separated OR terms (user keyword boxes often use llm,vllm).
+    terms = [t.strip() for t in text.split(",") if t.strip()]
+    if not terms:
+        return True
+    return any(term in blob for term in terms)
+
+
+def _filter_cve_records(q: str = ""):
+    records = knowledge_records()
+    if not (q or "").strip():
+        return records
+    out = []
+    for record in records:
+        item = record.get("item") or record
+        if _text_match(
+            q,
+            item.get("cve_id"),
+            item.get("title"),
+            item.get("description"),
+            item.get("product"),
+            " ".join(item.get("affected") or []),
+            " ".join(item.get("sources") or []) or item.get("source"),
+        ):
+            out.append(record)
+    return out
+
+
 @app.get("/api/items")
 def items(q: str = ""):
-    records = search(q, top_k=50) if q else knowledge_records()
+    # List filter must be substring match — RAG search() returns empty for many keywords.
+    records = _filter_cve_records(q)
     return {"items": [_summary(record) for record in records]}
+
+
+_CATEGORY_LABELS = {
+    "academic_paper": "学术论文",
+    "security_blog": "安全博客",
+    "security_community": "安全社区",
+    "technical_standard": "技术标准",
+    "policy_regulation": "政策法规",
+    "vendor_advisory": "厂商公告",
+    "government_alert": "政府告警",
+    "vulnerability_database": "漏洞数据库",
+    "academic": "学术",
+    "policy": "政策",
+    "research": "研究",
+    "standard": "标准",
+    "vendor": "厂商",
+    "research_article": "研究文章",
+    "vendor_guidance": "厂商指引",
+}
+
+
+def _fetch_team_documents(q="", limit=40):
+    import json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    from collectors.intelligence import team_base_url
+
+    base = team_base_url()
+    # Fetch broad list; apply local OR-substring filter so comma keywords don't empty the feed.
+    query = urllib.parse.urlencode({"q": "", "limit": min(max(limit * 3, 40), 100), "offset": 0})
+    try:
+        with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
+            payload = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return [], {"reachable": False, "total": 0}
+    rows = payload.get("items") or []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        category = row.get("source_category") or row.get("category") or ""
+        title = row.get("title") or ""
+        desc = row.get("description") or ""
+        if not _text_match(q, title, desc, category, row.get("source") or "", row.get("url") or ""):
+            continue
+        out.append({
+            "kind": "document",
+            "id": row.get("document_id") or row.get("id") or title,
+            "document_id": row.get("document_id") or "",
+            "title": title,
+            "description": desc,
+            "source": row.get("source") or "",
+            "sources": [row.get("source")] if row.get("source") else [],
+            "category": category,
+            "category_label": _CATEGORY_LABELS.get(category, category or "资料"),
+            "content_type": row.get("content_type") or "",
+            "url": row.get("url") or "",
+            "published_at": row.get("published_at") or row.get("first_seen_at") or "",
+            "demo": bool((row.get("raw_data") or {}).get("demo_fixture"))
+                or title.startswith("【演示】") or desc.startswith("演示用"),
+            "origin": "team_documents",
+        })
+        if len(out) >= limit:
+            break
+    return out, {"reachable": True, "total": payload.get("total", len(out))}
+
+
+def _library_documents(q="", limit=40):
+    from rag.library import documents as library_documents
+
+    rows = library_documents()
+    out = []
+    for row in rows:
+        title = row.get("title") or ""
+        dtype = row.get("document_type") or ""
+        if not _text_match(q, title, dtype, row.get("publisher") or "", row.get("url") or "", row.get("summary") or ""):
+            continue
+        out.append({
+            "kind": "document",
+            "id": row.get("document_id") or title,
+            "document_id": row.get("document_id") or "",
+            "title": title,
+            "description": row.get("summary") or row.get("description") or "",
+            "source": row.get("publisher") or row.get("source_id") or "",
+            "sources": [row.get("publisher") or row.get("source_id") or "资料库"],
+            "category": dtype,
+            "category_label": _CATEGORY_LABELS.get(dtype, dtype or "资料"),
+            "content_type": dtype,
+            "url": row.get("url") or "",
+            "published_at": row.get("published_at") or row.get("retrieved_at") or "",
+            "demo": title.startswith("【演示】"),
+            "origin": "library",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get("/api/monitor/feed")
+def monitor_feed(q: str = "", kind: str = "all"):
+    """Monitor feed: CVE cards + non-CVE documents (B team docs + C library)."""
+    kind = (kind or "all").strip().lower()
+    if kind not in {"all", "cve", "document", "demo", "live"}:
+        raise HTTPException(status_code=422, detail="kind 仅支持 all/cve/document/demo/live")
+
+    cve_items = []
+    if kind in {"all", "cve", "demo", "live"}:
+        # Use substring filter, not RAG search — otherwise keyword clicks look empty.
+        records = _filter_cve_records(q)
+        for record in records:
+            summary = _summary(record)
+            summary["kind"] = "cve"
+            title = summary.get("title") or ""
+            desc = summary.get("description") or ""
+            summary["demo"] = bool(
+                (summary.get("cve_id") or "").startswith("CVE-2099-")
+                or title.startswith("【演示】")
+                or "Demo offline" in (title + desc)
+                or "合成" in (title + desc)
+            )
+            cve_items.append(summary)
+
+    doc_items = []
+    team_meta = {"reachable": False, "total": 0}
+    if kind in {"all", "document", "demo", "live"}:
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=40)
+        lib_docs = _library_documents(q=q, limit=40)
+        # Prefer team docs; add library docs not already present by URL/title.
+        seen = set()
+        for row in team_docs + lib_docs:
+            key = (row.get("url") or "") + "|" + (row.get("title") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            doc_items.append(row)
+
+    if kind == "demo":
+        cve_items = [row for row in cve_items if row.get("demo")]
+        doc_items = [row for row in doc_items if row.get("demo")]
+    elif kind == "live":
+        cve_items = [row for row in cve_items if not row.get("demo")]
+        doc_items = [row for row in doc_items if not row.get("demo")]
+    elif kind == "cve":
+        doc_items = []
+    elif kind == "document":
+        cve_items = []
+
+    # Put non-CVE documents first on "all" so the monitor is not a CVE wall.
+    if kind == "all":
+        feed_items = doc_items + cve_items
+    else:
+        feed_items = cve_items + doc_items
+    return {
+        "kind": kind,
+        "counts": {
+            "cve": len(cve_items),
+            "document": len(doc_items),
+            "total": len(cve_items) + len(doc_items),
+        },
+        "team_documents": team_meta,
+        "items": feed_items,
+    }
 
 
 @app.get("/api/items/{cve_id}")
@@ -285,10 +490,103 @@ def asset_impact(cve_id: str):
     return impact_report(_asset_assessment(cve_id), load_assets())
 
 
+# Built-in AI-security scope for one-click auto monitor (comma-separated).
+AUTO_MONITOR_KEYWORDS = (
+    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection"
+)
+
+
+def _team_reachable_probe():
+    """Fast probe so UI can warn when B :8765 is down without freezing."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from collectors.intelligence import team_base_url
+
+    base = team_base_url()
+    try:
+        with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
+            payload = json.load(resp)
+        return {
+            "reachable": True,
+            "base_url": base,
+            "database_available": bool(payload.get("database_available")),
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return {"reachable": False, "base_url": base, "error": str(exc)[:160]}
+
+
+@app.get("/api/monitor/status")
+def monitor_status():
+    st = monitor_state()
+    team = _team_reachable_probe()
+    return {
+        "mode": "automatic",
+        "interval_hours": st.get("interval_hours"),
+        "auto_on_start": st.get("auto_on_start"),
+        "running": bool(st.get("running")),
+        "last_run": st.get("last_run") or "",
+        "last_count": st.get("last_count") or 0,
+        "last_error": st.get("last_error") or "",
+        "last_keyword": st.get("last_keyword") or "",
+        "team": team,
+        "notice": "默认持续自动监测宽范围 AI 安全情报；手动按钮仅用于立即刷新一轮。",
+    }
+
+
+@app.post("/api/monitor/run")
+def monitor_run(body: MonitorRunBody):
+    """Manual refresh of the automatic monitor cycle (broad AI-security by default)."""
+    keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
+    team = _team_reachable_probe()
+    warnings = []
+    if not team.get("reachable"):
+        warnings.append("团队情报服务（:8765）暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+    try:
+        result = run_collect(keyword)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
+    try:
+        from automation.schedule import mark_run
+        mark_run(count=len(result["records"]), keyword=keyword)
+    except Exception:
+        pass
+    library = None
+    if body.sync_library:
+        if not team.get("reachable"):
+            library = {"status": "skipped", "error": "team unreachable"}
+            warnings.append("已跳过团队资料同步。")
+        else:
+            try:
+                from rag.library import sync_team
+                library = sync_team(max_documents=body.max_documents)
+            except ValueError as exc:
+                library = {"status": "busy", "error": str(exc)}
+            except Exception as exc:
+                library = {"status": "error", "error": type(exc).__name__}
+                warnings.append("团队资料同步失败，CVE/公开源结果仍已刷新。")
+    team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
+                      for s in (result.get("steps") or []))
+    if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
+        warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    return {
+        "mode": "auto",
+        "keyword": keyword,
+        "count": len(result["records"]),
+        "steps": result["steps"],
+        "library_sync": library,
+        "team": team,
+        "warnings": warnings,
+        "items": [_summary(record) for record in result["records"][:10]],
+        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步非 CVE 资料；列表见 /api/monitor/feed。",
+    }
+
+
 @app.post("/api/collect")
 def collect(body: CollectBody):
     try:
-        result = run_collect(body.keyword.strip() or "ollama")
+        result = run_collect(body.keyword.strip() or AUTO_MONITOR_KEYWORDS)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="监测没有完成：%s" % exc)
     return {

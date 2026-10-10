@@ -30,6 +30,13 @@ start_compose() {
   log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
   log "Next: multi-source collect + library team-sync"
   "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
+  log "Triggering one automatic monitor cycle (no keyword required)…"
+  curl -sf --max-time 240 -X POST "$MAIN_URL/api/monitor/run" \
+    -H 'Content-Type: application/json' \
+    -d '{"keyword":"","sync_library":true,"max_documents":30}' \
+    -o "$DEMO_DIR/auto-monitor-boot.json" \
+    && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
+    || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
   log "Keep running: docker compose -p $COMPOSE_PROJECT logs -f"
   log "Stop:           ./scripts/demo-down.sh"
 }
@@ -81,6 +88,13 @@ start_local() {
   log "  B team:        $B_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
   log "Next: multi-source collect + library team-sync"
   "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"
+  log "Triggering one automatic monitor cycle (no keyword required)…"
+  curl -sf --max-time 240 -X POST "$MAIN_URL/api/monitor/run" \
+    -H 'Content-Type: application/json' \
+    -d '{"keyword":"","sync_library":true,"max_documents":30}' \
+    -o "$DEMO_DIR/auto-monitor-boot.json" \
+    && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
+    || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
   log "Logs: $DEMO_DIR/b-api.log  $DEMO_DIR/main-api.log"
   log "Stop: ./scripts/demo-down.sh"
 }

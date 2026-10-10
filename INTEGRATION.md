@@ -32,7 +32,12 @@ AUTO_INGEST_ON_COLLECT=1 ./scripts/demo-up.sh
 - Compose：`docker compose -p ai-sec-intel-demo logs -f`；容器 `restart: unless-stopped`。
 - 本地模式：日志在 `.demo/b-api.log`、`.demo/main-api.log`；进程挂了需重新 `./scripts/demo-up.sh`。
 
-浏览器打开 http://127.0.0.1:8023 ，默认关键词 `llm,...`（AI 安全集合）：监测 → 富化 → 问答（演示 CVE：`CVE-2099-90001` 等合成多源）。
+浏览器打开 http://127.0.0.1:8023：
+
+1. **情报监测** → 打开即应有自动情报流（`demo-up` / 服务启动已跑一轮）；可选「立即刷新一轮」（有 toast/条数）；关键词仅筛选
+2. **安全资料库** → 查阅已沉淀资料（与监测流分工不同）
+3. **情报富集** → 选 CVE 补 EPSS/KEV，并在同页评估**影响资产**
+4. **情报问答** → 演示 CVE：`CVE-2099-90001` 等
 
 ## 手动启动（不用一键脚本时）
 

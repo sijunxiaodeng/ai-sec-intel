@@ -345,6 +345,15 @@ def _merge_github_advisory(merged: UnifiedVulnerability, item: IntelligenceItem)
         }
         if info not in merged.affected_packages:
             merged.affected_packages.append(info)
+    if not merged.product:
+        names = {
+            (vulnerability.get("package") or {}).get("name")
+            for vulnerability in raw.get("vulnerabilities") or []
+        }
+        names.discard(None)
+        names.discard("")
+        if len(names) == 1:
+            merged.product = names.pop()
     _merge_references(merged, raw.get("references") or [])
 
 
