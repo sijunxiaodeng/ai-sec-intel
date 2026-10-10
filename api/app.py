@@ -580,6 +580,10 @@ def _fetch_team_documents(q="", limit=40):
 
     Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
     after demo-up seed when no sidecar is running).
+
+    Do not import ``collectors.intelligence`` before the embed branch: during an
+    in-process B monitor cycle, intelligence/ is briefly first on ``sys.path``
+    and that import raises ModuleNotFoundError (wrong ``collectors`` package).
     """
     import json
     import urllib.error
@@ -587,14 +591,16 @@ def _fetch_team_documents(q="", limit=40):
     import urllib.request
 
     from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
-    from collectors.intelligence import team_base_url
 
     page_limit = min(max(limit * 3, 40), 100)
     try:
         if embed_enabled():
-            prefer_root_packages()
+            # list_documents_page reads api_v6 repos; avoids collectors.* clash.
             payload = list_documents_page("", limit=page_limit, offset=0)
         else:
+            prefer_root_packages()
+            from collectors.intelligence import team_base_url
+
             base = team_base_url()
             query = urllib.parse.urlencode({"q": "", "limit": page_limit, "offset": 0})
             with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:

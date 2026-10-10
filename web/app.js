@@ -328,7 +328,8 @@ function setPill(ready) {
   pill.textContent = ready ? "大模型已配置" : "大模型未配置，问答先摘录原文";
 }
 
-function setView(name) {
+function setView(name, opts) {
+  opts = opts || {};
   clearError();
   if (name === "assets") name = "enrich";
   Object.keys(titles).forEach(function (key) {
@@ -343,7 +344,8 @@ function setView(name) {
   if (name === "overview") loadOverview();
   if (name === "monitor") {
     loadMonitorStatus();
-    loadItems("monitor");
+    // Skip feed fetch while a refresh is in flight — avoids racing B monitor path.
+    if (!monitorRefreshing && !opts.skipFeed) loadItems("monitor");
   }
   if (name === "enrich") loadItems(name);
   if (name === "ask") loadAsk();
@@ -594,6 +596,11 @@ function loadItems(view) {
       lastMonitorFeed = data;
       return renderMonitorFeed(data);
     }).catch(function (error) {
+      if (monitorRefreshing) {
+        // Soft-fail during in-flight refresh; final loadItems after run will retry.
+        setMonitorStatus("监测进行中，情报流稍后自动刷新…");
+        return null;
+      }
       showError(error);
       setMonitorStatus("刷新情报流失败：" + (error.message || "请求失败"));
       throw error;
@@ -1263,7 +1270,7 @@ document.addEventListener("click", function (event) {
   if (!btn || btn.getAttribute("data-bound") === "1") return;
   event.preventDefault();
   try {
-    if (btn.id === "overview-monitor-btn") setView("monitor");
+    if (btn.id === "overview-monitor-btn") setView("monitor", { skipFeed: true });
     var result = runMonitorRefresh({ sync_library: true });
     if (result && typeof result.catch === "function") {
       result.catch(function (error) { showError(error || new Error("操作失败")); });
@@ -1277,7 +1284,7 @@ bindClick("auto-monitor-btn", function () {
   return runMonitorRefresh({ sync_library: true });
 });
 bindClick("overview-monitor-btn", function () {
-  setView("monitor");
+  setView("monitor", { skipFeed: true });
   return runMonitorRefresh({ sync_library: true });
 });
 ["auto-monitor-btn", "overview-monitor-btn"].forEach(function (id) {

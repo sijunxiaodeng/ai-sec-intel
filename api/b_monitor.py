@@ -51,34 +51,34 @@ def _int_env(name: str, default: int) -> int:
 
 @contextmanager
 def _intelligence_import_scope() -> Iterator[None]:
-    """Prefer intelligence/ imports; restore root ``collectors`` afterward."""
-    from api.b_embed import INTEL_ROOT, ensure_intelligence_path
+    """Prefer intelligence/ imports; restore root ``collectors`` afterward.
 
-    ensure_intelligence_path()
-    intel = str(INTEL_ROOT.resolve())
-    # Force intel to the front even if something else reordered sys.path.
-    while intel in sys.path:
-        sys.path.remove(intel)
-    sys.path.insert(0, intel)
+    Holds ``b_embed._PATH_LOCK`` for the whole cycle so concurrent
+    ``prefer_root_packages()`` cannot interleave mid-import.
+    """
+    from api.b_embed import INTEL_ROOT, ROOT, _PATH_LOCK, prefer_root_packages
 
-    stashed: dict[str, Any] = {}
-    for key in list(sys.modules):
-        if any(key == name or key.startswith(name + ".") for name in _INTEL_SHADOW):
-            stashed[key] = sys.modules.pop(key)
-    try:
-        yield
-    finally:
-        # Drop intel-shadowed modules loaded during the call…
+    with _PATH_LOCK:
+        intel = str(INTEL_ROOT.resolve())
+        root = str(ROOT.resolve())
+        for path in (intel, root):
+            while path in sys.path:
+                sys.path.remove(path)
+        sys.path.insert(0, intel)
+        sys.path.insert(1, root)
+
+        stashed: dict[str, Any] = {}
         for key in list(sys.modules):
             if any(key == name or key.startswith(name + ".") for name in _INTEL_SHADOW):
-                sys.modules.pop(key, None)
-        # …then restore whatever A had (e.g. collectors.intelligence).
-        sys.modules.update(stashed)
-        # Path must put ROOT first again — otherwise the next import of
-        # collectors.team_documents resolves to intelligence/collectors.
-        from api.b_embed import prefer_root_packages
-
-        prefer_root_packages()
+                stashed[key] = sys.modules.pop(key)
+        try:
+            yield
+        finally:
+            for key in list(sys.modules):
+                if any(key == name or key.startswith(name + ".") for name in _INTEL_SHADOW):
+                    sys.modules.pop(key, None)
+            sys.modules.update(stashed)
+            prefer_root_packages()
 
 
 def run_b_monitor_cycle(
