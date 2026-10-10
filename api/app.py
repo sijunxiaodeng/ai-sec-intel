@@ -218,9 +218,9 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         source_level, source_note = "缺口", "尚无可用类别观测"
 
     if latency_count and latency_count > 0:
-        latency_level, latency_note = "部分可计", f"可计时效样本 {latency_count}；间隔≠发布→采集延迟"
+        latency_level, latency_note = "部分可计", f"可计时效样本 {latency_count}；间隔≠发布→采集延迟；新鲜度看 feed.freshness（近7/30天）"
     else:
-        latency_level, latency_note = "未达证", "latency_count=0 / sla_evidence 不足；勿用定时间隔冒充延迟"
+        latency_level, latency_note = "未达证", "latency_count=0 / sla_evidence 不足；勿用定时间隔或 CVE 年份冒充发布→采集延迟；列表已按 published_at 排序仅改善观感"
 
     enrich_cov = _enrichment_field_coverage(records)
     dim_n = enrich_cov["dimension_count"]
@@ -622,11 +622,50 @@ def monitor_feed(q: str = "", kind: str = "all"):
     elif kind == "document":
         cve_items = []
 
-    # Put non-CVE documents first on "all" so the monitor is not a CVE wall.
-    if kind == "all":
-        feed_items = doc_items + cve_items
-    else:
-        feed_items = cve_items + doc_items
+    def _pub_ts(row):
+        raw = (row.get("published_at") or "").strip()
+        if not raw:
+            return 0.0
+        text = raw.replace("Z", "+00:00")
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(text)
+            return dt.timestamp()
+        except Exception:
+            # Date-only YYYY-MM-DD
+            try:
+                from datetime import datetime, timezone
+                return datetime.fromisoformat(raw[:10]).replace(tzinfo=timezone.utc).timestamp()
+            except Exception:
+                return 0.0
+
+    def _freshness_bucket(ts, now_ts):
+        if not ts:
+            return "unknown"
+        age_days = (now_ts - ts) / 86400.0
+        if age_days <= 7:
+            return "days_7"
+        if age_days <= 30:
+            return "days_30"
+        return "older"
+
+    from datetime import datetime, timezone
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    # Recency-first across CVE + docs. CVE-2025 id ≠ old intel; sort by published_at.
+    # Demo/synthetic sinks after live items with the same timestamp.
+    feed_items = cve_items + doc_items
+    feed_items.sort(key=lambda row: (-_pub_ts(row), 1 if row.get("demo") else 0, row.get("cve_id") or row.get("title") or ""))
+
+    freshness = {"days_7": 0, "days_30": 0, "older": 0, "unknown": 0, "demo": 0}
+    for row in feed_items:
+        if row.get("demo"):
+            freshness["demo"] += 1
+        bucket = _freshness_bucket(_pub_ts(row), now_ts)
+        freshness[bucket] = freshness.get(bucket, 0) + 1
+    freshness["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    freshness["note"] = "按 published_at 新→旧；CVE 编号年份≠发布时间；近7/30天=监测新鲜度口径"
+
     return {
         "kind": kind,
         "counts": {
@@ -634,8 +673,10 @@ def monitor_feed(q: str = "", kind: str = "all"):
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
         },
+        "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
+        "sort": "published_at_desc",
     }
 
 

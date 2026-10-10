@@ -174,6 +174,16 @@ for s in steps:
     print("-", s.get("action"), "|", (s.get("detail") or "")[:160])
 sys.exit(0 if c.get("mode")=="auto" and team_ok and not team_fail else 1)
 PY
+python3 - <<PY
+import json,sys
+r=json.load(open("$OUT/monitor-run.json",encoding="utf-8"))
+diag=r.get("source_diag") or {}
+need=("nvd","osv","b_team","c_library_sync")
+ok=all(k in diag for k in need) and isinstance(diag.get("written"), int)
+print("source_diag", {k: (diag.get(k) or {}).get("status") for k in need}, "written", diag.get("written"))
+sys.exit(0 if ok else 1)
+PY
+check "monitor-run-source-diag" true
 check "auto-monitor-run-ok" true
 
 curl -sf --max-time 5 "$MAIN_URL/api/monitor/feed?kind=all" -o "$OUT/monitor-feed.json"

@@ -575,6 +575,20 @@ h3.subhead { font-size: 12px; font-weight: 700; margin: 12px 0 8px; color: var(-
 .row .title { font-weight: 650; }
 .row .desc { grid-column: 1 / -1; color: var(--muted); font-size: 13px; }
 .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.fresh-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #eceff3;
+  color: var(--muted);
+  vertical-align: middle;
+}
+.fresh-badge.is-hot { background: #e7f2ee; color: var(--low); }
+.fresh-badge.is-warm { background: #f3edd8; color: var(--mid); }
 .demo-badge, .kind-badge {
   display: inline-block;
   font-size: 10px;

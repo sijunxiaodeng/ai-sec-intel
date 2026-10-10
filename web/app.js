@@ -104,6 +104,18 @@ function dateText(value) {
   return (value || "").slice(0, 10) || "未知";
 }
 
+function freshnessLabel(publishedAt) {
+  var raw = (publishedAt || "").trim();
+  if (!raw) return "";
+  var ms = Date.parse(raw.length === 10 ? raw + "T00:00:00Z" : raw);
+  if (!ms) return "";
+  var days = Math.floor((Date.now() - ms) / 86400000);
+  if (days <= 7) return "近7天";
+  if (days <= 30) return "近30天";
+  if (days < 0) return "日期异常";
+  return "更早";
+}
+
 function epssText(epss) {
   if (!epss) return "尚未查询";
   if (epss.status === "ok") return String(epss.score);
@@ -169,6 +181,14 @@ function renderItemRow(parent, item, onPick) {
     kindBadge.textContent = "非CVE";
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(kindBadge);
+  }
+  var fresh = freshnessLabel(item.published_at);
+  if (fresh) {
+    var freshBadge = document.createElement("span");
+    freshBadge.className = "fresh-badge" + (fresh === "近7天" ? " is-hot" : fresh === "近30天" ? " is-warm" : "");
+    freshBadge.textContent = fresh;
+    titleLine.appendChild(document.createTextNode(" "));
+    titleLine.appendChild(freshBadge);
   }
   add(id, "div", "meta", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明");
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
@@ -461,10 +481,16 @@ function loadItems(view) {
       var teamMeta = data.team_documents || {};
       if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "feed 探测失败" });
       if (summary) {
-        summary.textContent = "情报流：漏洞 CVE " + (counts.cve || 0) + " · 非 CVE 资料 " + (counts.document || 0)
+        var fresh = data.freshness || {};
+        summary.textContent = "情报流（按发布时间新→旧）：CVE " + (counts.cve || 0)
+          + " · 非 CVE " + (counts.document || 0)
           + "（团队文档 " + teamTotal + "）"
-          + (query ? " · 已按「" + query + "」收窄" : " · 自动流（无需先输关键词）")
-          + "。默认自动采集；按钮仅「立即刷新一轮」。";
+          + " · 近7天 " + (fresh.days_7 || 0)
+          + " · 近30天 " + (fresh.days_30 || 0)
+          + " · 更早 " + (fresh.older || 0)
+          + " · 演示 " + (fresh.demo || 0)
+          + (query ? " · 已按「" + query + "」收窄" : "")
+          + "。CVE 编号年份≠发布时间；「演示」合成不计入实时监测成绩。点「立即刷新一轮」拉 NVD 近30天修改窗。";
       }
       if (!items.length) {
         var empty = add(target, "p", "empty", "");

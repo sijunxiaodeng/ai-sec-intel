@@ -1,17 +1,27 @@
 # NVD 关键词采集。B 以后在 collectors 里加别的来源，返回值仍用 models.normalize。
+# Recency: prefer lastMod window (30d → 90d → unrestricted) so keyword hits are not
+# dominated by ancient CVE-* year labels that happen to match "llm".
 
 import json
+import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 from models import normalize
 
 
-def fetch_nvd(keyword, limit=10):
-    url = (
-        "https://services.nvd.nist.gov/rest/json/cves/2.0"
-        "?keywordSearch=%s&resultsPerPage=%s"
-        % (urllib.request.quote(keyword), int(limit))
-    )
+def fetch_nvd(keyword, limit=10, last_mod_days=None):
+    params = {
+        "keywordSearch": keyword,
+        "resultsPerPage": int(limit),
+    }
+    if last_mod_days:
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=int(last_mod_days))
+        # NVD 2.0 expects local-like ISO without offset; use explicit Z-less form with ms.
+        params["lastModStartDate"] = start.strftime("%Y-%m-%dT%H:%M:%S.000")
+        params["lastModEndDate"] = end.strftime("%Y-%m-%dT%H:%M:%S.000")
+    url = "https://services.nvd.nist.gov/rest/json/cves/2.0?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url, headers={"User-Agent": "ai-sec-intel-student"})
     with urllib.request.urlopen(request, timeout=90) as response:
         return json.loads(response.read().decode("utf-8"))
@@ -112,20 +122,30 @@ def to_card(item, keyword, collected_at):
 class NVDCollector(object):
     """B 的采集接口：collect() 返回 IntelligenceItem 列表。"""
 
-    def __init__(self, keyword="ollama", limit=10):
+    def __init__(self, keyword="ollama", limit=20):
         self.keyword = keyword
         self.limit = limit
 
     def collect(self):
-        from datetime import datetime, timezone
-
         from models import intelligence_item
 
-        payload = fetch_nvd(self.keyword, self.limit)
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Prefer recently modified matches; widen if the short window is empty.
+        payload = {"vulnerabilities": []}
+        for days in (30, 90, None):
+            try:
+                payload = fetch_nvd(self.keyword, self.limit, last_mod_days=days)
+            except Exception:
+                if days is None:
+                    raise
+                continue
+            if payload.get("vulnerabilities") or days is None:
+                break
         items = []
         for vuln in payload.get("vulnerabilities") or []:
             card = to_card(vuln, self.keyword, collected_at)
             if card.get("cve_id"):
                 items.append(intelligence_item(card))
+        # Newest published first within this batch (CVE year ≠ freshness).
+        items.sort(key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""), reverse=True)
         return items
