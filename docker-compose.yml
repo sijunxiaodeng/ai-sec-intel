@@ -68,6 +68,10 @@ services:
       APP_PORT: "8023"
       TEAM_INTEL_MODE: embed
       INTELLIGENCE_DB_PATH: /app/intelligence/data/intelligence.db
+      B_MONITOR_ENABLED: "1"
+      B_MONITOR_ON_REFRESH: "1"
+      B_MONITOR_SOURCE_TIMEOUT: "45"
+      B_MONITOR_OVERALL_TIMEOUT: "180"
       # Stable demo default: skip long network ingest on every collect.
       AUTO_INGEST_ON_COLLECT: ${AUTO_INGEST_ON_COLLECT:-0}
       PYTHONUTF8: "1"

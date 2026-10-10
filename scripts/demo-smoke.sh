@@ -185,13 +185,27 @@ python3 - <<PY
 import json,sys
 r=json.load(open("$OUT/monitor-run.json",encoding="utf-8"))
 diag=r.get("source_diag") or {}
-need=("nvd","osv","b_team","c_library_sync")
+need=("nvd","osv","b_monitor","b_team","c_library_sync")
 ok=all(k in diag for k in need) and isinstance(diag.get("written"), int)
+bmon=(diag.get("b_monitor") or {}).get("status") or ""
+# In-process B cycle may be 成功/部分/超时/跳过 — not "未请求" under default embed
 print("source_diag", {k: (diag.get(k) or {}).get("status") for k in need}, "written", diag.get("written"))
-sys.exit(0 if ok else 1)
+sys.exit(0 if ok and bmon and bmon != "未请求" else 1)
 PY
 check "monitor-run-source-diag" true
 check "auto-monitor-run-ok" true
+# Single-process: no sidecar pid when embed
+python3 - <<PY
+import os, sys
+pid = os.path.join(os.environ.get("DEMO_DIR", ".demo"), "b.pid")
+mode = os.environ.get("TEAM_INTEL_MODE", "embed")
+if mode == "embed" and os.path.isfile(pid):
+    print("unexpected b.pid in embed mode", pid)
+    sys.exit(1)
+print("single_process_ok mode", mode, "b.pid", os.path.isfile(pid))
+sys.exit(0)
+PY
+check "single-process-no-b-pid" true
 
 curl -sf --max-time 5 "$MAIN_URL/api/monitor/feed?kind=all" -o "$OUT/monitor-feed.json"
 python3 - <<PY

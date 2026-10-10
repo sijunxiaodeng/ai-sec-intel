@@ -36,36 +36,40 @@ elif [[ "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
 fi
 
 if [[ "$B_MONITOR" == "1" ]]; then
-  log "attempting B multi-source run_monitor --once (timeout=${MONITOR_TIMEOUT}s, source-timeout=${SOURCE_TIMEOUT}s)"
+  log "attempting B multi-source via :8023 in-process (POST /api/monitor/b-cycle, timeout=${MONITOR_TIMEOUT}s)"
   set +e
-  if [[ "$mode" == "compose" ]] && have_docker; then
-    timeout --signal=TERM --kill-after=15s "$MONITOR_TIMEOUT" \
-      docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" run --rm --no-deps \
-      -e INTELLIGENCE_DB_PATH=/app/data/intelligence.db \
-      b-api python run_monitor.py --once \
-      --source-timeout "$SOURCE_TIMEOUT" --workers 4 \
-      >"$OUT/b-monitor.log" 2>&1
+  # Prefer unified app endpoint (embed). Fallback: root venv calling api.b_monitor.
+  if curl -sf --max-time 3 "$MAIN_URL/api/overview" >/dev/null 2>&1; then
+    curl -sf --max-time "$MONITOR_TIMEOUT" -X POST "$MAIN_URL/api/monitor/b-cycle" \
+      -o "$OUT/b-monitor.json" 2>"$OUT/b-monitor.log"
     rc=$?
   else
     ensure_venvs
     timeout --signal=TERM --kill-after=15s "$MONITOR_TIMEOUT" \
       env INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db" \
-      "$ROOT/intelligence/.venv/bin/python" "$ROOT/intelligence/run_monitor.py" --once \
-      --db "$ROOT/intelligence/data/intelligence.db" \
-      --source-timeout "$SOURCE_TIMEOUT" --workers 4 \
-      >"$OUT/b-monitor.log" 2>&1
+          B_MONITOR_SOURCE_TIMEOUT="$SOURCE_TIMEOUT" \
+          B_MONITOR_OVERALL_TIMEOUT="$MONITOR_TIMEOUT" \
+          PYTHONPATH="$ROOT:$ROOT/intelligence" \
+      "$ROOT/.venv/bin/python" -c "from api.b_monitor import run_b_monitor_cycle; import json; print(json.dumps(run_b_monitor_cycle(),ensure_ascii=False))" \
+      >"$OUT/b-monitor.json" 2>"$OUT/b-monitor.log"
     rc=$?
   fi
   set -e
-  if [[ "$rc" -eq 0 ]]; then
-    monitor_status="ok"
-    monitor_detail="run_monitor completed (see b-monitor.log)"
+  if [[ "$rc" -eq 0 ]] && [[ -s "$OUT/b-monitor.json" ]]; then
+    monitor_status="$(python3 -c "import json; print(json.load(open('$OUT/b-monitor.json')).get('status','unknown'))" 2>/dev/null || echo unknown)"
+    monitor_detail="in-process b-cycle status=$monitor_status (see b-monitor.json)"
+    # Normalize ok/partial as success for demo summary
+    if [[ "$monitor_status" == "success" || "$monitor_status" == "partial" ]]; then
+      monitor_status="ok"
+    fi
   elif [[ "$rc" -eq 124 ]]; then
     monitor_status="timeout"
-    monitor_detail="run_monitor exceeded ${MONITOR_TIMEOUT}s — keeping seed/partial DB"
+    monitor_detail="b-cycle exceeded ${MONITOR_TIMEOUT}s — keeping seed/partial DB"
+    echo '{"status":"timeout"}' >"$OUT/b-monitor.json"
   else
     monitor_status="failed"
-    monitor_detail="run_monitor exit=$rc — keeping seed fixtures (offline/rate-limit OK)"
+    monitor_detail="b-cycle exit=$rc — keeping seed fixtures (offline/rate-limit OK)"
+    echo '{"status":"failed"}' >"$OUT/b-monitor.json"
   fi
   log "B monitor: $monitor_status — $monitor_detail"
 else
@@ -73,16 +77,16 @@ else
   monitor_status="disabled"
 fi
 
-# B coverage snapshot (best-effort)
-if curl -sf --max-time 5 "$B_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" 2>/dev/null; then
+# B coverage / docs / health via single public port :8023 only
+if curl -sf --max-time 5 "$MAIN_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" 2>/dev/null; then
   coverage_note="coverage written"
 else
   coverage_note="coverage unavailable"
   echo '{}' >"$OUT/b-coverage.json"
 fi
-curl -sf --max-time 5 "$B_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" 2>/dev/null \
+curl -sf --max-time 5 "$MAIN_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" 2>/dev/null \
   || echo '{}' >"$OUT/b-documents-stats.json"
-curl -sf --max-time 5 "$B_URL/api/intelligence/health" -o "$OUT/b-health.json" 2>/dev/null \
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/health" -o "$OUT/b-health.json" 2>/dev/null \
   || echo '{}' >"$OUT/b-health.json"
 
 # C: sync team documents from B into library (requires main API)
@@ -123,19 +127,21 @@ if [[ "$LIBRARY_SYNC" == "1" ]]; then
   # Curated relation topics need arXiv HTML full text (abstract-only breaks injection graph).
   log "best-effort full-text for curated arXiv paper 2302.12173"
   set +e
-  paper_id="$(python3 - <<'PY'
-import json,urllib.request
-base="'"$MAIN_URL"'"
+  paper_id="$(
+    MAIN_URL="$MAIN_URL" python3 - <<'PY'
+import json, os, urllib.request
+base = os.environ["MAIN_URL"].rstrip("/")
 try:
-    with urllib.request.urlopen(base+"/api/library", timeout=10) as r:
-        items=json.load(r).get("items") or []
+    with urllib.request.urlopen(base + "/api/library", timeout=10) as r:
+        items = json.load(r).get("items") or []
 except Exception:
     raise SystemExit(0)
 for row in items:
     if (row.get("url") or "").rstrip("/") == "https://arxiv.org/abs/2302.12173":
-        print(row["document_id"]); break
+        print(row["document_id"])
+        break
 PY
-)"
+  )"
   if [[ -n "${paper_id:-}" ]]; then
     curl -sf --max-time 90 -X POST "$MAIN_URL/api/library/${paper_id}/full-text" \
       -o "$OUT/paper-full-text.json" && log "paper full-text: ok ($paper_id)" \
@@ -150,11 +156,12 @@ AI_KEYWORDS_CSV="$AI_SECURITY_KEYWORDS" \
 MONITOR_STATUS="$monitor_status" MONITOR_DETAIL="$monitor_detail" \
 TEAM_SYNC_STATUS="$team_sync_status" LIBRARY_SYNC_STATUS="$library_sync_status" \
 COVERAGE_NOTE="$coverage_note" MODE="$mode" OUT_DIR="$OUT" \
-MAIN_URL="$MAIN_URL" B_URL="$B_URL" \
+MAIN_URL="$MAIN_URL" \
 python3 - <<'PY'
 import json, os
 from pathlib import Path
 out = Path(os.environ["OUT_DIR"])
+main = os.environ["MAIN_URL"]
 summary = {
     "label": "demo_collect_partial_ok",
     "mode": os.environ["MODE"],
@@ -163,8 +170,12 @@ summary = {
     "library_sync": {"status": os.environ["LIBRARY_SYNC_STATUS"]},
     "coverage_note": os.environ["COVERAGE_NOTE"],
     "ai_keywords": [k.strip() for k in os.environ.get("AI_KEYWORDS_CSV", "").split(",") if k.strip()],
-    "urls": {"main": os.environ["MAIN_URL"], "b": os.environ["B_URL"]},
-    "note": "Live multi-source is best-effort; seed fixtures labeled demo/synthetic. Not SLA evidence.",
+    "urls": {
+        "main": main,
+        "b_health": main.rstrip("/") + "/api/intelligence/health",
+        "b_cycle": main.rstrip("/") + "/api/monitor/b-cycle",
+    },
+    "note": "In-process B monitor via :8023; seed fixtures labeled demo/synthetic. Not SLA evidence.",
 }
 out.joinpath("summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(summary, ensure_ascii=False, indent=2))

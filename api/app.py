@@ -893,10 +893,28 @@ def monitor_status():
     }
 
 
+@app.post("/api/monitor/b-cycle")
+def monitor_b_cycle():
+    """Run one B multi-source monitor cycle in-process (partial/timeout OK)."""
+    from api.b_monitor import run_b_monitor_cycle
+
+    return run_b_monitor_cycle()
+
+
 @app.post("/api/monitor/run")
 def monitor_run(body: MonitorRunBody):
     """Manual refresh of the automatic monitor cycle (broad AI-security by default)."""
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
+    from api.b_embed import embed_enabled
+    from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
+
+    b_cycle = None
+    if embed_enabled() and b_monitor_on_refresh():
+        try:
+            b_cycle = run_b_monitor_cycle()
+        except Exception as exc:
+            b_cycle = {"status": "failed", "error": "%s: %s" % (type(exc).__name__, exc)[:160]}
+
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
@@ -905,6 +923,11 @@ def monitor_run(body: MonitorRunBody):
             warnings.append("团队情报库暂不可用（同进程嵌入），已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
         else:
             warnings.append("团队情报 sidecar 暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+    if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
+        warnings.append(
+            "B 多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
+            % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
+        )
     try:
         result = run_collect(keyword)
     except Exception as exc:
@@ -970,9 +993,27 @@ def monitor_run(body: MonitorRunBody):
     else:
         c_sync = {"status": "成功", "detail": "已尽力同步团队/公开资料到资料库"}
 
+    if b_cycle is None:
+        b_mon = {"status": "未请求", "detail": "B_MONITOR_ON_REFRESH=0 或非 embed"}
+    elif b_cycle.get("status") in {"success", "partial"}:
+        b_mon = {
+            "status": "成功" if b_cycle.get("status") == "success" else "部分",
+            "detail": "同进程多源 %s/%s 成功"
+            % (b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
+        }
+    elif b_cycle.get("status") == "skipped":
+        b_mon = {"status": "跳过", "detail": "已有监测锁或禁用"}
+    elif b_cycle.get("status") == "timeout":
+        b_mon = {"status": "超时", "detail": b_cycle.get("error") or "overall timeout"}
+    elif b_cycle.get("status") == "disabled":
+        b_mon = {"status": "禁用", "detail": "B_MONITOR_ENABLED=0"}
+    else:
+        b_mon = {"status": "失败", "detail": b_cycle.get("error") or b_cycle.get("status")}
+
     source_diag = {
         "nvd": nvd,
         "osv": osv,
+        "b_monitor": b_mon,
         "b_team": b_src,
         "c_library_sync": c_sync,
         "written": len(result["records"]),
@@ -984,10 +1025,11 @@ def monitor_run(body: MonitorRunBody):
         "steps": steps,
         "library_sync": library,
         "team": team,
+        "b_monitor": b_cycle,
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步非 CVE 资料；列表见 /api/monitor/feed。",
+        "notice": "本轮含同进程 B 多源刷新（可 partial）+ NVD/OSV + 团队库读取；列表见 /api/monitor/feed。",
     }
 
 

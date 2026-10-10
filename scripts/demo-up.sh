@@ -12,6 +12,10 @@ MODE="${DEMO_MODE:-auto}"
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
 export AUTO_INGEST_ON_COLLECT
 export TEAM_INTEL_MODE="${TEAM_INTEL_MODE:-embed}"
+export B_MONITOR_ENABLED="${B_MONITOR_ENABLED:-1}"
+export B_MONITOR_ON_REFRESH="${B_MONITOR_ON_REFRESH:-1}"
+export B_MONITOR_SOURCE_TIMEOUT="${B_MONITOR_SOURCE_TIMEOUT:-45}"
+export B_MONITOR_OVERALL_TIMEOUT="${B_MONITOR_OVERALL_TIMEOUT:-180}"
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 
@@ -109,6 +113,8 @@ start_local_embed() {
       export APP_HOST=127.0.0.1 APP_PORT="$MAIN_PORT"
       export TEAM_INTEL_MODE=embed
       export INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db"
+      export B_MONITOR_ENABLED B_MONITOR_ON_REFRESH
+      export B_MONITOR_SOURCE_TIMEOUT B_MONITOR_OVERALL_TIMEOUT
       export AUTO_INGEST_ON_COLLECT
       "$ROOT/.venv/bin/python" -m rag.prepare >/dev/null 2>&1 || true
       nohup "$ROOT/.venv/bin/python" main.py \

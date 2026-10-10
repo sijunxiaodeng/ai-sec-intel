@@ -1,6 +1,15 @@
+# A orchestration shell + embedded B query/monitor (single demo venv).
+# Pins intentionally keep FastAPI/Pydantic on the A-compatible stack.
+# B's intelligence/requirements.lock.txt (FastAPI 0.143 / Pydantic 2) is NOT
+# installed here — create_app() + run_cycle work under these pins (see
+# docs in /cursor/stores/self/docs/unify-resolve-conflicts.md).
 fastapi==0.95.2
 pydantic==1.10.26
 uvicorn==0.22.0
 starlette==0.27.0
+# B collectors / monitor (non-conflicting with A stack)
+requests==2.32.5
+python-dotenv==1.1.1
+# C library extractors
 trafilatura==2.3.1
 pypdf==6.10.0
