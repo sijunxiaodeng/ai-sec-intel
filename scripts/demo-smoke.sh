@@ -102,7 +102,7 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
-check "ia-monitor-copy" grep -q "情报监测 = 自动情报流" "$OUT/page.html"
+check "ia-monitor-copy" grep -q "情报监测 = 自动持续采集" "$OUT/page.html"
 check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
 check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
 python3 - <<PY
@@ -114,8 +114,21 @@ check "ia-no-assets-nav" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"
 check "main-assets" test -s "$OUT/app.js"
 check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
+check "ui-refresh-label" grep -q "立即刷新一轮" "$OUT/page.html"
+check "ui-toast" grep -q 'id="toast"' "$OUT/page.html"
 
-# One-click auto monitor (broad AI scope) — primary IA path
+# Status endpoint: automatic continuous monitoring (no keyword required)
+curl -sf --max-time 5 "$MAIN_URL/api/monitor/status" -o "$OUT/monitor-status.json"
+python3 - <<PY
+import json,sys
+s=json.load(open("$OUT/monitor-status.json"))
+print("status", {k:s.get(k) for k in ("mode","auto_on_start","interval_hours","last_run","last_count","running")})
+print("team", s.get("team"))
+sys.exit(0 if s.get("mode")=="automatic" else 1)
+PY
+check "monitor-status-automatic" true
+
+# One-click refresh (broad AI scope, empty keyword) — must never be silent no-op
 curl -sf --max-time 240 -X POST "$MAIN_URL/api/monitor/run" \
   -H 'Content-Type: application/json' \
   -d '{"keyword":"","sync_library":true,"max_documents":30}' \

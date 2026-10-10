@@ -496,31 +496,90 @@ AUTO_MONITOR_KEYWORDS = (
 )
 
 
+def _team_reachable_probe():
+    """Fast probe so UI can warn when B :8765 is down without freezing."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from collectors.intelligence import team_base_url
+
+    base = team_base_url()
+    try:
+        with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
+            payload = json.load(resp)
+        return {
+            "reachable": True,
+            "base_url": base,
+            "database_available": bool(payload.get("database_available")),
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return {"reachable": False, "base_url": base, "error": str(exc)[:160]}
+
+
+@app.get("/api/monitor/status")
+def monitor_status():
+    st = monitor_state()
+    team = _team_reachable_probe()
+    return {
+        "mode": "automatic",
+        "interval_hours": st.get("interval_hours"),
+        "auto_on_start": st.get("auto_on_start"),
+        "running": bool(st.get("running")),
+        "last_run": st.get("last_run") or "",
+        "last_count": st.get("last_count") or 0,
+        "last_error": st.get("last_error") or "",
+        "last_keyword": st.get("last_keyword") or "",
+        "team": team,
+        "notice": "默认持续自动监测宽范围 AI 安全情报；手动按钮仅用于立即刷新一轮。",
+    }
+
+
 @app.post("/api/monitor/run")
 def monitor_run(body: MonitorRunBody):
-    """One-click auto monitor: broad AI-security CVE collect + optional library team-sync."""
+    """Manual refresh of the automatic monitor cycle (broad AI-security by default)."""
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
+    team = _team_reachable_probe()
+    warnings = []
+    if not team.get("reachable"):
+        warnings.append("团队情报服务（:8765）暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
     try:
         result = run_collect(keyword)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
+    try:
+        from automation.schedule import mark_run
+        mark_run(count=len(result["records"]), keyword=keyword)
+    except Exception:
+        pass
     library = None
     if body.sync_library:
-        try:
-            from rag.library import sync_team
-            library = sync_team(max_documents=body.max_documents)
-        except ValueError as exc:
-            library = {"status": "busy", "error": str(exc)}
-        except Exception as exc:
-            library = {"status": "error", "error": type(exc).__name__}
+        if not team.get("reachable"):
+            library = {"status": "skipped", "error": "team unreachable"}
+            warnings.append("已跳过团队资料同步。")
+        else:
+            try:
+                from rag.library import sync_team
+                library = sync_team(max_documents=body.max_documents)
+            except ValueError as exc:
+                library = {"status": "busy", "error": str(exc)}
+            except Exception as exc:
+                library = {"status": "error", "error": type(exc).__name__}
+                warnings.append("团队资料同步失败，CVE/公开源结果仍已刷新。")
+    team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
+                      for s in (result.get("steps") or []))
+    if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
+        warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
     return {
         "mode": "auto",
         "keyword": keyword,
         "count": len(result["records"]),
         "steps": result["steps"],
         "library_sync": library,
+        "team": team,
+        "warnings": warnings,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步团队非 CVE 资料；列表见 /api/monitor/feed。",
+        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步非 CVE 资料；列表见 /api/monitor/feed。",
     }
 
 

@@ -139,6 +139,25 @@ h2 { font-size: 16px; font-weight: 650; }
   padding: 10px 14px;
   margin-bottom: 16px;
 }
+.toast {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #eef6f1;
+  color: var(--ink);
+  box-shadow: 0 8px 24px rgba(20, 30, 40, 0.08);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.toast.is-busy { background: #eef2f7; }
+.toast.is-error { background: #f6e7df; color: var(--warn); }
+.toast.is-ok { background: #eef6f1; }
+.btn-busy { opacity: 0.75; cursor: wait; }
+.team-health { margin: 0 0 12px; padding: 8px 12px; border-radius: 10px; background: #f6e7df; color: var(--warn); }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }

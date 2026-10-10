@@ -76,15 +76,26 @@ def run(keyword="llm"):
     team_batches = []
     team_raw = 0
     team_err = None
+    # Short timeout + fail-fast: B down must not freeze the whole monitor click.
+    team_timeout = 5
     for kw in team_keys:
         items, step = _safe(
             "团队情报服务(%s)" % kw,
-            lambda k=kw: IntelligenceCollector(keyword=k, base_url=team_base_url()).collect(),
+            lambda k=kw: IntelligenceCollector(
+                keyword=k, base_url=team_base_url(), timeout=team_timeout, max_pages=5
+            ).collect(),
         )
         team_batches.append(items)
         team_raw += len(items)
         if "失败" in step["action"]:
             team_err = step["detail"]
+            # Connection refused / unreachable → skip remaining keywords immediately.
+            detail_l = (step.get("detail") or "").lower()
+            if any(token in detail_l for token in (
+                "connection refused", "连接被拒绝", "timed out", "timeout",
+                "name or service not known", "network is unreachable", "errno 111",
+            )):
+                break
     team_items = _merge_by_cve(team_batches)
 
     if team_err and not team_items:

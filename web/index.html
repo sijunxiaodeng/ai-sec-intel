@@ -39,12 +39,13 @@
         <div id="llm-pill" class="pill">正在读取配置</div>
       </header>
       <div id="banner" class="banner" hidden></div>
+      <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
 
       <section id="overview" class="view">
         <div class="stats" id="stats"></div>
         <p id="monitor-line" class="hint"></p>
         <ol class="flow" id="flow">
-          <li><b>监测</b><span>自动持续采集 AI 安全情报流：CVE 与告警/博客/论文/标准/政策等</span></li>
+          <li><b>监测</b><span>默认自动持续采集宽范围 AI 安全情报（CVE + 非 CVE）；无需先输关键词</span></li>
           <li><b>资料库</b><span>沉淀可检索原文与片段，供查阅与问答</span></li>
           <li><b>富集</b><span>对单条漏洞补 EPSS/KEV、关联资料与影响资产</span></li>
           <li><b>问答</b><span>先检索证据，再组织回答</span></li>
@@ -68,18 +69,19 @@
       <section id="monitor" class="view" hidden>
         <div class="ia-banner">
           <div>
-            <h2 class="ia-title">情报监测 = 自动情报流</h2>
-            <p class="hint">持续采集 AI 安全相关情报（漏洞 CVE + 非 CVE：告警、博客、论文、标准、政策、厂商公告等）。下方列表是<strong>流</strong>；关键词只是可选收窄，不是唯一入口。</p>
+            <h2 class="ia-title">情报监测 = 自动持续采集</h2>
+            <p class="hint">默认<strong>自动</strong>监测宽范围 AI 安全情报（CVE + 告警/博客/论文/标准/政策等）。服务启动与定时任务会自己跑；关键词只是可选收窄，不是入口。</p>
           </div>
           <div class="ia-actions">
-            <button type="button" class="primary" id="auto-monitor-btn">立即监测一轮</button>
-            <p id="auto-monitor-status" class="hint">定时任务默认每 6 小时一轮；点按钮立即跑一轮。关键词留空=宽范围 AI 安全。</p>
+            <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
+            <p id="auto-monitor-status" class="hint">正在读取自动监测状态…</p>
           </div>
         </div>
+        <p id="team-health" class="hint team-health" hidden></p>
 
         <form id="collect-form" class="toolbar monitor-keyword-bar">
-          <label class="grow">可选关键词（筛选列表；监测时也用于定向采集）
-            <input id="keyword" value="" placeholder="留空看全部 / 宽范围监测；例如 llm,ollama,vllm" title="多个词用英文逗号分隔，任一匹配即可" />
+          <label class="grow">可选关键词（筛选列表；刷新时也可定向采集）
+            <input id="keyword" value="" placeholder="留空=自动宽范围；例如 llm,ollama,vllm" title="多个词用英文逗号分隔，任一匹配即可" />
           </label>
           <button type="button" class="ghost" id="clear-keyword-btn">清除关键词</button>
           <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
