@@ -256,40 +256,72 @@ function setMonitorScope(scope) {
 }
 window.setMonitorScope = setMonitorScope;
 
+function monitorKeyword() {
+  var keywordEl = $("keyword");
+  var filterEl = $("filter");
+  var value = keywordEl ? keywordEl.value.trim() : "";
+  if (filterEl) filterEl.value = value;
+  return value;
+}
+
+function setMonitorStatus(text) {
+  var status = $("auto-monitor-status");
+  if (status) status.textContent = text;
+}
+
 function loadItems(view) {
-  var query = view === "monitor" ? $("filter").value.trim() : "";
+  var query = view === "monitor" ? monitorKeyword() : "";
   if (view === "monitor") {
-    api("/api/monitor/feed?kind=" + encodeURIComponent(monitorScope) + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (data) {
+    return api("/api/monitor/feed?kind=" + encodeURIComponent(monitorScope) + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (data) {
       var target = $("monitor-list");
       clear(target);
       var items = data.items || [];
       var counts = data.counts || {};
       var summary = $("monitor-summary");
+      var teamTotal = (((data.team_documents || {}).total) || 0);
       if (summary) {
         summary.textContent = "情报流：漏洞 CVE " + (counts.cve || 0) + " · 非 CVE 资料 " + (counts.document || 0)
-          + "（团队文档 " + (((data.team_documents || {}).total) || 0) + "）"
-          + "。主操作是「立即监测一轮」；关键词仅可选收窄。";
+          + "（团队文档 " + teamTotal + "）"
+          + (query ? " · 已按「" + query + "」收窄" : " · 未设关键词，显示当前流")
+          + "。主操作「立即监测一轮」。";
       }
       if (!items.length) {
-        add(target, "p", "empty", "没有匹配的情报。可切换「仅资料」或先同步安全资料库。");
-        return;
+        var empty = add(target, "p", "empty", "");
+        if (query) {
+          empty.textContent = "监测流里没有匹配「" + query + "」的条目。可点「清除关键词」查看全部，或换词后再次「立即监测一轮」。";
+          var clearBtn = add(target, "button", "ghost", "清除关键词并显示全部");
+          clearBtn.type = "button";
+          clearBtn.addEventListener("click", function () {
+            if ($("keyword")) $("keyword").value = "";
+            if ($("filter")) $("filter").value = "";
+            loadItems("monitor");
+          });
+        } else {
+          empty.textContent = "情报流还是空的。请点「立即监测一轮」自动采集；若仍为空，请检查团队情报服务是否可达。";
+        }
+        return data;
       }
       items.forEach(function (item) {
         renderItemRow(target, item, function (row) { openMonitorDetail(row); });
       });
-    }).catch(showError);
-    return;
+      return data;
+    }).catch(function (error) {
+      showError(error);
+      setMonitorStatus("刷新情报流失败：" + (error.message || "请求失败"));
+      throw error;
+    });
   }
-  api("/api/items" + (query ? "?q=" + encodeURIComponent(query) : "")).then(function (data) {
+  return api("/api/items" + (query ? "?q=" + encodeURIComponent(query) : "")).then(function (data) {
     var target = $("enrich-list");
     clear(target);
     if (!data.items.length) {
       add(target, "p", "empty", "没有匹配的情报。");
-      return;
+      return data;
     }
     data.items.forEach(function (item) {
       renderItemRow(target, item, function (row) { openDetail(row.cve_id || row.id); });
     });
+    return data;
   }).catch(showError);
 }
 
@@ -688,7 +720,24 @@ document.querySelectorAll(".nav button").forEach(function (button) {
 
 $("goto-monitor").addEventListener("click", function () { setView("monitor"); });
 
-$("filter").addEventListener("input", function () { loadItems("monitor"); });
+if ($("keyword")) {
+  $("keyword").addEventListener("input", function () {
+    monitorKeyword();
+    loadItems("monitor");
+  });
+}
+if ($("filter")) {
+  $("filter").addEventListener("input", function () { loadItems("monitor"); });
+}
+if ($("clear-keyword-btn")) {
+  $("clear-keyword-btn").addEventListener("click", function () {
+    if ($("keyword")) $("keyword").value = "";
+    if ($("filter")) $("filter").value = "";
+    clearError();
+    setMonitorStatus("已清除关键词，正在显示全部情报流。");
+    loadItems("monitor");
+  });
+}
 
 $("collect-form").addEventListener("submit", function (event) {
   event.preventDefault();
@@ -696,14 +745,30 @@ $("collect-form").addEventListener("submit", function (event) {
   button.disabled = true;
   button.textContent = "正在按关键词补采…";
   clearError();
-  var keyword = $("keyword").value.trim();
+  var keyword = monitorKeyword();
+  if (!keyword) {
+    setMonitorStatus("未填关键词：请点「立即监测一轮」做宽范围采集，或先填写关键词再补采。");
+    button.disabled = false;
+    button.textContent = "按关键词补采 CVE";
+    loadItems("monitor");
+    return;
+  }
+  setMonitorStatus("正在按「" + keyword + "」补采 CVE…");
   api("/api/collect", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: keyword || "llm,vllm,langchain,huggingface,openai,ollama,jailbreak" })
+    body: JSON.stringify({ keyword: keyword })
+  }).then(function (data) {
+    setMonitorStatus("补采完成：本轮写入相关 " + (data.count || 0) + " 条 CVE；正在刷新情报流…");
+    return loadItems("monitor").then(function (feed) {
+      var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
+      setMonitorStatus("补采完成：写入相关 " + (data.count || 0) + " 条；当前流匹配「" + keyword + "」共 " + total + " 条。");
+      if (!total) showError(new Error("补采已执行，但关键词「" + keyword + "」在情报流中暂无匹配。可清除关键词查看全部。"));
+    });
+  }).catch(function (error) {
+    showError(error);
+    setMonitorStatus("补采失败：" + (error.message || "请求失败"));
   }).then(function () {
-    loadItems("monitor");
-  }).catch(showError).then(function () {
     button.disabled = false;
     button.textContent = "按关键词补采 CVE";
   });
@@ -711,25 +776,40 @@ $("collect-form").addEventListener("submit", function (event) {
 
 $("auto-monitor-btn").addEventListener("click", function () {
   var button = $("auto-monitor-btn");
-  var status = $("auto-monitor-status");
   button.disabled = true;
   button.textContent = "正在自动监测…";
-  if (status) status.textContent = "按宽范围 AI 安全关键词采集 CVE，并同步团队非 CVE 资料…";
   clearError();
+  var keyword = monitorKeyword();
+  setMonitorStatus(keyword
+    ? "按关键词「" + keyword + "」定向监测，并同步团队非 CVE 资料…"
+    : "按宽范围 AI 安全关键词采集 CVE，并同步团队非 CVE 资料…");
   api("/api/monitor/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ keyword: "", sync_library: true, max_documents: 30 })
+    body: JSON.stringify({ keyword: keyword, sync_library: true, max_documents: 30 })
   }).then(function (data) {
     var lib = data.library_sync || {};
-    if (status) {
-      status.textContent = "本轮完成：CVE 入库相关 " + (data.count || 0) + " 条"
-        + (lib.status ? "；资料同步 " + lib.status : "")
-        + "。定时任务仍会每 6 小时自动跑。";
-    }
-    loadItems("monitor");
-    if ($("overview") && !$("overview").hidden) loadOverview();
-  }).catch(showError).then(function () {
+    var used = data.keyword || keyword || "宽范围 AI 安全";
+    setMonitorStatus("本轮完成：CVE 入库相关 " + (data.count || 0) + " 条"
+      + "（范围：" + String(used).slice(0, 64) + (String(used).length > 64 ? "…" : "") + "）"
+      + (lib && lib.status ? "；资料同步 " + lib.status : "")
+      + "。正在刷新情报流…");
+    return loadItems("monitor").then(function (feed) {
+      var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
+      setMonitorStatus("本轮完成：写入相关 " + (data.count || 0) + " 条；当前情报流显示 "
+        + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "（全部）")
+        + "。定时任务仍会每 6 小时自动跑。");
+      if (!total) {
+        showError(new Error(keyword
+          ? "监测已完成，但关键词「" + keyword + "」没有匹配条目。请点「清除关键词」查看全部流。"
+          : "监测已完成，但情报流仍为空。请检查团队情报服务或查看总览步骤。"));
+      }
+      if ($("overview") && !$("overview").hidden) loadOverview();
+    });
+  }).catch(function (error) {
+    showError(error);
+    setMonitorStatus("自动监测失败：" + (error.message || "请求失败"));
+  }).then(function () {
     button.disabled = false;
     button.textContent = "立即监测一轮";
   });

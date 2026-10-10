@@ -110,6 +110,14 @@ h2 { font-size: 16px; font-weight: 650; }
 }
 .filter-drawer > summary::-webkit-details-marker { display: none; }
 .filter-drawer[open] > summary { margin-bottom: 10px; color: var(--ink); }
+.monitor-keyword-bar {
+  align-items: end;
+  margin-bottom: 14px;
+  gap: 10px;
+}
+.monitor-keyword-bar .grow { flex: 1; min-width: 220px; }
+.monitor-keyword-bar label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.monitor-keyword-bar input { width: 100%; }
 .subhead { font-size: 14px; margin: 12px 0 8px; }
 .meta-block { margin-bottom: 8px; }
 

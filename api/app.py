@@ -10,7 +10,7 @@ from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich,
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
-from rag.retrieve import get_record, knowledge_records, search
+from rag.retrieve import get_record, knowledge_records
 from enrichment.assets import AssetImport, AssetPreview, import_assets, load_assets, impact_report
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -201,9 +201,43 @@ def overview():
     }
 
 
+def _text_match(needle: str, *parts: str) -> bool:
+    """Simple case-insensitive substring match for list filters (not RAG search)."""
+    text = (needle or "").strip().lower()
+    if not text:
+        return True
+    blob = " ".join(str(part or "") for part in parts).lower()
+    # Support comma-separated OR terms (user keyword boxes often use llm,vllm).
+    terms = [t.strip() for t in text.split(",") if t.strip()]
+    if not terms:
+        return True
+    return any(term in blob for term in terms)
+
+
+def _filter_cve_records(q: str = ""):
+    records = knowledge_records()
+    if not (q or "").strip():
+        return records
+    out = []
+    for record in records:
+        item = record.get("item") or record
+        if _text_match(
+            q,
+            item.get("cve_id"),
+            item.get("title"),
+            item.get("description"),
+            item.get("product"),
+            " ".join(item.get("affected") or []),
+            " ".join(item.get("sources") or []) or item.get("source"),
+        ):
+            out.append(record)
+    return out
+
+
 @app.get("/api/items")
 def items(q: str = ""):
-    records = search(q, top_k=50) if q else knowledge_records()
+    # List filter must be substring match — RAG search() returns empty for many keywords.
+    records = _filter_cve_records(q)
     return {"items": [_summary(record) for record in records]}
 
 
@@ -235,7 +269,8 @@ def _fetch_team_documents(q="", limit=40):
     from collectors.intelligence import team_base_url
 
     base = team_base_url()
-    query = urllib.parse.urlencode({"q": q or "", "limit": min(limit, 100), "offset": 0})
+    # Fetch broad list; apply local OR-substring filter so comma keywords don't empty the feed.
+    query = urllib.parse.urlencode({"q": "", "limit": min(max(limit * 3, 40), 100), "offset": 0})
     try:
         with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
             payload = json.load(resp)
@@ -249,6 +284,8 @@ def _fetch_team_documents(q="", limit=40):
         category = row.get("source_category") or row.get("category") or ""
         title = row.get("title") or ""
         desc = row.get("description") or ""
+        if not _text_match(q, title, desc, category, row.get("source") or "", row.get("url") or ""):
+            continue
         out.append({
             "kind": "document",
             "id": row.get("document_id") or row.get("id") or title,
@@ -266,6 +303,8 @@ def _fetch_team_documents(q="", limit=40):
                 or title.startswith("【演示】") or desc.startswith("演示用"),
             "origin": "team_documents",
         })
+        if len(out) >= limit:
+            break
     return out, {"reachable": True, "total": payload.get("total", len(out))}
 
 
@@ -273,13 +312,11 @@ def _library_documents(q="", limit=40):
     from rag.library import documents as library_documents
 
     rows = library_documents()
-    needle = (q or "").strip().lower()
     out = []
     for row in rows:
         title = row.get("title") or ""
         dtype = row.get("document_type") or ""
-        blob = " ".join([title, dtype, row.get("publisher") or "", row.get("url") or ""]).lower()
-        if needle and needle not in blob:
+        if not _text_match(q, title, dtype, row.get("publisher") or "", row.get("url") or "", row.get("summary") or ""):
             continue
         out.append({
             "kind": "document",
@@ -311,7 +348,8 @@ def monitor_feed(q: str = "", kind: str = "all"):
 
     cve_items = []
     if kind in {"all", "cve", "demo", "live"}:
-        records = search(q, top_k=50) if q else knowledge_records()
+        # Use substring filter, not RAG search — otherwise keyword clicks look empty.
+        records = _filter_cve_records(q)
         for record in records:
             summary = _summary(record)
             summary["kind"] = "cve"

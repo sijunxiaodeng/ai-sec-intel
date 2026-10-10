@@ -145,6 +145,36 @@ sys.exit(0 if c.get("document",0)>=1 and c.get("cve",0)>=1 and "document" in kin
 PY
 check "monitor-feed-mixed" true
 
+# Keyword must substring-filter the feed (not RAG-empty); llm should still show items after run
+curl -sf --max-time 5 "$MAIN_URL/api/monitor/feed?kind=all&q=llm" -o "$OUT/monitor-feed-llm.json"
+python3 - <<PY
+import json,sys
+d=json.load(open("$OUT/monitor-feed-llm.json"))
+c=d.get("counts") or {}
+print("llm_filter_counts", c)
+sys.exit(0 if c.get("total",0)>=1 else 1)
+PY
+check "monitor-feed-keyword-not-empty" true
+
+curl -sf --max-time 120 -X POST "$MAIN_URL/api/monitor/run" \
+  -H 'Content-Type: application/json' \
+  -d '{"keyword":"ollama","sync_library":false,"max_documents":5}' \
+  -o "$OUT/monitor-run-ollama.json"
+python3 - <<PY
+import json,sys,urllib.request
+run=json.load(open("$OUT/monitor-run-ollama.json"))
+with urllib.request.urlopen("$MAIN_URL/api/monitor/feed?kind=all&q=ollama", timeout=10) as r:
+    feed=json.load(r)
+total=(feed.get("counts") or {}).get("total",0)
+print("scoped_run_count", run.get("count"), "feed_ollama_total", total)
+sys.exit(0 if run.get("mode")=="auto" and total>=1 else 1)
+PY
+check "monitor-run-with-keyword-shows-feed" true
+
+# UI must wire keyword into monitor/run body (not always empty) and surface empty reasons
+check "ui-keyword-passed-to-run" grep -q 'keyword: keyword' "$OUT/app.js"
+check "ui-clear-empty-reason" grep -q '没有匹配' "$OUT/app.js"
+
 # After collect, overview sources should include more than OSV-only narrative when team labels land
 curl -sf --max-time 5 "$MAIN_URL/api/overview" -o "$OUT/overview-after-collect.json"
 python3 - <<PY

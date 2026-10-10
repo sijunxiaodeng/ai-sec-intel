@@ -69,24 +69,22 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测 = 自动情报流</h2>
-            <p class="hint">持续采集 AI 安全相关情报（漏洞 CVE + 非 CVE：告警、博客、论文、标准、政策、厂商公告等）。下方列表是<strong>流</strong>，不是「搜一个关键词才有结果」。</p>
+            <p class="hint">持续采集 AI 安全相关情报（漏洞 CVE + 非 CVE：告警、博客、论文、标准、政策、厂商公告等）。下方列表是<strong>流</strong>；关键词只是可选收窄，不是唯一入口。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即监测一轮</button>
-            <p id="auto-monitor-status" class="hint">定时任务默认每 6 小时一轮；点按钮立即跑一轮（宽范围 AI 安全关键词）。</p>
+            <p id="auto-monitor-status" class="hint">定时任务默认每 6 小时一轮；点按钮立即跑一轮。关键词留空=宽范围 AI 安全。</p>
           </div>
         </div>
 
-        <details class="filter-drawer" id="monitor-filter-drawer">
-          <summary>可选：用关键词收窄列表 / 定向补采</summary>
-          <form id="collect-form" class="toolbar">
-            <label>关键词筛选（可选）
-              <input id="keyword" value="" placeholder="留空=宽范围 AI 安全；也可填 llm,vllm,…" title="多个词用英文逗号分隔" />
-            </label>
-            <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
-            <p class="hint">主路径请用上方「立即监测一轮」。此处仅可选过滤列表，或对特定产品词补采 CVE。</p>
-          </form>
-        </details>
+        <form id="collect-form" class="toolbar monitor-keyword-bar">
+          <label class="grow">可选关键词（筛选列表；监测时也用于定向采集）
+            <input id="keyword" value="" placeholder="留空看全部 / 宽范围监测；例如 llm,ollama,vllm" title="多个词用英文逗号分隔，任一匹配即可" />
+          </label>
+          <button type="button" class="ghost" id="clear-keyword-btn">清除关键词</button>
+          <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
+        </form>
+        <input id="filter" type="hidden" value="" />
 
         <div class="panel">
           <div class="panel-head">
@@ -98,7 +96,6 @@
               <button type="button" class="chip" data-monitor-scope="live" onclick="setMonitorScope('live')">联网结果</button>
               <button type="button" class="chip" data-monitor-scope="demo" onclick="setMonitorScope('demo')">演示种子</button>
             </div>
-            <input id="filter" placeholder="在已采集流中筛选编号或标题" />
           </div>
           <p id="monitor-summary" class="hint"></p>
           <div class="split enrich-layout">
