@@ -102,13 +102,22 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
-check "ia-monitor-copy" grep -q "情报监测 = 自动持续采集" "$OUT/page.html"
-check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
-check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
+check "ia-brand" grep -q "AI 安全知识情报" "$OUT/page.html"
+check "ia-chain-order" grep -q "1 监测" "$OUT/page.html"
+python3 - <<PY
+import sys
+t=open("$OUT/page.html",encoding="utf-8").read()
+banned=["START HERE","一键跑通","今日优先处置","赛题指标九宫格","workbench-hero"]
+sys.exit(0 if not any(b in t for b in banned) else 1)
+PY
+check "ia-no-competitor-clone-copy" true
+check "ia-monitor-copy" grep -q "自动持续采集" "$OUT/page.html"
+check "ia-library-copy" grep -q "安全资料库" "$OUT/page.html"
+check "ia-enrich-copy" grep -q "影响资产" "$OUT/page.html"
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
-sys.exit(0 if 'data-view="assets"' not in html else 1)
+sys.exit(0 if 'data-view="assets"' not in html and "<<<<<<<" not in html else 1)
 PY
 check "ia-no-assets-nav" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"

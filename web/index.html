@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI 安全知识情报系统</title>
+  <title>AI 安全知识情报</title>
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
@@ -13,27 +13,31 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>AI 安全知识情报</strong>
-          <em>监测流 · 资料库 · 富集 · 问答</em>
+          <em>监测 · 富集 · 资料 · 问答</em>
         </div>
       </div>
       <nav class="nav" aria-label="功能">
         <button type="button" data-view="overview" class="is-on">总览</button>
         <button type="button" data-view="monitor">情报监测</button>
-        <button type="button" data-view="library">安全资料库</button>
         <button type="button" data-view="enrich">情报富集</button>
+        <button type="button" data-view="library">安全资料库</button>
         <button type="button" data-view="ask">情报问答</button>
-        <button type="button" data-view="settings">模型设置</button>
+        <div class="nav-foot">
+          <button type="button" data-view="settings">模型设置</button>
+        </div>
       </nav>
       <div class="side-ia">
-        <p><b>监测</b> 默认自动持续采集（CVE + 非 CVE）</p>
-        <p><b>资料库</b> 已沉淀、可检索的知识存档</p>
-        <p><b>富集</b> 对单条漏洞补维度（含影响资产）</p>
+        <p><b>监测</b> 自动持续采集 AI 安全情报流</p>
+        <p><b>富集</b> 单条补维（含影响资产）</p>
+        <p><b>资料库</b> 沉淀后的可检索原文</p>
+        <p><b>问答</b> 按证据回答</p>
       </div>
     </aside>
+
     <div class="main">
       <header class="top">
         <div>
-          <p class="eyebrow" id="page-eyebrow">智能体驱动的知识情报系统</p>
+          <p class="eyebrow" id="page-eyebrow">赛题九 · 知识情报</p>
           <h1 id="page-title">总览</h1>
         </div>
         <div id="llm-pill" class="pill">正在读取配置</div>
@@ -42,35 +46,47 @@
       <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
 
       <section id="overview" class="view">
-        <div class="stats" id="stats"></div>
-        <p id="monitor-line" class="hint"></p>
-        <ol class="flow" id="flow">
-          <li><b>监测</b><span>默认自动持续采集宽范围 AI 安全情报（CVE + 非 CVE）；无需先输关键词</span></li>
-          <li><b>资料库</b><span>沉淀可检索原文与片段，供查阅与问答</span></li>
-          <li><b>富集</b><span>对单条漏洞补 EPSS/KEV、关联资料与影响资产</span></li>
-          <li><b>问答</b><span>先检索证据，再组织回答</span></li>
-          <li><b>核对</b><span>编号和分数必须来自证据</span></li>
+        <div class="brief-head">
+          <div class="brand-line">AI 安全<span>知识情报</span></div>
+          <p>本系统默认自动采集宽范围 AI 安全情报，再对单条漏洞做富集与资产匹配，把原文沉淀进资料库，最后按证据回答问题。</p>
+        </div>
+        <div class="status-strip" id="monitor-line">正在读取运行状态…</div>
+        <ol class="chain" id="flow">
+          <li data-go="monitor"><b>1 监测</b><span>自动持续采集 CVE 与非 CVE 情报，无需先输关键词</span></li>
+          <li data-go="enrich"><b>2 富集</b><span>补 EPSS / KEV / 资料，并评估影响资产</span></li>
+          <li data-go="library"><b>3 资料库</b><span>沉淀可检索原文与片段</span></li>
+          <li data-go="ask"><b>4 问答</b><span>先检索证据，再组织回答并核对</span></li>
         </ol>
+        <div class="stats" id="stats"></div>
         <div class="split">
           <article class="panel">
             <header class="panel-head">
               <h2>最近情报</h2>
-              <button type="button" class="text-btn" id="goto-monitor">打开监测流</button>
+              <button type="button" class="text-btn" id="goto-monitor">打开监测</button>
             </header>
             <div id="recent"></div>
           </article>
           <article class="panel">
-            <header class="panel-head"><h2>最近一次智能体步骤</h2></header>
+            <header class="panel-head"><h2>最近智能体步骤</h2></header>
             <div id="steps"></div>
           </article>
+        </div>
+        <div class="accept-quiet">
+          <h2>验收对照（安静列表，非计分板）</h2>
+          <ul id="accept-list">
+            <li>持续自动监测：服务启动 / 定时 /「立即刷新一轮」</li>
+            <li>监测含 CVE 与非 CVE；关键词仅可选</li>
+            <li>富集含公开风险字段与影响资产</li>
+            <li>资料库可检索；问答须引用证据</li>
+          </ul>
         </div>
       </section>
 
       <section id="monitor" class="view" hidden>
         <div class="ia-banner">
           <div>
-            <h2 class="ia-title">情报监测 = 自动持续采集</h2>
-            <p class="hint">默认<strong>自动</strong>监测宽范围 AI 安全情报（CVE + 告警/博客/论文/标准/政策等）。服务启动与定时任务会自己跑；关键词只是可选收窄，不是入口。</p>
+            <h2 class="ia-title">情报监测</h2>
+            <p class="hint">默认<strong>自动持续采集</strong>宽范围 AI 安全情报（CVE + 告警 / 博客 / 论文 / 标准 / 政策）。关键词不是入口，只是可选收窄。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -79,43 +95,95 @@
         </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
-        <form id="collect-form" class="toolbar monitor-keyword-bar">
-          <label class="grow">可选关键词（筛选列表；刷新时也可定向采集）
-            <input id="keyword" value="" placeholder="留空=自动宽范围；例如 llm,ollama,vllm" title="多个词用英文逗号分隔，任一匹配即可" />
-          </label>
-          <button type="button" class="ghost" id="clear-keyword-btn">清除关键词</button>
-          <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
-        </form>
+        <details class="filter-drawer" id="monitor-filter-drawer">
+          <summary>可选：关键词筛选 / 定向补采</summary>
+          <form id="collect-form" class="toolbar monitor-keyword-bar">
+            <label class="grow">关键词
+              <input id="keyword" value="" placeholder="留空=自动宽范围；如 llm,ollama,vllm" title="多个词用英文逗号分隔" />
+            </label>
+            <button type="button" class="ghost" id="clear-keyword-btn">清除</button>
+            <button type="submit" class="ghost" id="collect-btn">按关键词补采 CVE</button>
+          </form>
+        </details>
         <input id="filter" type="hidden" value="" />
 
         <div class="panel">
           <div class="panel-head">
             <h2>情报流</h2>
             <div class="chip-row" id="monitor-scope">
-              <button type="button" class="chip is-on" data-monitor-scope="all" onclick="setMonitorScope('all')">全部类型</button>
-              <button type="button" class="chip" data-monitor-scope="document" onclick="setMonitorScope('document')">非 CVE 资料</button>
-              <button type="button" class="chip" data-monitor-scope="cve" onclick="setMonitorScope('cve')">漏洞 CVE</button>
-              <button type="button" class="chip" data-monitor-scope="live" onclick="setMonitorScope('live')">联网结果</button>
-              <button type="button" class="chip" data-monitor-scope="demo" onclick="setMonitorScope('demo')">演示种子</button>
+              <button type="button" class="chip is-on" data-monitor-scope="all" onclick="setMonitorScope('all')">全部</button>
+              <button type="button" class="chip" data-monitor-scope="document" onclick="setMonitorScope('document')">非 CVE</button>
+              <button type="button" class="chip" data-monitor-scope="cve" onclick="setMonitorScope('cve')">CVE</button>
+              <button type="button" class="chip" data-monitor-scope="live" onclick="setMonitorScope('live')">联网</button>
+              <button type="button" class="chip" data-monitor-scope="demo" onclick="setMonitorScope('demo')">演示</button>
             </div>
           </div>
           <p id="monitor-summary" class="hint"></p>
           <div class="split enrich-layout">
             <div id="monitor-list"></div>
             <article class="panel" id="monitor-detail">
-              <p class="empty">点左侧一条查看摘要。漏洞可「送去富集」；非 CVE 资料可打开资料库。</p>
+              <p class="empty">点左侧一条查看摘要。漏洞可送去富集；非 CVE 可打开资料库。</p>
             </article>
           </div>
         </div>
       </section>
 
+      <section id="enrich" class="view" hidden>
+        <div class="ia-banner">
+          <div>
+            <h2 class="ia-title">情报富集</h2>
+            <p class="hint">对已监测到的<strong>漏洞</strong>补充 EPSS、KEV、关联资料，并评估<strong>影响资产</strong>（资产是富集输出，不是独立导航）。</p>
+          </div>
+          <div class="ia-actions">
+            <button type="button" class="primary" id="enrich-btn">批量查询 EPSS / KEV / 论文</button>
+          </div>
+        </div>
+        <div class="split enrich-layout">
+          <div class="panel" id="enrich-list"></div>
+          <article class="panel" id="enrich-detail">
+            <p class="empty">从左侧选择一条漏洞，查看富集结果与影响资产。</p>
+          </article>
+        </div>
+        <details class="filter-drawer" id="asset-drawer" open>
+          <summary>影响资产（富集维度）</summary>
+          <div class="panel asset-import">
+            <p class="hint">登记本机 AI 组件清单，与当前选中漏洞做版本匹配。不扫描互联网、不连接目标主机。</p>
+            <div class="toolbar">
+              <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
+              <label for="asset-file">读取 JSON</label>
+              <input id="asset-file" type="file" accept=".json,application/json" />
+            </div>
+            <label for="asset-json">资产 JSON</label>
+            <textarea id="asset-json" rows="5" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
+            <div class="ask-row">
+              <label for="asset-cve">匹配漏洞</label>
+              <select id="asset-cve"></select>
+              <button type="button" class="primary" id="asset-preview">预览匹配</button>
+              <button type="button" class="ghost" id="asset-save">保存清单</button>
+              <button type="button" class="ghost" id="asset-evaluate">评估已保存清单</button>
+            </div>
+            <p id="asset-message" class="hint">演示清单为虚构组件；预览不会自动保存。</p>
+            <div class="split">
+              <div>
+                <h3 class="subhead">匹配结果</h3>
+                <div id="asset-impact"><p class="empty">选择漏洞后预览或评估。</p></div>
+              </div>
+              <div>
+                <h3 class="subhead">已保存资产 <span id="asset-count"></span></h3>
+                <div id="asset-list"></div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+
       <section id="library" class="view" hidden>
         <div class="ia-banner">
           <div>
-            <h2 class="ia-title">安全资料库 = 已沉淀知识</h2>
-            <p class="hint">这里存放可检索的原文与片段。与「监测」不同：监测是自动采集流；资料库是沉淀后的查阅与问答底座。</p>
+            <h2 class="ia-title">安全资料库</h2>
+            <p class="hint">已沉淀、可检索的知识存档。监测是自动流；这里是查阅与问答底座。</p>
           </div>
-          <div class="ia-actions toolbar">
+          <div class="ia-actions toolbar" style="margin:0">
             <button type="button" class="primary" id="library-sync">同步公开资料</button>
             <button type="button" class="ghost" id="library-team-sync">同步团队资料</button>
           </div>
@@ -146,9 +214,9 @@
           </article>
         </div>
         <details class="filter-drawer">
-          <summary>高级：资料问答与关系审核（可选）</summary>
+          <summary>高级：资料问答与关系审核</summary>
           <form id="library-ask-form" class="panel library-ask">
-            <p class="hint">基于已沉淀资料做摘录或限定主题关系分析；不是监测采集入口。</p>
+            <p class="hint">基于已沉淀资料做摘录或关系分析；不是监测入口。</p>
             <label for="library-mode">回答方式</label>
             <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析</option></select>
             <label for="library-question">问题</label>
@@ -181,62 +249,12 @@
         </details>
       </section>
 
-      <section id="enrich" class="view" hidden>
-        <div class="ia-banner">
-          <div>
-            <h2 class="ia-title">情报富集 = 补齐单条维度</h2>
-            <p class="hint">对已监测到的<strong>漏洞</strong>补充 EPSS、KEV、关联资料，并评估<strong>影响资产</strong>（资产匹配是富集输出，不是独立监测入口）。</p>
-          </div>
-          <div class="ia-actions">
-            <button type="button" class="primary" id="enrich-btn">批量查询 EPSS / KEV / 论文</button>
-          </div>
-        </div>
-        <div class="split enrich-layout">
-          <div class="panel" id="enrich-list"></div>
-          <article class="panel" id="enrich-detail">
-            <p class="empty">从左侧选择一条漏洞，查看富集结果与影响资产。</p>
-          </article>
-        </div>
-        <details class="filter-drawer" id="asset-drawer" open>
-          <summary>影响资产（富集维度）</summary>
-          <div class="panel asset-import">
-            <p class="hint">登记本机 AI 组件清单，与当前选中的漏洞做版本匹配。不扫描互联网、不连接目标主机。</p>
-            <div class="toolbar">
-              <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
-              <label for="asset-file">读取 JSON</label>
-              <input id="asset-file" type="file" accept=".json,application/json" />
-            </div>
-            <label for="asset-json">资产 JSON</label>
-            <textarea id="asset-json" rows="5" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
-            <div class="ask-row">
-              <label for="asset-cve">匹配漏洞</label>
-              <select id="asset-cve"></select>
-              <button type="button" class="primary" id="asset-preview">预览匹配</button>
-              <button type="button" class="ghost" id="asset-save">保存清单</button>
-              <button type="button" class="ghost" id="asset-evaluate">评估已保存清单</button>
-            </div>
-            <p id="asset-message" class="hint">演示清单为虚构组件；预览不会自动保存。</p>
-            <div class="split">
-              <div>
-                <h3 class="subhead">匹配结果</h3>
-                <div id="asset-impact"><p class="empty">选择漏洞后预览或评估。</p></div>
-              </div>
-              <div>
-                <h3 class="subhead">已保存资产 <span id="asset-count"></span></h3>
-                <div id="asset-list"></div>
-              </div>
-            </div>
-          </div>
-        </details>
-      </section>
-
-      <!-- Kept for compatibility; not in nav — assets live under 富集 -->
       <section id="assets" class="view" hidden aria-hidden="true"></section>
 
       <section id="ask" class="view" hidden>
         <div class="toolbar">
           <button type="button" id="sample-btn" class="ghost">载入历史演示样例</button>
-          <p class="hint">载入人工核对的案例用于查看跨文档证据；不计入实时监测成绩。</p>
+          <p class="hint">载入人工核对案例用于跨文档证据；不计入实时监测成绩。</p>
         </div>
         <form id="ask-form" class="ask-box">
           <label>问题

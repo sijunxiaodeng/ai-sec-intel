@@ -8,11 +8,11 @@ var titles = {
   settings: "模型设置"
 };
 var eyebrows = {
-  overview: "工作流一览",
-  monitor: "自动采集的 AI 安全情报流",
-  enrich: "单条漏洞补维度 · 含影响资产",
-  library: "已沉淀、可检索的知识存档",
-  assets: "单条漏洞补维度 · 含影响资产",
+  overview: "赛题九 · 知识情报",
+  monitor: "自动持续采集 · 无需先输关键词",
+  enrich: "单条补维 · 含影响资产",
+  library: "已沉淀可检索原文",
+  assets: "单条补维 · 含影响资产",
   ask: "按证据回答",
   settings: "本机模型配置"
 };
@@ -183,7 +183,8 @@ function renderItemRow(parent, item, onPick) {
 
 function setPill(ready) {
   var pill = $("llm-pill");
-  pill.textContent = ready ? "大模型已配置" : "大模型未配置，问答先摘录原文";
+  pill.textContent = ready ? "大模型已配置" : "大模型未配置 · 问答先摘录原文";
+  pill.className = "pill " + (ready ? "is-ok" : "is-warn");
 }
 
 function setView(name) {
@@ -248,50 +249,33 @@ function loadOverview() {
     clear(stats);
     var monitor = data.monitor || {};
     var team = data.team_intel || {};
-    var cov = team.coverage || {};
-    var teamBits = [];
-    if (team.reachable) {
-      teamBits.push("团队情报可达");
-      if (team.team_total != null) teamBits.push("已分类 AI CVE " + team.team_total + " 条");
-      if (team.document_total != null) teamBits.push("B 文档 " + team.document_total + " 份");
-      if (cov.observed_ai_category_count != null) {
-        teamBits.push("B 观测类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
-      }
-    } else {
-      teamBits.push("团队情报暂不可达");
-    }
-    $("monitor-line").textContent =
-      "默认自动持续监测宽范围 AI 安全情报，间隔 " + (monitor.interval_hours || 6) +
-      " 小时" + (monitor.last_run ? "；最近一轮 " + monitor.last_run : "；启动后会自动跑首轮") +
-      "（开始于 " + dateText(monitor.started_at) +
-      "）。可计时效 " + data.latency_count +
-      " 条。漏洞来源标签：" +
-      ((data.sources || []).join("、") || "还没有") +
-      "。" + teamBits.join("；") +
-      "。资料库已沉淀 " + ((data.library || {}).documents || 0) +
-      " 份（" +
-      (((data.library || {}).source_categories || []).join("、") || "尚无") +
-      "）。影响资产在「情报富集」里评估。";
+    var bits = [];
+    bits.push("<b>自动监测</b> 间隔 " + (monitor.interval_hours || 6) + "h");
+    bits.push(monitor.last_run ? ("最近 " + monitor.last_run) : "启动后自动跑首轮");
+    bits.push(team.reachable ? ("B 可达 · AI CVE " + (team.team_total != null ? team.team_total : "—")) : "B :8765 暂不可达（NVD/OSV 仍继续）");
+    bits.push("来源 " + ((data.sources || []).join("、") || "尚无"));
+    if ($("monitor-line")) $("monitor-line").innerHTML = bits.join('<span aria-hidden="true"> · </span>');
+
     [
-      [String(data.items), "知识库情报"],
-      [String(data.source_count || 0), "漏洞数据库来源"],
-      [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "离线", "团队 AI CVE"],
+      [String(data.items || 0), "情报条目"],
+      [String((data.library || {}).documents || 0), "资料文档"],
       [String(data.latency_count || 0), "可计时效"],
-      [data.llm_ready ? "可用" : "未配置", "问答模型"]
+      [data.llm_ready ? "已配置" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
       add(card, "b", "", pair[0]);
       add(card, "span", "", pair[1]);
     });
+
     var recent = $("recent");
     clear(recent);
-    if (!data.recent.length) {
-      add(recent, "p", "empty", "知识库还是空的。到情报监测里运行一次。");
+    if (!(data.recent || []).length) {
+      add(recent, "p", "empty", "知识库还是空的。打开「情报监测」或等待自动采集。");
+    } else {
+      data.recent.forEach(function (item) {
+        renderItemRow(recent, item, function (id) { openDetail(id); });
+      });
     }
-    data.recent.forEach(function (item) {
-      renderItemRow(recent, item, function (id) { openDetail(id); });
-    });
     renderSteps($("steps"), data.steps);
   }).catch(showError);
 }
@@ -776,7 +760,12 @@ document.querySelectorAll(".nav button").forEach(function (button) {
   });
 });
 
-$("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+if ($("goto-monitor")) $("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+document.querySelectorAll("#flow [data-go]").forEach(function (node) {
+  node.addEventListener("click", function () {
+    setView(node.getAttribute("data-go"));
+  });
+});
 
 if ($("keyword")) {
   $("keyword").addEventListener("input", function () {
