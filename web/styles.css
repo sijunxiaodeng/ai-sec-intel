@@ -202,18 +202,63 @@ h3.subhead { font-size: 12px; font-weight: 700; margin: 12px 0 8px; color: var(-
 .toast {
   position: sticky;
   top: 12px;
-  z-index: 20;
+  z-index: 40;
   margin-bottom: 14px;
-  padding: 11px 14px;
+  padding: 12px 16px;
   border-radius: 10px;
   border: 1px solid var(--line);
   background: #eef5f1;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(20, 23, 29, 0.08);
 }
-.toast.is-busy { background: #eef2f7; }
-.toast.is-error { background: #f6e7df; color: var(--warn); }
-.toast.is-ok { background: #eef5f1; }
-.btn-busy { opacity: 0.75; cursor: wait; }
+.toast.is-busy { background: #e8eef8; border-color: #b8c7e0; color: #243552; }
+.toast.is-error { background: #f6e7df; color: var(--warn); border-color: #e0c2b2; }
+.toast.is-ok { background: #e8f4ee; border-color: #b7d4c6; color: var(--low); }
+.btn-busy { opacity: 0.8; cursor: wait; }
+button[aria-busy="true"] { pointer-events: none; }
+
+.src-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.src-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: #eef1f5;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+.src-tag.src-nvd { background: #e8f0ff; color: #274a8c; border-color: #c5d4f0; }
+.src-tag.src-osv { background: #eef8e8; color: #2f5d28; border-color: #c7dfbf; }
+.src-tag.src-gh { background: #f3eef8; color: #4b3570; border-color: #d5c8e6; }
+.src-tag.src-kev { background: #fff0e8; color: #8a3f1f; border-color: #e8c4ae; }
+.src-tag.src-team { background: #e8f6f5; color: #1f5c57; border-color: #b7d9d5; }
+.src-tag.src-lib { background: #f4f1ea; color: #5a4a2e; border-color: #ddd2bc; }
+.src-tag.src-paper { background: #eef3fa; color: #2f4a6e; border-color: #c5d2e6; }
+.src-tag.src-comm { background: #f7efe8; color: #6a4020; border-color: #e2cdb8; }
+
+.source-legend {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.source-legend .panel-head { margin-bottom: 8px; }
+.source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.source-list li { display: flex; align-items: center; gap: 8px; }
+.source-chips { margin: 0 0 10px; }
 .team-health {
   margin: 0 0 12px;
   padding: 8px 12px;
