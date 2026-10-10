@@ -146,6 +146,30 @@ button.row {
 .score.high { color: var(--high); }
 .score.mid { color: var(--mid); }
 .score.low { color: var(--low); }
+.demo-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #c4a35a;
+  color: #7a5a18;
+  background: #f7efd8;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.row.is-demo { background: linear-gradient(90deg, #fbf6ea 0, transparent 48%); }
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip.is-on { border-color: #7a5a18; color: #7a5a18; background: #f7efd8; font-weight: 600; }
 .empty { color: var(--muted); line-height: 1.6; }
 
 .step { display: grid; grid-template-columns: 64px 1fr; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line); }

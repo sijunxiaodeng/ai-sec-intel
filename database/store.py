@@ -63,9 +63,19 @@ def merge_records(old, new):
     old_item = old.get("item") or {}
     new_item = new.get("item") or {}
     sources = _union(old_item.get("sources"), new_item.get("sources"))
+    old_title = old_item.get("title") or ""
+    new_title = new_item.get("title") or ""
+    # Prefer explicit demo/Chinese labels over stale English seed placeholders.
+    if new_title.startswith("【演示】") or (new_title and old_title.startswith("Demo")):
+        title = new_title
+    else:
+        title = old_title or new_title
     description = old_item.get("description") or ""
-    if len(new_item.get("description") or "") > len(description):
-        description = new_item.get("description") or ""
+    new_description = new_item.get("description") or ""
+    if new_description.startswith("演示用") or new_description.startswith("【演示】"):
+        description = new_description
+    elif len(new_description) > len(description):
+        description = new_description
     collected_times = [value for value in (old_item.get("collected_at"), new_item.get("collected_at")) if value]
     papers = []
     seen_papers = set()
@@ -84,7 +94,7 @@ def merge_records(old, new):
     old_cvss = old.get("cvss") if (old.get("cvss") or {}).get("score") is not None else None
     item = dict(new_item)
     item.update({
-        "title": old_item.get("title") or new_item.get("title"),
+        "title": title,
         "description": description,
         "source": "、".join(sources),
         "sources": sources,

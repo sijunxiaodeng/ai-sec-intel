@@ -53,7 +53,20 @@ function scoreClass(score) {
 }
 
 function scoreText(score) {
-  return score == null ? "原文没有" : String(score);
+  return score == null ? "暂无评分" : String(score);
+}
+
+function missingText(value, fallback) {
+  if (value == null || value === "") return fallback || "未写明";
+  return value;
+}
+
+function isDemoItem(item) {
+  var cve = item.cve_id || "";
+  var title = item.title || "";
+  var desc = item.description || "";
+  return /^CVE-2099-/.test(cve) || title.indexOf("【演示】") === 0
+    || /demo_fixture|Synthetic |合成/.test(desc + title);
 }
 
 function dateText(value) {
@@ -106,14 +119,24 @@ function renderSteps(target, steps) {
 function renderItemRow(parent, item, onPick) {
   var row = add(parent, "button", "row");
   row.type = "button";
+  if (isDemoItem(item)) row.className += " is-demo";
   row.addEventListener("click", function () { onPick(item.cve_id); });
   var id = add(row, "div");
-  add(id, "div", "title", item.cve_id);
-  add(id, "div", "meta", (item.sources || [item.source || ""]).join("、"));
+  var titleLine = add(id, "div", "title", item.cve_id);
+  if (isDemoItem(item)) {
+    var badge = document.createElement("span");
+    badge.className = "demo-badge";
+    badge.textContent = "演示";
+    titleLine.appendChild(document.createTextNode(" "));
+    titleLine.appendChild(badge);
+  }
+  add(id, "div", "meta", (item.sources || [item.source || ""]).join("、") || "来源未写明");
   add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
   var text = add(row, "div");
-  add(text, "div", "desc", (item.description || "").slice(0, 140));
-  add(text, "div", "meta", dateText(item.published_at) + " · " + (item.source || ""));
+  var headline = item.title && item.title !== item.cve_id ? item.title : (item.description || "");
+  add(text, "div", "desc", headline.slice(0, 140));
+  var product = item.product ? (" · " + item.product) : "";
+  add(text, "div", "meta", dateText(item.published_at) + " · " + ((item.sources || [item.source || ""]).join("、") || "来源未写明") + product);
 }
 
 function setPill(ready) {
@@ -192,18 +215,60 @@ function loadOverview() {
   }).catch(showError);
 }
 
+var monitorScope = "all";
+
 function loadItems(view) {
   var query = view === "monitor" ? $("filter").value.trim() : "";
   api("/api/items" + (query ? "?q=" + encodeURIComponent(query) : "")).then(function (data) {
     var target = view === "monitor" ? $("monitor-list") : $("enrich-list");
     clear(target);
+    if (view === "monitor") {
+      var items = data.items || [];
+      if (monitorScope === "demo") items = items.filter(isDemoItem);
+      if (monitorScope === "live") items = items.filter(function (item) { return !isDemoItem(item); });
+      data = Object.assign({}, data, {items: items});
+      var summary = $("monitor-summary");
+      if (summary) {
+        summary.textContent = "当前列表 " + items.length + " 条"
+          + (monitorScope === "demo" ? "（仅演示种子）" : monitorScope === "live" ? "（已排除演示种子）" : "（含历史入库；演示种子带「演示」标记）")
+          + "。点「开始监测」会合并 NVD/OSV/团队情报，不会清空旧记录。";
+      }
+    }
     if (!data.items.length) {
       add(target, "p", "empty", "没有匹配的情报。");
       return;
     }
     data.items.forEach(function (item) {
-      renderItemRow(target, item, function (id) { openDetail(id); });
+      renderItemRow(target, item, function (id) {
+        if (view === "monitor") openMonitorDetail(id);
+        else openDetail(id);
+      });
     });
+  }).catch(showError);
+}
+
+function openMonitorDetail(cveId) {
+  api("/api/items/" + encodeURIComponent(cveId)).then(function (item) {
+    var panel = $("monitor-detail");
+    clear(panel);
+    add(panel, "h2", "", item.cve_id + (isDemoItem(item) ? "（演示）" : ""));
+    add(panel, "p", "desc", item.title || "");
+    add(panel, "p", "desc", item.description || "");
+    var fields = add(panel, "div", "fields");
+    [
+      ["来源", (item.sources || []).join("、") || "未写明"],
+      ["产品", missingText(item.product, "未写明")],
+      ["受影响版本", (item.affected || []).length ? (item.affected || []).join("、") : "未写明"],
+      ["CVSS", scoreText(item.cvss) + (item.severity ? " · " + item.severity : "")],
+      ["记录类型", isDemoItem(item) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
+    ].forEach(function (pair) {
+      var field = add(fields, "div", "field");
+      add(field, "span", "", pair[0]);
+      add(field, "b", "", pair[1]);
+    });
+    var go = add(panel, "button", "ghost", "去情报富化查看完整评估");
+    go.type = "button";
+    go.addEventListener("click", function () { openDetail(cveId); });
   }).catch(showError);
 }
 
@@ -296,15 +361,16 @@ function renderDetail(item) {
   add(panel, "p", "desc", item.description || "");
   var fields = add(panel, "div", "fields");
   [
-    ["来源", (item.sources || []).join("、") || "原文没有"],
-    ["产品", item.product || "原文没有"],
-    ["受影响版本", (item.affected || []).join("、") || "原文没有"],
+    ["来源", (item.sources || []).join("、") || "未写明"],
+    ["产品", missingText(item.product, "未写明")],
+    ["受影响版本", (item.affected || []).length ? (item.affected || []).join("、") : "未写明"],
     ["CVSS", scoreText(item.cvss) + (item.severity ? " · " + item.severity : "")],
-    ["CVSS 版本", item.cvss_version || "原文没有"],
+    ["CVSS 版本", missingText(item.cvss_version, "未写明")],
     ["EPSS", epssText(item.epss)],
     ["CISA KEV", kevText(item.kev)],
-    ["公开利用链接", item.poc_count ? item.poc_count + " 条链接" : "原文没有标记"],
-    ["论文", item.paper_count ? item.paper_count + " 篇" : "尚未关联"]
+    ["公开利用链接", item.poc_count ? item.poc_count + " 条链接" : "未见 Exploit 标记"],
+    ["论文", item.paper_count ? item.paper_count + " 篇" : "尚未关联"],
+    ["记录类型", isDemoItem(item) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
   ].forEach(function (pair) {
     var field = add(fields, "div", "field");
     add(field, "span", "", pair[0]);
@@ -562,6 +628,23 @@ $("collect-form").addEventListener("submit", function (event) {
   }).catch(showError).then(function () {
     button.disabled = false;
     button.textContent = "开始监测";
+  });
+});
+
+document.querySelectorAll("[data-monitor-scope]").forEach(function (button) {
+  button.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    monitorScope = button.getAttribute("data-monitor-scope") || "all";
+    document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
+      node.className = node === button ? "chip is-on" : "chip";
+    });
+    var detail = $("monitor-detail");
+    if (detail) {
+      clear(detail);
+      add(detail, "p", "empty", "点左侧一条情报，在此查看摘要。演示种子会标明「演示」。完整富化仍可到「情报富化」。");
+    }
+    loadItems("monitor");
   });
 });
 

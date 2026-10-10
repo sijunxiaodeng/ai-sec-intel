@@ -4,6 +4,7 @@ Labeled **demo / synthetic** — not competition evidence of live multi-source S
 
 - Several AI-security CVE rows with distinct upstream source labels
   (NVD / GITHUB_ADVISORY / CISA_KEV) so team API + overview are not OSV/NVD-only.
+- Chinese titles/descriptions for the monitor UI (【演示】prefix).
 - A few non-CVE knowledge documents across categories for library team-sync.
 
 Usage:
@@ -31,10 +32,10 @@ DEMO_ITEMS = (
     {
         "cve": "CVE-2099-90001",
         "source": "NVD",
-        "title": "Demo: Ollama agent authorization bypass (synthetic)",
+        "title": "【演示】Ollama 智能体授权绕过（合成）",
         "description": (
-            "Synthetic offline fixture for Ollama / LLM agent tooling. "
-            "Keywords: ollama, llm, agent security. Not a real NVD record."
+            "演示用合成记录：模拟 Ollama / LLM 智能体工具链相关漏洞。"
+            "关键词：ollama、llm、agent。非真实 NVD 公告。"
         ),
         "product": "ollama",
         "end": "0.1.34",
@@ -43,10 +44,10 @@ DEMO_ITEMS = (
     {
         "cve": "CVE-2099-90002",
         "source": "GITHUB_ADVISORY",
-        "title": "Demo: vLLM inference server prompt injection (synthetic)",
+        "title": "【演示】vLLM 推理服务提示注入（合成）",
         "description": (
-            "Synthetic GHSA-shaped fixture for vLLM / Hugging Face inference. "
-            "Keywords: vllm, huggingface, prompt injection, llm security."
+            "演示用合成记录：模拟 vLLM / Hugging Face 推理场景的提示注入风险。"
+            "关键词：vllm、huggingface、prompt injection、llm。"
         ),
         "product": "vllm",
         "end": "0.6.0",
@@ -55,10 +56,10 @@ DEMO_ITEMS = (
     {
         "cve": "CVE-2099-90003",
         "source": "CISA_KEV",
-        "title": "Demo: LangChain tool-calling jailbreak chain (synthetic)",
+        "title": "【演示】LangChain 工具调用越狱链（合成）",
         "description": (
-            "Synthetic KEV-shaped fixture for LangChain / OpenAI-compatible agents. "
-            "Keywords: langchain, openai, jailbreak, adversarial, agent."
+            "演示用合成记录：模拟 LangChain / OpenAI 兼容智能体的越狱与对抗利用。"
+            "关键词：langchain、openai、jailbreak、adversarial。"
         ),
         "product": "langchain",
         "end": "0.2.10",
@@ -67,10 +68,10 @@ DEMO_ITEMS = (
     {
         "cve": "CVE-2099-90004",
         "source": "NVD",
-        "title": "Demo: Hugging Face model supply-chain pickle risk (synthetic)",
+        "title": "【演示】Hugging Face 模型供应链 pickle 风险（合成）",
         "description": (
-            "Synthetic fixture for model supply chain / pickle deserialization. "
-            "Keywords: huggingface, pickle, supply chain, machine learning security."
+            "演示用合成记录：模拟模型权重 / pickle 反序列化供应链风险。"
+            "关键词：huggingface、pickle、supply chain。"
         ),
         "product": "transformers",
         "end": "4.40.0",
@@ -84,8 +85,8 @@ DEMO_DOCS = (
         "category": "security_blog",
         "content_type": "article",
         "sid": "demo-tob-prompt-injection",
-        "title": "Demo blog: Indirect prompt injection in LLM apps (synthetic)",
-        "description": "Synthetic research-blog summary for library team-sync demos.",
+        "title": "【演示】LLM 应用中间接提示注入（合成博客摘要）",
+        "description": "演示用合成研报摘要，供资料库 team-sync。",
         "url": "https://blog.trailofbits.com/demo-ai-sec-intel-fixture-prompt-injection",
     },
     {
@@ -93,8 +94,8 @@ DEMO_DOCS = (
         "category": "academic_paper",
         "content_type": "paper",
         "sid": "demo-arxiv-jailbreak",
-        "title": "Demo paper: Jailbreak and adversarial prompts (synthetic)",
-        "description": "Synthetic arXiv-style abstract for AI security library demos.",
+        "title": "【演示】越狱与对抗提示（合成论文摘要）",
+        "description": "演示用合成 arXiv 风格摘要。",
         "url": "https://arxiv.org/abs/2099.90001",
     },
     {
@@ -102,8 +103,8 @@ DEMO_DOCS = (
         "category": "technical_standard",
         "content_type": "standard",
         "sid": "demo-nist-ai-rmf",
-        "title": "Demo standard: AI risk management excerpt (synthetic)",
-        "description": "Synthetic NIST-style policy/standard blurb for category coverage demos.",
+        "title": "【演示】AI 风险管理节选（合成标准）",
+        "description": "演示用合成 NIST 风格标准摘要。",
         "url": "https://csrc.nist.gov/demo-ai-sec-intel-fixture-rmf",
     },
     {
@@ -111,8 +112,8 @@ DEMO_DOCS = (
         "category": "security_community",
         "content_type": "post",
         "sid": "demo-hf-community",
-        "title": "Demo community: Hugging Face security discussion (synthetic)",
-        "description": "Synthetic community post for multi-category offline demos.",
+        "title": "【演示】Hugging Face 安全讨论（合成社区帖）",
+        "description": "演示用合成社区讨论摘要。",
         "url": "https://discuss.huggingface.co/demo-ai-sec-intel-fixture",
     },
 )
@@ -121,36 +122,80 @@ DEMO_DOCS = (
 def _vuln_item(row: dict) -> IntelligenceItem:
     cve = row["cve"]
     product = row["product"]
-    raw = {
-        "id": cve,
-        "demo_fixture": True,
-        "configurations": [{
-            "nodes": [{
-                "cpeMatch": [{
-                    "vulnerable": True,
-                    "criteria": f"cpe:2.3:a:demo:{product}:*:*:*:*:*:*:*:*",
-                    "versionEndExcluding": row["end"],
+    source = row["source"]
+    score = row["score"]
+    end = row["end"]
+
+    if source == "GITHUB_ADVISORY":
+        raw = {
+            "ghsa_id": f"GHSA-demo-{cve[-5:]}",
+            "summary": row["title"],
+            "description": row["description"],
+            "severity": "HIGH",
+            "demo_fixture": True,
+            "cvss": {"score": score, "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "version": "3.1"},
+            "cvss_severities": {
+                "cvss_v3": {
+                    "score": score,
+                    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                    "version": "3.1",
+                },
+            },
+            "vulnerabilities": [{
+                "package": {"ecosystem": "pip", "name": product},
+                "vulnerable_version_range": f"< {end}",
+                "first_patched_version": {"identifier": end},
+            }],
+            "references": [{"url": f"https://github.com/advisories/GHSA-demo-{cve[-5:]}"}],
+        }
+        source_id = f"GHSA-demo-{cve[-5:]}"
+    elif source == "CISA_KEV":
+        raw = {
+            "demo_fixture": True,
+            "cveID": cve,
+            "vendorProject": "demo",
+            "vendor": "demo",
+            "product": product,
+            "dateAdded": "2026-10-08",
+            "requiredAction": "演示用：请升级到供应商修复版本（合成）",
+            "shortDescription": row["description"],
+            "notes": "synthetic offline fixture",
+        }
+        source_id = cve
+    else:
+        raw = {
+            "id": cve,
+            "demo_fixture": True,
+            "configurations": [{
+                "nodes": [{
+                    "cpeMatch": [{
+                        "vulnerable": True,
+                        "criteria": f"cpe:2.3:a:demo:{product}:*:*:*:*:*:*:*:*",
+                        "versionEndExcluding": end,
+                    }],
                 }],
             }],
-        }],
-        "metrics": {
-            "cvssMetricV31": [{
-                "type": "Primary",
-                "source": "demo@ai-sec-intel",
-                "cvssData": {
-                    "version": "3.1",
-                    "baseScore": row["score"],
-                    "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-                },
-            }],
-        },
-        "references": [
-            {"url": f"https://example.com/demo/{cve.lower()}", "tags": ["Vendor Advisory"]},
-        ],
-    }
+            "metrics": {
+                "cvssMetricV31": [{
+                    "type": "Primary",
+                    "source": "demo@ai-sec-intel",
+                    "cvssData": {
+                        "version": "3.1",
+                        "baseScore": score,
+                        "baseSeverity": "CRITICAL" if score >= 9 else "HIGH",
+                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+                    },
+                }],
+            },
+            "references": [
+                {"url": f"https://nvd.nist.gov/vuln/detail/{cve}", "tags": ["Vendor Advisory"]},
+            ],
+        }
+        source_id = cve
+
     return IntelligenceItem(
-        source=row["source"],
-        source_id=cve if row["source"] != "GITHUB_ADVISORY" else f"GHSA-demo-{cve[-5:]}",
+        source=source,
+        source_id=source_id,
         cve_id=cve,
         title=row["title"],
         description=row["description"],
@@ -203,6 +248,12 @@ def main(argv=None) -> int:
     for row in DEMO_ITEMS:
         counts = store.ingest_batch(row["source"], [_vuln_item(row)])
         ingest_summary.append({"source": row["source"], "cve": row["cve"], **counts})
+        # Companion NVD-shaped metrics so GHSA/CISA rows still carry product + CVSS
+        # after fusion (their native adapters do not always populate those fields).
+        if row["source"] != "NVD":
+            companion = dict(row, source="NVD", title=row["title"], description=row["description"])
+            extra = store.ingest_batch("NVD", [_vuln_item(companion)])
+            ingest_summary.append({"source": "NVD+companion", "cve": row["cve"], **extra})
 
     docs = SQLiteDocumentStore(db)
     doc_summary = []
