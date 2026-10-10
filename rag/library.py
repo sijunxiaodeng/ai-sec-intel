@@ -361,7 +361,8 @@ def verified_sources(db_path=LIBRARY_DB):
             results.append({"document": copy.deepcopy(doc), "chunks": copy.deepcopy(chunks), "body": body,
                             "latest_attempt_status": attempts.get(row["document_id"], {}).get("status"),
                             "retained_previous": attempts.get(row["document_id"], {}).get("status") == "error"})
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, ImportError, OSError):
+            # ImportError: lxml.html.clean missing on lxml 6.x — skip this source, do not 500.
             continue
     return results
 

@@ -790,7 +790,14 @@ def monitor_feed(q: str = "", kind: str = "all"):
 
 @app.get("/api/items/{cve_id}")
 def item_detail(cve_id: str):
-    record = get_record(cve_id)
+    try:
+        record = get_record(cve_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="加载情报详情失败：%s。若提示 lxml.html.clean，请安装 lxml_html_clean 后重启。"
+            % exc,
+        ) from exc
     if not record:
         raise HTTPException(status_code=404, detail="知识库里没有这条情报")
     payload = _summary(record)
@@ -800,16 +807,25 @@ def item_detail(cve_id: str):
     payload["vector"] = (record.get("cvss") or {}).get("vector")
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
     from rag.ingest import document_status
-    payload["documents"] = document_status(cve_id.upper())
+    try:
+        payload["documents"] = document_status(cve_id.upper())
+    except Exception as exc:
+        payload["documents"] = {"status": "error", "detail": str(exc)[:160]}
     from enrichment.assessment import assess
-    payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+    try:
+        payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+    except Exception as exc:
+        payload["assessment"] = {"status": "error", "detail": "自动评估暂不可用：%s" % str(exc)[:160]}
     payload["related_guidance"] = (record["item"].get("raw_data") or {}).get("related_guidance")
     return payload
 
 
 @app.get("/api/guidance/{cve_id}")
 def related_guidance(cve_id: str):
-    record = get_record(cve_id.upper())
+    try:
+        record = get_record(cve_id.upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="读取关联建议失败：%s" % exc) from exc
     if not record:
         raise HTTPException(status_code=404, detail="请先收录这条漏洞")
     return record["item"].get("raw_data", {}).get("related_guidance") or {"status": "empty", "facets": {}, "evidence": []}
@@ -821,7 +837,14 @@ def refresh_guidance(cve_id: str):
     if not record:
         raise HTTPException(status_code=404, detail="请先收录这条漏洞")
     from enrichment.guidance import refresh
-    return refresh(record)
+    try:
+        return refresh(record)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="补充关联建议失败：%s。若涉及 lxml.html.clean，请安装 lxml_html_clean。"
+            % exc,
+        ) from exc
 
 
 @app.get("/api/assessment/{cve_id}")
