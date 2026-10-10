@@ -631,21 +631,21 @@ $("collect-form").addEventListener("submit", function (event) {
   });
 });
 
-document.querySelectorAll("[data-monitor-scope]").forEach(function (button) {
-  button.addEventListener("click", function (event) {
-    event.preventDefault();
-    event.stopPropagation();
-    monitorScope = button.getAttribute("data-monitor-scope") || "all";
-    document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
-      node.className = node === button ? "chip is-on" : "chip";
-    });
-    var detail = $("monitor-detail");
-    if (detail) {
-      clear(detail);
-      add(detail, "p", "empty", "点左侧一条情报，在此查看摘要。演示种子会标明「演示」。完整富化仍可到「情报富化」。");
-    }
-    loadItems("monitor");
+document.addEventListener("click", function (event) {
+  var button = event.target && event.target.closest ? event.target.closest("[data-monitor-scope]") : null;
+  if (!button) return;
+  event.preventDefault();
+  event.stopPropagation();
+  monitorScope = button.getAttribute("data-monitor-scope") || "all";
+  document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
+    node.className = node === button ? "chip is-on" : "chip";
   });
+  var detail = $("monitor-detail");
+  if (detail) {
+    clear(detail);
+    add(detail, "p", "empty", "点左侧一条情报，在此查看摘要。演示种子会标明「演示」。完整富化仍可到「情报富化」。");
+  }
+  loadItems("monitor");
 });
 
 $("enrich-btn").addEventListener("click", function () {
