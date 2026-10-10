@@ -134,7 +134,12 @@ def inprocess_health() -> dict:
             "mode": "embed",
             "via_proxy": False,
             "database_available": False,
-            "error": "intelligence.db missing — run seed or B monitor",
+            "error": (
+                "缺少 intelligence.db（%s）。请先执行："
+                "cd intelligence && PYTHONPATH=. python seed_demo_db.py --force"
+                "；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；"
+                "再 ./scripts/demo-up.sh"
+            ) % path,
         }
     try:
         ensure_intelligence_path()

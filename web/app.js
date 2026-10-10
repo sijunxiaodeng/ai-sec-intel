@@ -344,9 +344,18 @@ function setTeamHealth(team) {
   if (!el) return;
   if (team && team.reachable === false) {
     el.hidden = false;
+    var err = team.error || "";
+    var hint;
+    if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
+      hint = "请先生成多源库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
+    } else if (/多源资料探测失败|Connection refused|8765/i.test(err)) {
+      hint = "嵌入模式下应直读本机库，无需 :8765。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
+    } else {
+      hint = "仍会采集 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查多源库。";
+    }
     el.textContent = "多源情报库暂不可用"
-      + (team.error ? "：" + team.error : "")
-      + "。仍会采集 NVD/OSV；请确认已运行 ./scripts/demo-up.sh。";
+      + (err ? "：" + err : "")
+      + "。" + hint;
   } else {
     el.hidden = true;
     el.textContent = "";
@@ -469,7 +478,12 @@ function renderMonitorFeed(data) {
   var summary = $("monitor-summary");
   var teamTotal = (((data.team_documents || {}).total) || 0);
   var teamMeta = data.team_documents || {};
-  if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "多源资料探测失败" });
+  if (teamMeta.reachable === false) {
+    setTeamHealth({
+      reachable: false,
+      error: teamMeta.error || "多源资料探测失败",
+    });
+  }
   if (summary) {
     var fresh = data.freshness || {};
     summary.textContent = "共 CVE " + (counts.cve || 0)
@@ -986,7 +1000,7 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
     bits.push("多源情报不可用时仍应有 NVD/OSV 与本地资料");
   }
   if (teamDocs.reachable === false) {
-    bits.push("多源资料探测失败");
+    bits.push("多源资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
