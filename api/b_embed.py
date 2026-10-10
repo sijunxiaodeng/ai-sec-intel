@@ -198,8 +198,19 @@ def list_team_page(keyword: str = "", *, limit: int = 100, offset: int = 0, ai_o
 
 
 def list_documents_page(q: str = "", *, limit: int = 40, offset: int = 0) -> dict:
-    ensure_intelligence_path()
+    """List B documents without reordering sys.path / purging collectors.
+
+    Safe to call while ``b_monitor`` holds the intelligence import scope — we
+    only ensure ``intelligence/`` is importable (append), never prefer it over
+    root ``collectors.*``.
+    """
+    intel = str(INTEL_ROOT.resolve())
+    if intel not in sys.path:
+        sys.path.append(intel)
     from api_v6.document_repository import DocumentRepository
 
-    docs = DocumentRepository(db_path(), INTEL_ROOT)
+    path = Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB)
+    if not path.is_absolute():
+        path = INTEL_ROOT / path
+    docs = DocumentRepository(path.resolve(), INTEL_ROOT)
     return docs.list_items(q=q or None, limit=limit, offset=offset, include_raw=False)
