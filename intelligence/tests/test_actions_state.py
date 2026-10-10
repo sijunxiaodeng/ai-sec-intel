@@ -131,6 +131,21 @@ class ActionsStateTests(unittest.TestCase):
             self.assertEqual(set(archive.namelist()), {'intelligence.db', 'monitoring_baseline.json',
                              'monitoring_status.json', 'classification_status.json', 'manifest.json'})
             self.assertNotIn(b'fixture-not-a-real-secret', b''.join(archive.read(n) for n in archive.namelist()))
+    def test_optional_model_and_facts_reports_round_trip_with_checksums(self):
+        model = {'run_id': '42', 'status': 'partial', 'semantic_calls': 2, 'semantic_success': 1,
+                 'provider': 'deepseek', 'reason_category': 'invalid_response'}
+        facts = {'format_version': 1, 'run_id': '42', 'classification': {'pending_llm': 10},
+                 'latency': {'full_observation_period': {'summary': {'breached_6h': 210}}}}
+        (self.source / 'deepseek_status.json').write_text(json.dumps(model))
+        (self.source / 'actions_report.json').write_text(json.dumps(facts))
+        destination = self.root / 'optional-snapshot'
+        save_state(self.source, destination, repository=REPOSITORY, branch=BRANCH, run_id=42)
+        payload = archive_of(destination)
+        restore_archive(payload, self.root / 'optional-restored', repository=REPOSITORY, branch=BRANCH, run_id=42)
+        self.assertEqual(json.loads((self.root / 'optional-restored/deepseek_status.json').read_text()), model)
+        self.assertEqual(json.loads((self.root / 'optional-restored/actions_report.json').read_text()), facts)
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            self.assertNotIn(b'fixture-not-a-real-secret', b''.join(archive.read(n) for n in archive.namelist()))
     def test_checksum_failure_does_not_modify_destination(self):
         (self.snapshot / 'monitoring_baseline.json').write_text(json.dumps({'started_at': FIRST_SEEN}))
         with self.assertRaisesRegex(StateError, 'checksum'):
