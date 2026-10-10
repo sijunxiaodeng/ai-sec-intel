@@ -910,20 +910,44 @@ def _team_reachable_probe():
 
 
 @app.get("/api/monitor/status")
-def monitor_status():
+def monitor_status(light: int = 0):
+    """Monitor schedule/progress.
+
+    Use ``?light=1`` while a cycle is running — skip the embed health probe so
+    progress polling is not blocked by the same-process multi-source work.
+    """
+    from automation.schedule import next_run_iso
+
     st = monitor_state()
-    team = _team_reachable_probe()
+    running = bool(st.get("running"))
+    team = None
+    if not light and not running:
+        team = _team_reachable_probe()
+    elif not light and running:
+        # Cheap stub so the UI keeps a team object without opening the intel DB.
+        from api.b_embed import embed_enabled, public_b_base
+
+        team = {
+            "reachable": True,
+            "mode": "embed" if embed_enabled() else "sidecar",
+            "public_base": public_b_base(),
+            "base_url": public_b_base(),
+            "probe": "skipped_while_running",
+        }
     return {
         "mode": "automatic",
         "interval_hours": st.get("interval_hours"),
         "auto_on_start": st.get("auto_on_start"),
-        "running": bool(st.get("running")),
+        "running": running,
+        "run_phase": st.get("run_phase") or "",
+        "run_started_at": st.get("run_started_at") or "",
         "last_run": st.get("last_run") or "",
+        "next_run": next_run_iso(st),
         "last_count": st.get("last_count") or 0,
         "last_error": st.get("last_error") or "",
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
-        "notice": "默认持续自动监测宽范围 AI 安全情报；手动按钮仅用于立即刷新一轮。",
+        "notice": "定时轮询（默认约 6 小时）+ 手动「立即刷新」；不是竞品式实时推流。",
     }
 
 
@@ -941,10 +965,17 @@ def monitor_run(body: MonitorRunBody):
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
     from api.b_embed import embed_enabled
     from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
+    from automation.schedule import mark_phase, mark_run, mark_running
+
+    try:
+        mark_running(phase="starting", keyword=keyword)
+    except Exception:
+        pass
 
     b_cycle = None
     if embed_enabled() and b_monitor_on_refresh():
         try:
+            mark_phase("多源采集刷新")
             b_cycle = run_b_monitor_cycle()
         except Exception as exc:
             b_cycle = {"status": "failed", "error": "%s: %s" % (type(exc).__name__, exc)[:160]}
@@ -962,29 +993,34 @@ def monitor_run(body: MonitorRunBody):
             "多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
             % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
         )
-    try:
-        result = run_collect(keyword)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
-    try:
-        from automation.schedule import mark_run
-        mark_run(count=len(result["records"]), keyword=keyword)
-    except Exception:
-        pass
+    result = None
     library = None
-    if body.sync_library:
-        if not team.get("reachable"):
-            library = {"status": "skipped", "error": "team unreachable"}
-            warnings.append("已跳过多源资料同步。")
-        else:
-            try:
-                from rag.library import sync_team
-                library = sync_team(max_documents=body.max_documents)
-            except ValueError as exc:
-                library = {"status": "busy", "error": str(exc)}
-            except Exception as exc:
-                library = {"status": "error", "error": type(exc).__name__}
-                warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
+    try:
+        mark_phase("NVD/OSV/多源 CVE 入库")
+        result = run_collect(keyword)
+        if body.sync_library:
+            if not team.get("reachable"):
+                library = {"status": "skipped", "error": "team unreachable"}
+                warnings.append("已跳过多源资料同步。")
+            else:
+                try:
+                    mark_phase("资料库同步")
+                    from rag.library import sync_team
+                    library = sync_team(max_documents=body.max_documents)
+                except ValueError as exc:
+                    library = {"status": "busy", "error": str(exc)}
+                except Exception as exc:
+                    library = {"status": "error", "error": type(exc).__name__}
+                    warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
+        mark_run(count=len(result["records"]), keyword=keyword)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        try:
+            mark_run(count=0, keyword=keyword, error=str(exc)[:200])
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     steps = result.get("steps") or []
     team_failed = any(
         ("多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))

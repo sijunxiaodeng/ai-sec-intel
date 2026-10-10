@@ -26,6 +26,10 @@ var prompts = [
   "比较 CVE-2024-37032 和 CVE-2025-0312 的 CVSS、受影响版本与修复记录"
 ];
 var askSessionId = "";
+var monitorRefreshing = false;
+var monitorElapsedTimer = null;
+var monitorPollTimer = null;
+var monitorRefreshStartedAt = 0;
 
 function $(id) {
   return document.getElementById(id);
@@ -371,20 +375,75 @@ function statusClass(status) {
   return "st-bad";
 }
 
+function formatStamp(value) {
+  if (!value) return "—";
+  var text = String(value).replace("T", " ").replace("Z", " UTC");
+  return text.length > 22 ? text.slice(0, 19) + " UTC" : text;
+}
+
+function renderMonitorLive(data, opts) {
+  opts = opts || {};
+  var live = $("monitor-live");
+  var stateEl = $("monitor-live-state");
+  var lastEl = $("monitor-live-last");
+  var nextEl = $("monitor-live-next");
+  var phaseEl = $("monitor-live-phase");
+  var progress = $("monitor-progress");
+  if (!live || !stateEl) return;
+  var running = !!(opts.running || (data && data.running) || monitorRefreshing);
+  var phase = opts.phase || (data && data.run_phase) || "";
+  var elapsed = opts.elapsedSec != null ? opts.elapsedSec : null;
+  live.classList.toggle("is-running", running);
+  if (progress) progress.hidden = !running;
+  if (running) {
+    stateEl.textContent = "正在刷新" + (elapsed != null ? "（已 " + elapsed + " 秒）" : "") + "…";
+    phaseEl.textContent = phase
+      ? ("当前步骤：" + phase)
+      : "正在跑一轮（多源采集 → NVD/OSV 入库 → 可选资料同步），请稍候…";
+  } else {
+    stateEl.textContent = "空闲（定时轮询，非实时推流）";
+    phaseEl.textContent = "定时约每 " + ((data && data.interval_hours) || 6)
+      + " 小时自动一轮；点「立即刷新一轮」可马上跑。";
+  }
+  if (lastEl) {
+    var last = (data && data.last_run) || "";
+    var count = (data && data.last_count) || 0;
+    lastEl.textContent = last ? (formatStamp(last) + " · 相关 " + count + " 条") : "尚未记录";
+  }
+  if (nextEl) {
+    nextEl.textContent = (data && data.next_run) ? formatStamp(data.next_run) : "等待首轮完成后估算";
+  }
+}
+
 function loadMonitorStatus() {
   return api("/api/monitor/status").then(function (data) {
     setTeamHealth(data.team);
+    renderMonitorLive(data);
+    if (monitorRefreshing) {
+      // Keep the in-progress copy; only refresh the live panel timestamps.
+      return data;
+    }
     var bits = [];
-    bits.push("模式：自动持续监测（宽范围 AI 安全）");
-    if (data.running) bits.push("后台正在跑一轮…");
-    else if (data.last_run) bits.push("最近自动轮次 " + data.last_run + "，入库相关 " + (data.last_count || 0) + " 条");
-    else bits.push("启动后会自动跑首轮；也可点「立即刷新一轮」");
-    bits.push("间隔 " + (data.interval_hours || 6) + " 小时");
+    bits.push("模式：定时自动监测（约每 " + (data.interval_hours || 6) + " 小时，非实时推流）");
+    if (data.running) bits.push("后台正在跑：" + (data.run_phase || "进行中"));
+    else if (data.last_run) bits.push("最近一轮 " + formatStamp(data.last_run) + "，入库相关 " + (data.last_count || 0) + " 条");
+    else bits.push("尚无完成轮次；可点「立即刷新一轮」");
+    if (data.next_run) bits.push("预计下次定时 " + formatStamp(data.next_run));
     if (data.last_error) bits.push("上次错误：" + data.last_error);
     setMonitorStatus(bits.join("。") + "。");
+    var line = $("monitor-line");
+    if (line) {
+      line.textContent = data.running
+        ? ("监测进行中：" + (data.run_phase || "刷新中") + "…")
+        : (data.last_run
+          ? ("最近监测 " + formatStamp(data.last_run) + " · 相关 " + (data.last_count || 0) + " 条")
+          : "可点「立即刷新监测」马上跑一轮");
+    }
     return data;
   }).catch(function (error) {
-    setMonitorStatus("无法读取自动监测状态：" + (error.message || "请求失败"));
+    if (!monitorRefreshing) {
+      setMonitorStatus("无法读取自动监测状态：" + (error.message || "请求失败"));
+    }
   });
 }
 
@@ -1017,22 +1076,67 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   return bits.join("；");
 }
 
+function stopMonitorProgressTimers() {
+  if (monitorElapsedTimer) {
+    clearInterval(monitorElapsedTimer);
+    monitorElapsedTimer = null;
+  }
+  if (monitorPollTimer) {
+    clearInterval(monitorPollTimer);
+    monitorPollTimer = null;
+  }
+}
+
+function startMonitorProgressTimers(busyBase) {
+  stopMonitorProgressTimers();
+  monitorRefreshStartedAt = Date.now();
+  var tick = function () {
+    var sec = Math.max(0, Math.round((Date.now() - monitorRefreshStartedAt) / 1000));
+    var msg = busyBase + "已等待 " + sec + " 秒…";
+    setMonitorStatus(msg);
+    showToast(msg, "busy");
+    renderMonitorLive(null, { running: true, elapsedSec: sec, phase: "请求进行中" });
+  };
+  tick();
+  monitorElapsedTimer = setInterval(tick, 1000);
+  monitorPollTimer = setInterval(function () {
+    api("/api/monitor/status?light=1").then(function (data) {
+      if (!monitorRefreshing) return;
+      var sec = Math.max(0, Math.round((Date.now() - monitorRefreshStartedAt) / 1000));
+      renderMonitorLive(data, {
+        running: true,
+        elapsedSec: sec,
+        phase: data.run_phase || "监测执行中",
+      });
+      if (data.run_phase) {
+        showToast("监测进行中：" + data.run_phase + "（" + sec + " 秒）", "busy");
+      }
+    }).catch(function () {});
+  }, 1500);
+}
+
 function runMonitorRefresh(options) {
   options = options || {};
   var button = $("auto-monitor-btn");
+  var overviewBtn = $("overview-monitor-btn");
   var keyword = monitorKeyword();
   var syncLibrary = options.sync_library !== false;
-  if (!button) {
+  if (!button && !overviewBtn) {
     showToast("找不到刷新按钮，请刷新页面后重试", "error");
-    return Promise.reject(new Error("auto-monitor-btn missing"));
+    return Promise.reject(new Error("monitor button missing"));
   }
+  if (monitorRefreshing) {
+    showToast("已有一轮监测在进行，请稍候…", "busy");
+    return Promise.resolve(null);
+  }
+  monitorRefreshing = true;
   setBusyButton(button, true, "正在刷新…", "立即刷新一轮");
+  setBusyButton(overviewBtn, true, "正在刷新…", "立即刷新监测");
   clearError();
-  var busyMsg = keyword
-    ? "正在按「" + keyword + "」刷新监测…"
-    : "正在刷新一轮监测（含公开源与多源情报库，可能需要数十秒）…";
-  setMonitorStatus(busyMsg);
-  showToast(busyMsg, "busy");
+  var busyBase = keyword
+    ? ("正在按「" + keyword + "」刷新监测，")
+    : "正在刷新一轮监测（多源 + NVD/OSV，可能需数十秒），";
+  startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1042,7 +1146,6 @@ function runMonitorRefresh(options) {
     var lib = data.library_sync || {};
     var warns = data.warnings || [];
     var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
-    var used = data.keyword || keyword || "宽范围 AI 安全";
     setMonitorStatus("本轮完成：相关 " + (data.count || 0) + " 条"
       + (bmon.status ? "；多源采集 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
@@ -1061,7 +1164,6 @@ function runMonitorRefresh(options) {
           ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why
           : "刷新已完成，但情报流仍为空。" + why));
       }
-      if ($("overview") && !$("overview").hidden) loadOverview();
       return data;
     });
   }).catch(function (error) {
@@ -1070,10 +1172,20 @@ function runMonitorRefresh(options) {
     showToast("刷新失败：" + (error.message || "请求失败"), "error");
     throw error;
   }).then(function (data) {
+    stopMonitorProgressTimers();
+    monitorRefreshing = false;
     setBusyButton(button, false, null, "立即刷新一轮");
-    return data;
+    setBusyButton(overviewBtn, false, null, "立即刷新监测");
+    return loadMonitorStatus().then(function () {
+      if ($("overview") && !$("overview").hidden) loadOverview();
+      return data;
+    });
   }, function (error) {
+    stopMonitorProgressTimers();
+    monitorRefreshing = false;
     setBusyButton(button, false, null, "立即刷新一轮");
+    setBusyButton(overviewBtn, false, null, "立即刷新监测");
+    loadMonitorStatus();
     throw error;
   });
 }
@@ -1138,6 +1250,10 @@ function bindClick(id, handler) {
 }
 
 bindClick("auto-monitor-btn", function () {
+  return runMonitorRefresh({ sync_library: true });
+});
+bindClick("overview-monitor-btn", function () {
+  setView("monitor");
   return runMonitorRefresh({ sync_library: true });
 });
 
