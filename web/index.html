@@ -41,7 +41,7 @@
         <div class="stats" id="stats"></div>
         <p id="monitor-line" class="hint"></p>
         <ol class="flow" id="flow">
-          <li><b>监测</b><span>NVD、OSV 与团队情报（B），按编号合并；资料库另同步</span></li>
+          <li><b>监测</b><span>CVE（NVD/OSV/团队）+ 非 CVE 资料（论文/博客/标准等）</span></li>
           <li><b>富化</b><span>查询风险指标，抓取关联资料与修复记录</span></li>
           <li><b>入库</b><span>同一编号合并成一条情报</span></li>
           <li><b>问答</b><span>先检索，再组织回答</span></li>
@@ -74,9 +74,9 @@
           <div class="panel-head">
             <h2>情报列表</h2>
             <div class="chip-row" id="monitor-scope">
-              <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
-              <button type="button" class="chip" data-monitor-scope="cve">仅漏洞</button>
               <button type="button" class="chip" data-monitor-scope="document">仅资料</button>
+              <button type="button" class="chip" data-monitor-scope="cve">仅漏洞</button>
+              <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
               <button type="button" class="chip" data-monitor-scope="demo">仅演示</button>
               <button type="button" class="chip" data-monitor-scope="live">仅联网</button>
             </div>

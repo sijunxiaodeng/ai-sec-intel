@@ -230,6 +230,19 @@ function loadOverview() {
 
 var monitorScope = "all";
 
+function setMonitorScope(scope) {
+  monitorScope = scope || "all";
+  document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
+    node.className = node.getAttribute("data-monitor-scope") === monitorScope ? "chip is-on" : "chip";
+  });
+  var detail = $("monitor-detail");
+  if (detail) {
+    clear(detail);
+    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可去「情报富化」；论文/博客/标准等资料也可在「安全资料库」打开。");
+  }
+  loadItems("monitor");
+}
+
 function loadItems(view) {
   var query = view === "monitor" ? $("filter").value.trim() : "";
   if (view === "monitor") {
@@ -685,16 +698,15 @@ document.addEventListener("click", function (event) {
   if (!button) return;
   event.preventDefault();
   event.stopPropagation();
-  monitorScope = button.getAttribute("data-monitor-scope") || "all";
-  document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
-    node.className = node === button ? "chip is-on" : "chip";
+  setMonitorScope(button.getAttribute("data-monitor-scope") || "all");
+});
+// Direct bind as fallback (some automation clicks miss delegated handlers).
+document.querySelectorAll("[data-monitor-scope]").forEach(function (button) {
+  button.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setMonitorScope(button.getAttribute("data-monitor-scope") || "all");
   });
-  var detail = $("monitor-detail");
-  if (detail) {
-    clear(detail);
-    add(detail, "p", "empty", "点左侧一条情报，在此查看摘要。演示种子会标明「演示」。完整富化仍可到「情报富化」。");
-  }
-  loadItems("monitor");
 });
 
 $("enrich-btn").addEventListener("click", function () {

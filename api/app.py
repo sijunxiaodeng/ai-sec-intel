@@ -343,6 +343,11 @@ def monitor_feed(q: str = "", kind: str = "all"):
     elif kind == "document":
         cve_items = []
 
+    # Put non-CVE documents first on "all" so the monitor is not a CVE wall.
+    if kind == "all":
+        feed_items = doc_items + cve_items
+    else:
+        feed_items = cve_items + doc_items
     return {
         "kind": kind,
         "counts": {
@@ -351,7 +356,7 @@ def monitor_feed(q: str = "", kind: str = "all"):
             "total": len(cve_items) + len(doc_items),
         },
         "team_documents": team_meta,
-        "items": cve_items + doc_items,
+        "items": feed_items,
     }
 
 
