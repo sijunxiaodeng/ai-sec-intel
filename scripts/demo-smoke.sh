@@ -107,6 +107,24 @@ check "ia-monitor-copy" grep -q "自动监测" "$OUT/page.html"
 check "ia-library-copy" grep -q "资料库沉淀" "$OUT/page.html"
 check "ia-enrich-copy" grep -q "情报富集" "$OUT/page.html"
 check "ia-ask-copy" grep -q "证据问答" "$OUT/page.html"
+check "ia-vis-board" grep -q 'class="vis-board"' "$OUT/page.html"
+check "ia-mod-strip" grep -q 'class="mod-strip"' "$OUT/page.html"
+curl -sf --max-time 8 "$MAIN_URL/api/visibility" -o "$OUT/visibility.json"
+python3 - <<PY
+import json,sys
+v=json.load(open("$OUT/visibility.json",encoding="utf-8"))
+assert v.get("policy",{}).get("competition_passed") is None
+mods={m["id"]:m for m in v.get("modules") or []}
+assert set(mods)>= {"monitor","enrich","library","ask"}
+# Honest: latency gap or empty accuracy must appear in standards/gaps
+levels=" ".join((s.get("level") or "")+" "+(s.get("note") or "") for s in (v.get("standards") or []))
+assert "未达证" in levels or "空" in levels or "未实现" in levels
+integ={i["party"]:i["status"] for i in (v.get("integration") or [])}
+assert "A" in integ and "B" in integ and "C" in integ
+print("visibility_ok modules", sorted(mods), "B", integ.get("B"), "gaps", len(v.get("gaps") or []))
+sys.exit(0)
+PY
+check "api-visibility-honest" true
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()

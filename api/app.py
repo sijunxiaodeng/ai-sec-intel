@@ -171,6 +171,236 @@ def _team_intel_snapshot():
     return out
 
 
+def _enrichment_field_coverage(records):
+    """Operational field presence — not independent enrichment accuracy."""
+    keys = ("cvss", "epss", "kev", "papers", "affected", "poc")
+    counts = {k: 0 for k in keys}
+    live = 0
+    for record in records:
+        item = record.get("item") or {}
+        if (item.get("raw_data") or {}).get("sample_mode"):
+            continue
+        live += 1
+        if record.get("cvss") or item.get("cvss"):
+            counts["cvss"] += 1
+        if record.get("epss") is not None or (item.get("epss") is not None):
+            counts["epss"] += 1
+        if record.get("kev") or item.get("kev"):
+            counts["kev"] += 1
+        if record.get("papers") or item.get("papers"):
+            counts["papers"] += 1
+        if record.get("affected") or item.get("affected"):
+            counts["affected"] += 1
+        if record.get("poc") or item.get("poc"):
+            counts["poc"] += 1
+    present = [k for k, n in counts.items() if n > 0]
+    return {"live_items": live, "counts": counts, "present_dimensions": present, "dimension_count": len(present)}
+
+
+def _build_visibility(records, names, monitor, library, team, latency_count, llm_ready):
+    """Honest module board: duty / standards / integration. Never invent competition_passed."""
+    from enrichment.assets import load_assets
+
+    cov = (team or {}).get("coverage") or {}
+    observed_cats = int(cov.get("observed_ai_category_count") or 0)
+    lib_cats = len((library or {}).get("source_categories") or [])
+    # Prefer B observed categories for source-breadth narrative; fall back to library categories.
+    source_breadth = max(observed_cats, lib_cats, len(names or []))
+    if source_breadth >= 7:
+        source_level, source_note = "良好～优秀（演示）", "类别观测≥7；优秀「实时」有调度但 SLA 样本不足，非自动判竞赛分"
+    elif source_breadth >= 5:
+        source_level, source_note = "良好（演示）", "类别观测≥5；非 competition_passed"
+    elif source_breadth >= 3:
+        source_level, source_note = "合格（演示）", "类别观测≥3；非自动判竞赛分"
+    elif source_breadth > 0:
+        source_level, source_note = "缺口", "来源类别不足合格线（≥3）"
+    else:
+        source_level, source_note = "缺口", "尚无可用类别观测"
+
+    if latency_count and latency_count > 0:
+        latency_level, latency_note = "部分可计", f"可计时效样本 {latency_count}；间隔≠发布→采集延迟"
+    else:
+        latency_level, latency_note = "未达证", "latency_count=0 / sla_evidence 不足；勿用定时间隔冒充延迟"
+
+    enrich_cov = _enrichment_field_coverage(records)
+    dim_n = enrich_cov["dimension_count"]
+    if dim_n >= 5:
+        enrich_dim_level, enrich_dim_note = "良好（可演示）", f"字段维度 {dim_n}：{', '.join(enrich_cov['present_dimensions'])}；缺互联网资产发现与独立准确率"
+    elif dim_n >= 3:
+        enrich_dim_level, enrich_dim_note = "合格（可演示）", f"字段维度 {dim_n}；独立准确率仍为空"
+    else:
+        enrich_dim_level, enrich_dim_note = "缺口", f"字段维度仅 {dim_n}，低于合格线≥3"
+
+    assets = load_assets() or []
+    asset_n = len(assets) if isinstance(assets, list) else 0
+
+    b_reachable = bool((team or {}).get("reachable"))
+    b_status = "接通" if b_reachable else "不可达"
+    b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_URL"
+    if b_reachable:
+        b_detail += f" · AI CVE {(team or {}).get('team_total') if (team or {}).get('team_total') is not None else '—'} · 文档 {(team or {}).get('document_total') if (team or {}).get('document_total') is not None else '—'}"
+    elif (team or {}).get("error"):
+        b_detail += f" · {(team or {}).get('error')}"
+
+    c_local = "接通"  # C capabilities run in-process on A
+    llm_status = "接通" if llm_ready else "未配置"
+    docs_n = int((library or {}).get("documents") or 0)
+    chunks_n = int((library or {}).get("chunks") or 0)
+
+    if "缺口" in source_level and latency_level == "未达证":
+        monitor_std_level = "缺口"
+    elif latency_level == "未达证":
+        monitor_std_level = "部分"
+    else:
+        monitor_std_level = source_level
+
+    modules = [
+        {
+            "id": "monitor",
+            "title": "自动监测",
+            "position": "管线 01 · 入口情报流",
+            "duty": "宽范围 AI 安全情报流（CVE + 非 CVE）；默认自动持续采集，关键词仅可选收窄。",
+            "standard": {
+                "level": monitor_std_level,
+                "summary": f"来源类别 {source_level}；延迟 {latency_level}",
+                "detail": f"{source_note}。{latency_note}",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · monitor 角色",
+                "peers": [
+                    {"party": "A", "role": "调度 / feed / status", "status": "接通"},
+                    {"party": "B", "role": "团队情报 :8765", "status": b_status, "detail": b_detail},
+                    {"party": "C", "role": "不经监测入口", "status": "跳过"},
+                ],
+            },
+            "signals": {
+                "items": len(records),
+                "last_run": (monitor or {}).get("last_run"),
+                "running": bool((monitor or {}).get("running")),
+                "mode": (monitor or {}).get("mode") or "automatic",
+            },
+        },
+        {
+            "id": "enrich",
+            "title": "情报富集",
+            "position": "管线 02 · 单条补维度",
+            "duty": "对单条漏洞补 EPSS / KEV / 论文等，并评估影响资产（登记匹配，非互联网发现）。",
+            "standard": {
+                "level": enrich_dim_level,
+                "summary": f"富化维度 {enrich_dim_level}；准确率 空",
+                "detail": f"{enrich_dim_note}。independent_enrichment_accuracy=null；互联网资产定位未实现；PoC 可用性未验收。已登记资产 {asset_n}。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · enrich 角色",
+                "peers": [
+                    {"party": "A", "role": "编排触发 /api/enrich", "status": "接通"},
+                    {"party": "B", "role": "监测上游输入", "status": "跳过", "detail": "富集读本地库，不直连 B"},
+                    {"party": "C", "role": "assessment / assets", "status": c_local},
+                ],
+            },
+            "signals": enrich_cov,
+        },
+        {
+            "id": "library",
+            "title": "资料库沉淀",
+            "position": "管线 03 · 可检索原文",
+            "duty": "沉淀可检索原文与片段；监测是流，这里是存档与问答底座。",
+            "standard": {
+                "level": "可演示" if docs_n >= 1 else "缺口",
+                "summary": f"文档 {docs_n} · 片段 {chunks_n} · 类别 {lib_cats}",
+                "detail": "快照级检索/资料绑定可跑；独立语义质量不由此绿。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 壳 · C 资料检索",
+                "peers": [
+                    {"party": "A", "role": "资料库页 / 同步触发", "status": "接通"},
+                    {"party": "B", "role": "团队文档同步", "status": b_status if b_reachable else "不可达", "detail": "可选 team-sync"},
+                    {"party": "C", "role": "library / chunks / RAG 底座", "status": c_local},
+                ],
+            },
+            "signals": {"documents": docs_n, "chunks": chunks_n, "categories": (library or {}).get("source_categories") or []},
+        },
+        {
+            "id": "ask",
+            "title": "证据问答",
+            "position": "管线 04 · 先证据后答",
+            "duty": "先检索证据再组织回答；编号与分数须来自证据；verifier 核对。",
+            "standard": {
+                "level": "部分（开发验证）" if docs_n >= 1 else "缺口",
+                "summary": "问答质量待独立验收；competition_passed=null",
+                "detail": ("大模型未配置，当前走原文摘录。" if not llm_ready else "大模型已配置；独立问答准确率仍为空。")
+                + " 规则/开发题可过，不冒充赛题得分。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · qa + verifier",
+                "peers": [
+                    {"party": "A", "role": "会话 / 核对角色壳", "status": "接通"},
+                    {"party": "B", "role": "不直连问答", "status": "跳过"},
+                    {"party": "C", "role": "检索 / 证据组装", "status": c_local},
+                    {"party": "LLM", "role": "国产模型接口", "status": llm_status},
+                ],
+            },
+            "signals": {"llm_ready": llm_ready},
+        },
+    ]
+
+    standards = [
+        {"id": "source_categories", "metric": "来源类别数", "level": source_level, "note": source_note},
+        {"id": "enrichment_dimensions", "metric": "富化维度数", "level": enrich_dim_level, "note": enrich_dim_note},
+        {"id": "latency", "metric": "发布→采集延迟", "level": latency_level, "note": latency_note},
+        {"id": "enrichment_accuracy", "metric": "富化准确率", "level": "空", "note": "independent_enrichment_accuracy=null"},
+        {"id": "qa_quality", "metric": "问答质量", "level": "部分（开发验证）" if docs_n >= 1 else "缺口", "note": "独立准确率 null；勿把规则测试当竞赛分"},
+        {"id": "internet_assets", "metric": "互联网资产定位", "level": "未实现", "note": "仅登记/预览匹配"},
+        {"id": "poc_verify", "metric": "PoC 可用验证", "level": "未验收", "note": "候选未正式验收"},
+    ]
+
+    integration = [
+        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · :8023"},
+        {"party": "B", "name": "团队情报服务", "status": b_status, "detail": b_detail},
+        {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
+        {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
+    ]
+
+    gaps = [row for row in standards if row["level"] in ("缺口", "未达证", "空", "未实现", "未验收") or "部分" in str(row["level"])]
+
+    return {
+        "policy": {
+            "competition_passed": None,
+            "note": "对照验收包/acceptance_criteria 的工程自评；不自动判定竞赛通过。禁止假绿。",
+        },
+        "modules": modules,
+        "standards": standards,
+        "integration": integration,
+        "gaps": gaps,
+    }
+
+
+@app.get("/api/visibility")
+def visibility():
+    records = knowledge_records()
+    names = []
+    for record in records:
+        if (record.get("item", {}).get("raw_data") or {}).get("sample_mode"):
+            continue
+        for name in (record.get("item") or {}).get("sources") or []:
+            if name and name not in names:
+                names.append(name)
+    monitor = monitor_state()
+    from rag.library import overview as library_overview
+    library = library_overview()
+    team = _team_intel_snapshot()
+    return _build_visibility(
+        records, names, monitor,
+        {"documents": library["documents"], "chunks": library["chunks"],
+         "source_categories": library["source_categories"]},
+        team, countable_latency(records), configured(),
+    )
+
+
 @app.get("/api/overview")
 def overview():
     records = knowledge_records()
@@ -185,17 +415,21 @@ def overview():
     from rag.library import overview as library_overview
     library = library_overview()
     team = _team_intel_snapshot()
+    lib = {"documents": library["documents"], "chunks": library["chunks"],
+           "source_categories": library["source_categories"]}
+    latency = countable_latency(records)
+    llm_ready = configured()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
         "items": len(records),
         "source_count": len(names),
         "sources": names,
-        "latency_count": countable_latency(records),
-        "llm_ready": configured(),
+        "latency_count": latency,
+        "llm_ready": llm_ready,
         "monitor": monitor,
-        "library": {"documents": library["documents"], "chunks": library["chunks"],
-                    "source_categories": library["source_categories"]},
+        "library": lib,
         "team_intel": team,
+        "visibility": _build_visibility(records, names, monitor, lib, team, latency, llm_ready),
         "steps": last_steps(),
         "recent": [_summary(record) for record in records[:6]],
     }

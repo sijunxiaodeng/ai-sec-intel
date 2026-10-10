@@ -77,25 +77,53 @@
           <button type="button" class="ghost" id="goto-monitor">进入自动监测</button>
         </div>
 
-        <ol class="arch-stack" id="arch-stack">
+        <section class="vis-board" aria-label="整合与达标一览">
+          <header class="vis-head">
+            <h2>整合健康 · A / B / C</h2>
+            <p id="vis-policy" class="hint">对照验收包诚实自评；不自动判竞赛通过。</p>
+          </header>
+          <div class="integ-row" id="integ-row"></div>
+          <header class="vis-head">
+            <h2>达标缺口（禁止假绿）</h2>
+          </header>
+          <div class="gap-row" id="gap-row"></div>
+        </section>
+
+        <ol class="arch-stack" id="arch-stack" aria-label="管线地图 · 职责/达标/整合">
           <li data-go="monitor">
             <div class="idx">01</div>
-            <div><b>自动监测</b><span>宽范围 AI 安全情报流（CVE + 告警/博客/论文/标准/政策），无需先输关键词</span></div>
+            <div class="stack-body">
+              <b>自动监测</b>
+              <span class="duty">宽范围 AI 安全情报流（CVE + 非 CVE），无需先输关键词</span>
+              <div class="triad" data-triad="monitor"></div>
+            </div>
             <div class="go">打开 →</div>
           </li>
           <li data-go="enrich">
             <div class="idx">02</div>
-            <div><b>情报富集</b><span>EPSS / KEV / 论文 / 影响资产 — 富集输出，不是独立监测入口</span></div>
+            <div class="stack-body">
+              <b>情报富集</b>
+              <span class="duty">EPSS / KEV / 论文 / 影响资产 — 富集输出，不是独立监测入口</span>
+              <div class="triad" data-triad="enrich"></div>
+            </div>
             <div class="go">打开 →</div>
           </li>
           <li data-go="library">
             <div class="idx">03</div>
-            <div><b>资料库沉淀</b><span>可检索原文与片段，供查阅与问答底座</span></div>
+            <div class="stack-body">
+              <b>资料库沉淀</b>
+              <span class="duty">可检索原文与片段，供查阅与问答底座</span>
+              <div class="triad" data-triad="library"></div>
+            </div>
             <div class="go">打开 →</div>
           </li>
           <li data-go="ask">
             <div class="idx">04</div>
-            <div><b>证据问答</b><span>先检索证据，再组织回答；编号与分数须来自证据</span></div>
+            <div class="stack-body">
+              <b>证据问答</b>
+              <span class="duty">先检索证据，再组织回答；编号与分数须来自证据</span>
+              <div class="triad" data-triad="ask"></div>
+            </div>
             <div class="go">打开 →</div>
           </li>
         </ol>
@@ -125,6 +153,7 @@
             <p id="auto-monitor-status" class="hint">正在读取自动监测状态…</p>
           </div>
         </div>
+        <div class="mod-strip" data-mod="monitor" aria-label="职责达标整合"></div>
         <p id="team-health" class="hint team-health" hidden></p>
         <details class="filter-drawer" id="monitor-filter-drawer">
           <summary>可选：关键词筛选 / 定向补采</summary>
@@ -168,6 +197,7 @@
             <button type="button" class="primary" id="enrich-btn">批量查询 EPSS / KEV / 论文</button>
           </div>
         </div>
+        <div class="mod-strip" data-mod="enrich" aria-label="职责达标整合"></div>
         <div class="split enrich-layout">
           <div class="panel" id="enrich-list"></div>
           <article class="panel" id="enrich-detail">
@@ -218,6 +248,7 @@
             <button type="button" class="ghost" id="library-team-sync">同步团队资料</button>
           </div>
         </div>
+        <div class="mod-strip" data-mod="library" aria-label="职责达标整合"></div>
         <p id="library-summary" class="hint"></p>
         <form id="library-search-form" class="toolbar">
           <label for="library-query">检索<input id="library-query" placeholder="提示注入、供应链、vLLM、CVE…" /></label>
@@ -282,10 +313,16 @@
       <section id="assets" class="view" hidden aria-hidden="true"></section>
 
       <section id="ask" class="view" hidden>
-        <div class="toolbar">
-          <button type="button" id="sample-btn" class="ghost">载入历史演示样例</button>
-          <p class="hint">人工核对案例；不计入实时监测成绩。</p>
+        <div class="ia-banner">
+          <div>
+            <h2 class="ia-title">证据问答</h2>
+            <p class="hint">先检索证据，再组织回答。人工核对案例不计入实时监测成绩。</p>
+          </div>
+          <div class="ia-actions toolbar" style="margin:0">
+            <button type="button" id="sample-btn" class="ghost">载入历史演示样例</button>
+          </div>
         </div>
+        <div class="mod-strip" data-mod="ask" aria-label="职责达标整合"></div>
         <form id="ask-form" class="ask-box">
           <label>问题
             <textarea id="question" rows="3" placeholder="例如：CVE-2025-0312 的风险有多高？影响哪个版本？"></textarea>

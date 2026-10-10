@@ -208,6 +208,10 @@ function setView(name) {
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
+  if (name === "monitor" || name === "enrich" || name === "library" || name === "ask") {
+    if (visibilityCache) applyVisibility(visibilityCache);
+    else loadVisibility();
+  }
 }
 
 function setTeamHealth(team) {
@@ -222,6 +226,128 @@ function setTeamHealth(team) {
     el.hidden = true;
     el.textContent = "";
   }
+}
+
+function statusClass(status) {
+  var s = String(status || "");
+  if (s === "接通" || s.indexOf("良好") === 0 || s.indexOf("合格") === 0 || s.indexOf("优秀") === 0 || s === "可演示") return "st-ok";
+  if (s === "跳过") return "st-skip";
+  if (s === "空" || s === "未配置") return "st-empty";
+  if (s.indexOf("部分") === 0 || s === "部分可计") return "st-warn";
+  return "st-bad";
+}
+
+var visibilityCache = null;
+
+function renderIntegration(row) {
+  var host = $("integ-row");
+  if (!host) return;
+  clear(host);
+  (row || []).forEach(function (item) {
+    var chip = add(host, "div", "integ-chip");
+    add(chip, "span", "party", item.party + " · " + (item.name || ""));
+    var st = add(chip, "span", "status " + statusClass(item.status), item.status || "—");
+    st.className = "status " + statusClass(item.status);
+    add(chip, "span", "detail", item.detail || "");
+  });
+}
+
+function renderGaps(gaps, standards) {
+  var host = $("gap-row");
+  if (!host) return;
+  clear(host);
+  var list = (gaps && gaps.length) ? gaps : (standards || []);
+  if (!list.length) {
+    add(host, "p", "hint", "暂无自评缺口条目。");
+    return;
+  }
+  list.forEach(function (item) {
+    var chip = add(host, "div", "gap-chip");
+    add(chip, "span", "metric", item.metric || item.id || "");
+    var level = add(chip, "span", "level", item.level || "—");
+    level.className = "level " + statusClass(item.level);
+    add(chip, "span", "note", item.note || "");
+  });
+}
+
+function renderTriad(mod) {
+  if (!mod) return;
+  var host = document.querySelector('[data-triad="' + mod.id + '"]');
+  if (!host) return;
+  clear(host);
+  var duty = add(host, "div", "cell");
+  add(duty, "em", "", "职责");
+  duty.appendChild(document.createTextNode(mod.position || ""));
+  var std = add(host, "div", "cell");
+  add(std, "em", "", "达标");
+  var strong = document.createElement("strong");
+  strong.textContent = (mod.standard && mod.standard.level) || "—";
+  std.appendChild(strong);
+  std.appendChild(document.createTextNode(" · " + ((mod.standard && mod.standard.summary) || "")));
+  var integ = add(host, "div", "cell");
+  add(integ, "em", "", "整合");
+  var peers = ((mod.integration && mod.integration.peers) || []).map(function (p) {
+    return p.party + ":" + p.status;
+  }).join(" · ");
+  integ.appendChild(document.createTextNode(peers || ((mod.integration && mod.integration.owner) || "")));
+}
+
+function renderModStrip(mod) {
+  if (!mod) return;
+  var host = document.querySelector('.mod-strip[data-mod="' + mod.id + '"]');
+  if (!host) return;
+  clear(host);
+  var duty = add(host, "div", "cell");
+  add(duty, "em", "", "职责");
+  add(duty, "p", "", mod.duty || "");
+  add(duty, "p", "meta", mod.position || "");
+
+  var std = add(host, "div", "cell");
+  add(std, "em", "", "达标");
+  var levelLine = add(std, "p", "", "");
+  var badge = document.createElement("span");
+  badge.className = "status " + statusClass(mod.standard && mod.standard.level);
+  badge.style.display = "inline-block";
+  badge.style.padding = "2px 7px";
+  badge.style.borderRadius = "4px";
+  badge.style.fontSize = "11px";
+  badge.style.fontWeight = "700";
+  badge.textContent = (mod.standard && mod.standard.level) || "—";
+  levelLine.appendChild(badge);
+  levelLine.appendChild(document.createTextNode("  " + ((mod.standard && mod.standard.summary) || "")));
+  add(std, "p", "meta", (mod.standard && mod.standard.detail) || "");
+
+  var integ = add(host, "div", "cell");
+  add(integ, "em", "", "整合");
+  add(integ, "p", "", (mod.integration && mod.integration.owner) || "");
+  var peers = add(integ, "div", "peers");
+  ((mod.integration && mod.integration.peers) || []).forEach(function (p) {
+    var peer = add(peers, "span", "peer", p.party + " " + p.status + (p.role ? " · " + p.role : ""));
+    peer.className = "peer " + statusClass(p.status);
+  });
+}
+
+function applyVisibility(vis) {
+  visibilityCache = vis || null;
+  if (!vis) return;
+  if ($("vis-policy") && vis.policy) {
+    $("vis-policy").textContent = vis.policy.note || "对照验收包诚实自评；不自动判竞赛通过。";
+  }
+  renderIntegration(vis.integration || []);
+  renderGaps(vis.gaps || [], vis.standards || []);
+  (vis.modules || []).forEach(function (mod) {
+    renderTriad(mod);
+    renderModStrip(mod);
+  });
+}
+
+function loadVisibility() {
+  return api("/api/visibility").then(function (data) {
+    applyVisibility(data);
+    return data;
+  }).catch(function () {
+    return null;
+  });
 }
 
 function loadMonitorStatus() {
@@ -251,22 +377,24 @@ function loadOverview() {
     var cov = team.coverage || {};
     var teamBits = [];
     if (team.reachable) {
-      teamBits.push("团队情报可达");
-      if (team.team_total != null) teamBits.push("已分类 AI CVE " + team.team_total + " 条");
-      if (team.document_total != null) teamBits.push("B 文档 " + team.document_total + " 份");
+      teamBits.push("B 接通");
+      if (team.team_total != null) teamBits.push("AI CVE " + team.team_total);
       if (cov.observed_ai_category_count != null) {
-        teamBits.push("B 观测类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
+        teamBits.push("类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
       }
     } else {
-      teamBits.push("团队情报暂不可达");
+      teamBits.push("B 不可达");
     }
     var running = monitor.running ? "后台正在跑一轮" : (monitor.last_run ? "最近一轮 " + monitor.last_run : "启动后自动首轮");
     $("monitor-line").textContent =
       "自动监测 · " + running +
-      " · 间隔 " + (monitor.interval_hours || 6) + " 小时" +
+      " · 间隔 " + (monitor.interval_hours || 6) + "h" +
       " · 情报 " + data.items +
-      " · 资料库 " + ((data.library || {}).documents || 0) +
-      " · " + teamBits.join(" · ");
+      " · 资料 " + ((data.library || {}).documents || 0) +
+      " · " + teamBits.join(" · ") +
+      " · LLM " + (data.llm_ready ? "接通" : "未配置");
+    if (data.visibility) applyVisibility(data.visibility);
+    else loadVisibility();
     [
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源"],
