@@ -67,7 +67,10 @@
 
         <div class="live-bar">
           <p id="monitor-line">正在读取监测状态…</p>
-          <button type="button" class="ghost" id="goto-monitor">打开情报监测</button>
+          <div class="live-actions">
+            <button type="button" class="primary" id="overview-monitor-btn">立即刷新监测</button>
+            <button type="button" class="ghost" id="goto-monitor">打开情报监测</button>
+          </div>
         </div>
 
         <ol class="arch-stack" id="arch-stack" aria-label="工作流">
@@ -128,6 +131,27 @@
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
             <p id="auto-monitor-status" class="hint">正在读取监测状态…</p>
+          </div>
+        </div>
+        <div class="monitor-live" id="monitor-live" aria-live="polite">
+          <div class="monitor-live-row">
+            <span class="monitor-live-label">状态</span>
+            <span id="monitor-live-state">空闲</span>
+          </div>
+          <div class="monitor-live-row">
+            <span class="monitor-live-label">最近一轮</span>
+            <span id="monitor-live-last">—</span>
+          </div>
+          <div class="monitor-live-row">
+            <span class="monitor-live-label">下次定时</span>
+            <span id="monitor-live-next">—</span>
+          </div>
+          <div class="monitor-live-row">
+            <span class="monitor-live-label">进度</span>
+            <span id="monitor-live-phase">定时轮询（非实时推流）；点「立即刷新」可马上跑一轮</span>
+          </div>
+          <div class="monitor-progress" id="monitor-progress" hidden>
+            <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
           </div>
         </div>
         <p id="team-health" class="hint team-health" hidden></p>

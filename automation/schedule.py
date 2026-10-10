@@ -52,6 +52,8 @@ def ensure_state():
     data.setdefault("last_count", 0)
     data.setdefault("last_keyword", "")
     data.setdefault("running", False)
+    data.setdefault("run_phase", "")
+    data.setdefault("run_started_at", "")
     data.setdefault("mode", "automatic")
     _write_state(data)
     return data
@@ -98,6 +100,41 @@ def log_line(text):
         handle.write("%s %s\n" % (_now(), text))
 
 
+def mark_running(*, phase="starting", keyword=""):
+    """Mark a manual or scheduled cycle as in-progress so the UI can show progress."""
+    data = ensure_state()
+    data["running"] = True
+    data["run_phase"] = (phase or "starting")[:80]
+    if not data.get("run_started_at"):
+        data["run_started_at"] = _now()
+    if keyword:
+        data["last_keyword"] = keyword
+    data["last_error"] = ""
+    _write_state(data)
+    return data
+
+
+def mark_phase(phase):
+    data = ensure_state()
+    if data.get("running"):
+        data["run_phase"] = (phase or "")[:80]
+        _write_state(data)
+    return data
+
+
+def next_run_iso(data=None):
+    """Best-effort next scheduled run (last_run + interval). Empty if unknown."""
+    data = data or ensure_state()
+    last = parse_stamp(data.get("last_run"))
+    if not last:
+        return ""
+    hours = int(data.get("interval_hours") or INTERVAL_HOURS or 6)
+    from datetime import timedelta
+
+    nxt = last + timedelta(hours=max(hours, 1))
+    return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def mark_run(*, count=0, keyword="", error=""):
     """Update monitor state after a manual /api/monitor/run (or other external cycle)."""
     data = ensure_state()
@@ -106,6 +143,8 @@ def mark_run(*, count=0, keyword="", error=""):
     data["last_keyword"] = keyword or data.get("last_keyword") or ""
     data["last_error"] = error or ""
     data["running"] = False
+    data["run_phase"] = ""
+    data["run_started_at"] = ""
     _write_state(data)
     return data
 
