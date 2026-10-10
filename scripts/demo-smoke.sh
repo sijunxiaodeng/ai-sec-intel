@@ -102,20 +102,24 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
-check "ia-monitor-copy" grep -q "情报监测 = 自动持续采集" "$OUT/page.html"
-check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
-check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
+check "ia-workbench" grep -q "一键跑通流水线" "$OUT/page.html"
+check "ia-monitor-copy" grep -q "默认.*自动持续采集" "$OUT/page.html"
+check "ia-library-copy" grep -q "安全资料库" "$OUT/page.html"
+check "ia-enrich-copy" grep -q "影响资产" "$OUT/page.html"
+check "ia-score-nav" grep -q 'data-view="score"' "$OUT/page.html"
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
-sys.exit(0 if 'data-view="assets"' not in html else 1)
+# assets must not be a top-level nav button
+sys.exit(0 if 'data-view="assets"' not in html and "<<<<<<<" not in html else 1)
 PY
-check "ia-no-assets-nav" true
+check "ia-no-assets-nav-or-conflicts" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"
 check "main-assets" test -s "$OUT/app.js"
 check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
 check "ui-refresh-label" grep -q "立即刷新一轮" "$OUT/page.html"
 check "ui-toast" grep -q 'id="toast"' "$OUT/page.html"
+check "ui-pipeline" grep -q "runWorkbenchPipeline\|pipeline-btn" "$OUT/app.js"
 
 # Status endpoint: automatic continuous monitoring (no keyword required)
 curl -sf --max-time 5 "$MAIN_URL/api/monitor/status" -o "$OUT/monitor-status.json"
