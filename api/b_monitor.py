@@ -74,6 +74,11 @@ def _intelligence_import_scope() -> Iterator[None]:
                 sys.modules.pop(key, None)
         # …then restore whatever A had (e.g. collectors.intelligence).
         sys.modules.update(stashed)
+        # Path must put ROOT first again — otherwise the next import of
+        # collectors.team_documents resolves to intelligence/collectors.
+        from api.b_embed import prefer_root_packages
+
+        prefer_root_packages()
 
 
 def run_b_monitor_cycle(

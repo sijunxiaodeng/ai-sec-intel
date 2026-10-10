@@ -5,11 +5,17 @@ pins fastapi 0.143 / pydantic 2.x. We do NOT upgrade the whole A stack here.
 Empirically `intelligence/api_v6.create_app()` loads and serves under the root
 venv — so we ASGI-dispatch B routes in-process and call B repositories from
 IntelligenceCollector. Optional TEAM_INTEL_MODE=sidecar keeps the old :8765 path.
+
+Path rule: workspace ROOT stays ahead of intelligence/ on sys.path so A's
+``collectors.*`` (team_documents, nvd, …) win. B-only packages (api_v6,
+monitoring, storage, …) are still found via intelligence on path position 1.
+b_monitor temporarily prefers intelligence when it must import B's collectors.
 """
 from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +23,7 @@ INTEL_ROOT = ROOT / "intelligence"
 DEFAULT_DB = INTEL_ROOT / "data" / "intelligence.db"
 
 _b_app = None
+_PATH_LOCK = threading.RLock()
 
 
 def team_intel_mode() -> str:
@@ -32,13 +39,42 @@ def sidecar_enabled() -> bool:
     return team_intel_mode() in {"sidecar", "proxy", "http"}
 
 
+def _purge_intelligence_collectors() -> None:
+    """Drop collectors.* if they were loaded from intelligence/ (name clash)."""
+    coll = sys.modules.get("collectors")
+    if coll is None:
+        return
+    origin = (getattr(coll, "__file__", "") or "").replace("\\", "/")
+    if "/intelligence/" not in origin and not origin.endswith("/intelligence/collectors/__init__.py"):
+        # Also treat namespace packages whose path is under intelligence/
+        paths = [str(p).replace("\\", "/") for p in (getattr(coll, "__path__", None) or [])]
+        if not any("/intelligence/" in p for p in paths):
+            return
+    for key in list(sys.modules):
+        if key == "collectors" or key.startswith("collectors."):
+            sys.modules.pop(key, None)
+
+
+def prefer_root_packages() -> None:
+    """Keep ROOT before intelligence/ so A collectors.* import correctly."""
+    with _PATH_LOCK:
+        root = str(ROOT.resolve())
+        intel = str(INTEL_ROOT.resolve())
+        for path in (intel, root):
+            while path in sys.path:
+                sys.path.remove(path)
+        sys.path.insert(0, root)
+        sys.path.insert(1, intel)
+        _purge_intelligence_collectors()
+        os.environ.setdefault(
+            "INTELLIGENCE_DB_PATH",
+            str(Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB).resolve()),
+        )
+
+
 def ensure_intelligence_path() -> Path:
-    path = str(INTEL_ROOT.resolve())
-    if path not in sys.path:
-        sys.path.insert(0, path)
-    os.environ.setdefault("INTELLIGENCE_DB_PATH", str(Path(
-        os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB
-    ).resolve()))
+    """Ensure intelligence is importable without shadowing root collectors."""
+    prefer_root_packages()
     return INTEL_ROOT
 
 
@@ -87,6 +123,7 @@ class EmbedBMiddleware:
 
 def inprocess_health() -> dict:
     """Health for visibility / monitor status without HTTP to :8765."""
+    prefer_root_packages()
     path = db_path()
     public = public_b_base()
     if not path.is_file():

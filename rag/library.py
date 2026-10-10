@@ -12,8 +12,58 @@ import time
 import urllib.parse
 
 from collectors.library import SEEDS, SOURCES, discover, relevant
-from collectors.team_documents import TEAM_MEDIA, TeamDocumentCollector, extract_summary, team_id
 from enrichment.documents import canonical, digest, extract_document, fetch, fetch_url, make_chunks, now
+
+
+def _prefer_root_collectors():
+    """After embed/multi-source cycles, ROOT collectors.* must win over intelligence/."""
+    try:
+        from api.b_embed import prefer_root_packages
+
+        prefer_root_packages()
+    except Exception:
+        pass
+
+
+def _team_docs():
+    """Import root collectors.team_documents reliably (never intelligence/collectors)."""
+    _prefer_root_collectors()
+    import collectors.team_documents as mod
+
+    return mod
+
+
+def _is_module_clash_error(text):
+    value = text or ""
+    return "collectors.team_documents" in value or (
+        "No module named" in value and "collectors" in value
+    )
+
+
+def _friendly_library_error(text):
+    if _is_module_clash_error(text):
+        return "多源资料模块暂不可用，请稍后重试同步"
+    return (text or "")[:240]
+
+
+def _purge_module_clash_attempts(db_path):
+    """Drop ImportError spam rows so the library page is not flooded."""
+    path = Path(db_path)
+    if not path.is_file():
+        return 0
+    removed = 0
+    with _connection(path) as conn:
+        _schema(conn)
+        rows = list(conn.execute("SELECT document_id, payload FROM library_attempts"))
+        for doc_id, payload in rows:
+            try:
+                data = json.loads(payload)
+            except ValueError:
+                continue
+            if data.get("status") == "error" and _is_module_clash_error(data.get("error") or ""):
+                conn.execute("DELETE FROM library_attempts WHERE document_id=?", (doc_id,))
+                removed += 1
+    return removed
 from rag.evidence import CVE, DEFAULT_DB, _connection, rank_bm25
 from rag.hybrid import _dense, config_path, fuse, update_index
 from enrichment.reference_text import ARXIV_ID, catalog_document, paper_html, pdf_document, policy_document, reference_source
@@ -70,15 +120,17 @@ def _paper(response, url):
 
 
 def _extract(candidate, response):
+    team_mod = _team_docs()
+    TEAM_MEDIA = team_mod.TEAM_MEDIA
     url, kind = candidate["url"], candidate["document_type"]
     if kind not in DOCUMENT_TYPES:
         raise ValueError("不支持的资料类型")
     team = response.get("content_type") == TEAM_MEDIA
     if team:
-        from collectors.team_documents import TYPE_MAP
-        doc, record = extract_summary(response)
+        TYPE_MAP = team_mod.TYPE_MAP
+        doc, record = team_mod.extract_summary(response)
         if record["document_id"] != candidate.get("team_document_id") or canonical(record["url"]) != url or TYPE_MAP[record["source_category"]] != kind or record["source"] != candidate["source_name"]:
-            raise ValueError("团队快照与目标资料身份不一致")
+            raise ValueError("多源资料快照与目标资料身份不一致")
     elif kind == "academic_paper":
         if urllib.parse.urlsplit(url).hostname != "arxiv.org":
             raise ValueError("论文解析仅支持官方 arXiv 页面")
@@ -131,7 +183,7 @@ def _extract(candidate, response):
                              "reason": "公告标识字段明确列出此编号" if cve in declared else "提取内容提到此编号；不代表整篇资料证明该漏洞的所有结论"}
                             for cve in sorted(set(mentions) | declared)]
     doc["topic_tags"] = [tag for tag, (pattern, _) in TOPICS.items() if re.search(pattern, text, re.I)]
-    identity = team_id(record["document_id"]) if team else _id(url)
+    identity = team_mod.team_id(record["document_id"]) if team else _id(url)
     doc.update({"schema_version": 1, "document_id": identity, "source_id": digest(identity if team else url)[:16],
                 "url": url, "fetch_url": response["url"], "document_type": kind, "content_type": response.get("content_type", "text/html"),
                 "source_category": CATEGORY[kind], "publisher": candidate["source_name"],
@@ -155,7 +207,12 @@ def ingest_document(candidate, db_path=LIBRARY_DB, fetcher=fetch):
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     candidate = dict(candidate, url=canonical(candidate["url"]))
-    doc_id = team_id(candidate["team_document_id"]) if candidate.get("team_document_id") else _id(candidate["url"])
+    team_mod = _team_docs()
+    doc_id = (
+        team_mod.team_id(candidate["team_document_id"])
+        if candidate.get("team_document_id")
+        else _id(candidate["url"])
+    )
     try:
         response = candidate.get("_prefetched_response") or fetcher(fetch_url(candidate["url"]))
         doc, chunks = _extract(candidate, response)
@@ -177,8 +234,22 @@ def ingest_document(candidate, db_path=LIBRARY_DB, fetcher=fetch):
         return {"document_id": doc_id, "url": candidate["url"], "status": "ok", "chunks": len(chunks),
                 "changed": not previous or previous["text_sha256"] != doc["text_sha256"]}
     except Exception as exc:
+        # Import/path clash is a process-wide issue — do not spam one row per document.
+        if _is_module_clash_error(str(exc)):
+            return {
+                "document_id": doc_id,
+                "url": candidate["url"],
+                "document_type": candidate["document_type"],
+                "publisher": candidate["source_name"],
+                "retrieved_at": now(),
+                "status": "error",
+                "error": _friendly_library_error(str(exc)),
+                "retained_previous": Path(db_path).is_file(),
+                "skipped_persist": True,
+            }
         attempt = {"document_id": doc_id, "url": candidate["url"], "document_type": candidate["document_type"],
-                   "publisher": candidate["source_name"], "retrieved_at": now(), "status": "error", "error": str(exc)[:240]}
+                   "publisher": candidate["source_name"], "retrieved_at": now(), "status": "error",
+                   "error": _friendly_library_error(str(exc))}
         attempt["invalidated_previous"] = str(exc) == "公告未公开或已经撤回"
         with _connection(path) as conn:
             _schema(conn)
@@ -223,6 +294,7 @@ def _valid_evidence(db_path):
         docs = {json.loads(payload)["document_id"]: json.loads(payload) for (payload,) in conn.execute("SELECT payload FROM library_documents")}
         snapshots = {doc_id: body for doc_id, _, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")}
     expected = {}
+    TEAM_MEDIA = _team_docs().TEAM_MEDIA
     keys = ("document_id", "url", "document_type", "content_type", "content_scope", "publisher", "source_snapshot_kind",
             "team_document_id", "team_source", "team_source_category", "team_content_updated_at", "text_sha256",
             "source_response_sha256", "snapshot_url", "published_at", "source_last_modified", "team_first_seen_at")
@@ -252,6 +324,7 @@ def _valid_evidence(db_path):
 
 @lru_cache(maxsize=24)
 def _reparse(url, kind, publisher, discovery_source_id, body, fetch_url_value, retrieved_at, content_type):
+    TEAM_MEDIA = _team_docs().TEAM_MEDIA
     candidate = {"url": url, "document_type": kind, "source_name": publisher, "source_id": discovery_source_id}
     if content_type == TEAM_MEDIA:
         candidate["team_document_id"] = json.loads(body)["document_id"]
@@ -270,9 +343,10 @@ def verified_sources(db_path=LIBRARY_DB):
         snapshots = {doc_id: (sha, body) for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")}
         attempts = {r["document_id"]: r for (payload,) in conn.execute("SELECT payload FROM library_attempts") if (r := json.loads(payload))}
     results = []
+    TEAM_MEDIA = _team_docs().TEAM_MEDIA
     for row in docs:
         if row.get("content_type") == TEAM_MEDIA:
-            continue  # 团队描述字段不作为原始公告/文章的漏洞修复事实。
+            continue  # 多源描述字段不作为原始公告/文章的漏洞修复事实。
         if row["document_type"] not in ("vendor_advisory", "research_article") or attempts.get(row["document_id"], {}).get("invalidated_previous"):
             continue
         snapshot = snapshots.get(row["document_id"])
@@ -305,12 +379,37 @@ def detail(document_id, db_path=LIBRARY_DB):
 
 
 def overview(db_path=LIBRARY_DB):
+    _purge_module_clash_attempts(db_path)
     rows = documents(db_path)
     counts = {kind: sum(r["document_type"] == kind for r in rows) for kind in sorted(DOCUMENT_TYPES)}
+    failed = []
+    module_notice = None
+    for row in _read(db_path, "library_attempts"):
+        if row.get("status") != "error":
+            continue
+        err = row.get("error") or ""
+        if _is_module_clash_error(err):
+            if module_notice is None:
+                module_notice = {
+                    "document_id": "module-clash",
+                    "url": "",
+                    "status": "error",
+                    "error": _friendly_library_error(err),
+                    "retained_previous": True,
+                    "collapsed": True,
+                }
+            continue
+        failed.append(dict(row, error=_friendly_library_error(err)))
+    if module_notice is not None:
+        failed.insert(0, module_notice)
+    sources = sorted(_read(db_path, "library_sources"), key=lambda r: r["source_id"])
+    for source in sources:
+        if source.get("error"):
+            source["error"] = _friendly_library_error(source["error"])
     return {"documents": len(rows), "chunks": sum(r["chunk_count"] for r in rows), "types": counts,
             "source_categories": sorted({r["source_category"] for r in rows}),
-            "sources": sorted(_read(db_path, "library_sources"), key=lambda r: r["source_id"]),
-            "failed_documents": [r for r in _read(db_path, "library_attempts") if r["status"] == "error"],
+            "sources": sources,
+            "failed_documents": failed,
             "scope_counts": {scope: sum(r["content_scope"] == scope for r in rows) for scope in sorted({r["content_scope"] for r in rows})},
             "scope_notice": "按每份资料区分摘要、HTML/PDF 文字、政策条文和仅目录；不能把目录或摘要称为全文。不是赛题准确率或时效达标证明。"}
 
@@ -437,30 +536,87 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
         _SYNC_LOCK.release()
 
 
-def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url="http://127.0.0.1:8765", collector=None):
-    collector = collector or TeamDocumentCollector(base_url, max_documents=max_documents)
+def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url=None, collector=None):
+    """Sync multi-source document summaries into the library.
+
+    ``base_url`` defaults to None so embed mode uses in-process reads.
+    Pass an explicit HTTP base for sidecar / offline fixtures.
+    """
+    _prefer_root_collectors()
+    _purge_module_clash_attempts(db_path)
+    if collector is None:
+        try:
+            collector = _team_docs().TeamDocumentCollector(base_url, max_documents=max_documents)
+        except Exception as exc:
+            path = Path(db_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            source = {"id": "team_documents", "name": "多源情报资料", "url": "inprocess://b-embed/api/documents"}
+            status = {
+                "source_id": source["id"], "name": source["name"], "url": source["url"],
+                "category": "team", "checked_at": now(), "discovered": 0,
+                "status": "error", "error": _friendly_library_error(str(exc)),
+            }
+            _record_source(source, status, None, path)
+            return {"status": "error", "attempted": 0, "ok": 0, "changed": 0,
+                    "documents": [], "source": status, "overview": overview(path)}
     if not _SYNC_LOCK.acquire(blocking=False):
         raise ValueError("资料同步正在运行，请等待本轮完成")
     try:
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        source = {"id": "team_documents", "name": "队友情报服务资料", "url": base_url + "/api/documents"}
+        source_url = (getattr(collector, "base_url", None) or base_url or "inprocess://b-embed") + "/api/documents"
+        source = {"id": "team_documents", "name": "多源情报资料", "url": source_url}
         status = {"source_id": source["id"], "name": source["name"], "url": source["url"],
                   "category": "team", "checked_at": now(), "discovered": 0}
         try:
             collected = collector.collect()
         except Exception as exc:
-            status.update(status="error", error=str(exc)[:240])
+            status.update(status="error", error=_friendly_library_error(str(exc)))
             _record_source(source, status, None, path)
             return {"status": "error", "attempted": 0, "ok": 0, "changed": 0,
                     "documents": [], "source": status, "overview": overview(path)}
         results = [ingest_document(row, path) for row in collected["candidates"]]
+        module_clash_once = False
         for error in collected["errors"]:
+            err_text = error.get("error") or ""
+            if _is_module_clash_error(err_text):
+                if module_clash_once:
+                    continue
+                module_clash_once = True
+                error = dict(error, error=_friendly_library_error(err_text), collapsed=True)
+                results.append(error)
+                continue
+            error = dict(error, error=_friendly_library_error(err_text))
             with _connection(path) as conn:
                 _schema(conn)
-                error["retained_previous"] = bool(conn.execute("SELECT 1 FROM library_documents WHERE document_id=?", (error["document_id"],)).fetchone())
-                conn.execute("INSERT OR REPLACE INTO library_attempts VALUES (?,?)", (error["document_id"], json.dumps(error, ensure_ascii=False)))
+                error["retained_previous"] = bool(conn.execute(
+                    "SELECT 1 FROM library_documents WHERE document_id=?", (error["document_id"],)).fetchone())
+                conn.execute(
+                    "INSERT OR REPLACE INTO library_attempts VALUES (?,?)",
+                    (error["document_id"], json.dumps(error, ensure_ascii=False)),
+                )
             results.append(error)
+        # Collapse ingest-time module clash returns (not persisted).
+        if any(row.get("skipped_persist") for row in results):
+            status.update(
+                status="error",
+                error=_friendly_library_error("No module named 'collectors.team_documents'"),
+                discovered=collected["selected"],
+                total=collected.get("total"),
+                remaining=collected.get("remaining"),
+                coverage=collected.get("coverage"),
+            )
+            _record_source(source, status, None, path)
+            clean = [row for row in results if not row.get("skipped_persist")]
+            return {
+                "status": "error",
+                "attempted": len(results),
+                "ok": sum(row["status"] == "ok" for row in results),
+                "changed": sum(bool(row.get("changed")) for row in results),
+                "documents": clean[:1] + [row for row in clean if row.get("status") == "ok"],
+                "source": status,
+                "overview": overview(path),
+            }
         status.update(status="partial" if any(row["status"] == "error" for row in results) else "ok",
                       discovered=collected["selected"], total=collected["total"], remaining=collected["remaining"],
                       coverage=collected["coverage"])

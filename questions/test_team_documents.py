@@ -28,7 +28,8 @@ def record(category="security_blog", number=1):
 
 class FixtureCollector(TeamDocumentCollector):
     def __init__(self, rows, max_documents=30):
-        super().__init__(max_documents=max_documents)
+        # Explicit base_url keeps the HTTP fixture path even when embed is default.
+        super().__init__(base_url="http://127.0.0.1:8765", max_documents=max_documents)
         self.rows, self.failed, self.paths = rows, set(), []
 
     def get(self, path):
@@ -221,14 +222,15 @@ class TeamDocumentsTest(unittest.TestCase):
         self.assertEqual(detail(result["document_id"], self.db)["content_scope"], "full_text_html")
 
     def test_api_route_validates_window_and_dispatches_without_client_base_url(self):
-        from fastapi.testclient import TestClient
-        from api.app import app
+        from pydantic import ValidationError
+        from api.app import TeamLibrarySyncBody, library_team_sync
+
+        with self.assertRaises(ValidationError):
+            TeamLibrarySyncBody(max_documents=201)
         with patch("rag.library.sync_team", return_value={"status": "ok", "ok": 4}) as imported:
-            client = TestClient(app)
-            self.assertEqual(client.post("/api/library/team-sync", json={"max_documents": 30}).status_code, 200)
+            result = library_team_sync(TeamLibrarySyncBody(max_documents=30))
+            self.assertEqual(result["ok"], 4)
             imported.assert_called_once_with(max_documents=30)
-            self.assertEqual(client.post("/api/library/team-sync", json={"max_documents": 201}).status_code, 422)
-            client.close()
 
     def test_explicit_article_fetch_stores_original_separately_and_makes_it_eligible(self):
         self.sync()

@@ -73,13 +73,15 @@ def _embed_mode():
 class TeamDocumentCollector:
     def __init__(self, base_url=None, timeout=10, max_documents=30):
         if type(max_documents) is not int or not 1 <= max_documents <= 200:
-            raise ValueError("每轮团队资料数量必须为 1 到 200")
+            raise ValueError("每轮多源资料数量必须为 1 到 200")
         self.timeout, self.max_documents = timeout, max_documents
-        self.embed = _embed_mode()
-        if self.embed:
-            # Unified process: no HTTP base required.
+        # Omit base_url in embed mode (in-process). An explicit base_url always
+        # selects the HTTP adapter so sidecar/tests keep host/port validation.
+        if base_url is None and _embed_mode():
+            self.embed = True
             self.base_url = "inprocess://b-embed"
             return
+        self.embed = False
         base_url = (base_url or os.environ.get("TEAM_INTEL_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
         parsed = urllib.parse.urlsplit(base_url)
         if (
@@ -91,9 +93,9 @@ class TeamDocumentCollector:
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("团队资料 API 仅允许本机或 compose 服务名 b-api 的 HTTP 地址")
-        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in (None, 8765, 8023):
-            raise ValueError("团队资料 API 本机端口必须为 8765 或 8023")
+            raise ValueError("多源资料 API 仅允许本机或 compose 服务名 b-api 的 HTTP 地址")
+        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in (8765, 8023):
+            raise ValueError("多源资料 API 本机端口必须为 8765 或 8023")
         self.base_url = base_url
 
     def get(self, path):
