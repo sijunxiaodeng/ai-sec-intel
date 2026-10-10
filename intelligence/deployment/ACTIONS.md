@@ -1,8 +1,20 @@
 # 个人电脑关机后的 GitHub 云端采集
 
-`.github/workflows/intelligence-collect.yml` 使用 GitHub 托管的 Linux runner，每小时第 7、22、37、52 分钟自动执行一次八类来源采集。任务在 GitHub 服务器运行，个人电脑无须开机。默认不调用付费模型；NVD API key 可以配置在仓库 Secret `NVD_API_KEY`，不是启动的必需条件。
+`.github/workflows/intelligence-collect.yml` 使用 GitHub 托管的 Linux runner，每小时第 7、22、37、52 分钟自动执行一次八类来源采集。任务在 GitHub 服务器运行，个人电脑无须开机。仓库已设置 Secret `DEEPSEEK_API_KEY` 后，默认在采集之后运行独立的 DeepSeek 语义复核，每轮最多两次请求；没有该 Secret 时仍执行采集和规则分类。NVD API key 可以配置在仓库 Secret `NVD_API_KEY`，不是启动的必需条件。
 
 工作流只在 `main` 分支执行。定时触发要求这个工作流文件存在于仓库**默认分支**；采集代码明确从原来的 `feat/intelligence` 分支拉取，因此不需要把 A/C 的主应用代码替换为 B 代码。仅把文件留在 B 分支不会启用定时任务。
+
+## 独立的 DeepSeek 语义复核
+
+采集阶段的 `CLASSIFY_V5_MAX_LLM_CALLS` 保持为 `0`：各来源先提交新情报，确定的规则分类先落库，模糊的 AI 候选保留为待复核。之后单独执行 `deployment/deepseek_review.py`，通过固定的 DeepSeek 官方 HTTPS 接口复用现有混合分类器。Secret 仅注入这个模型步骤，不注入采集子进程。
+
+默认模型为 `deepseek-chat`。需要使用账户支持的其他 DeepSeek 模型时，可设置仓库变量 `DEEPSEEK_MODEL`；无需修改或提交密钥。手动 **Run workflow** 时取消 `deepseek_review` 即可关闭该轮模型复核；定时任务默认开启。缺少 Secret 或关闭开关时，模型步骤跳过，并为本轮写入明确的跳过状态。
+
+每轮最多处理两次模型请求，失败尝试也占预算。单请求设置 20 秒连接/读取超时，模型子进程组另有 60 秒绝对截止。模型超时、认证失败或响应校验失败不会改变已提交的采集数据、来源游标或采集结果，也不会阻止后续快照上传；截止前已提交的分类仍被保留。待复核和失败项保持 `unknown/null`，不会冒充已确认的非 AI 结论。
+
+模型复核范围是统一漏洞表中规则无法确定的 **CVE 记录**，不会重新判断每一篇博客、论文、标准或政策文档，也不会逐条复核规则已确定的漏洞。`deepseek_status.json` 记录本轮模型、尝试数、通过响应校验的成功数、失败类型以及已提交结果数；成功响应数与已落库结果数分别统计。状态文件和日志不保存密钥、认证头、完整异常或模型原始响应。
+
+新增模型步骤不重置历史 `first_seen_at`、发布时间、观察基线或六小时超限记录。发布到首次入库的采集时效与语义复核队列的等待时间是两个指标；开启 DeepSeek 本身不能证明严格 `<6h` 已通过。
 
 ## 数据如何跨运行保留
 
@@ -11,7 +23,7 @@
 即使某个来源失败或采集步骤报错，也继续用 SQLite online backup 导出已提交数据，然后上传 `intelligence-state-<run_id>`。快照包含：
 
 - 完整 `intelligence.db`：漏洞、非 CVE 文档、分类结果、增量游标、每源观察基线、HTTP ETag/Last-Modified 缓存和原始首次入库时间。
-- `monitoring_baseline.json`、`monitoring_status.json`、`classification_status.json`（存在时）。
+- `monitoring_baseline.json`、`monitoring_status.json`、`classification_status.json`、`deepseek_status.json`、`actions_report.json`（存在时）。
 - 带仓库、分支、运行 ID、文件大小和 SHA-256 的清单。
 
 快照不包含 `.env`、密钥、PID、进程锁、源日志或虚拟环境。artifact 保存期限为 90 天，但**成功上传新状态后只保留最近八份本工作流可信快照**，避免每 15 分钟重复保存大数据库而长期累积。清理使用 `actions: write`；采集代码、状态恢复默认使用 `contents: read`。其他工作流、其他分支的 artifact、初始 Release 种子均不清理。
@@ -46,7 +58,9 @@ python intelligence/deployment/actions_state.py save \
 
 ## 查看结果与取回数据
 
-GitHub 仓库 → **Actions** → **B public intelligence collection** 可以查看每轮运行。Summary 显示逐源状态、待补采、数据覆盖以及原始严格六小时时效统计；失败时查看该轮日志。
+GitHub 仓库 → **Actions** → **B public intelligence collection** 可以查看每轮运行。Summary 显示本轮模型尝试与响应校验数、逐源状态、待补采、数据覆盖和实际运行间隔。去重 CVE 的时效分别显示原始完整观察期、首次云端部署后和最近 24 小时，三个范围不会互相替代；逐源记录数另外显示，不能当作去重后的漏洞数。首次云端部署时间固定为已核实的 `2026-10-09T12:05:16Z`，不会写回原观察基线。
+
+`deployment/actions_report.py record` 在采集和模型复核后只读数据库，写出与当前 `run_id` 对应的 `actions_report.json`，并输出只含安全状态和数字的 `B cloud facts` 通知。最后的 `summary` 只读取同一运行的报告；恢复出的旧报告或旧模型状态不会冒充本轮结果。报告故障不阻止已采集数据备份。
 
 个人电脑重新开机后，可以从最近一次可信运行下载 `intelligence-state-<run_id>` artifact，在 B 数据目录为空且旧进程已停止时恢复。先把旧 `data/` 留作备份，不覆盖仍在运行的数据库：
 
