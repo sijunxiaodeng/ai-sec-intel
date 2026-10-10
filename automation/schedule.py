@@ -128,6 +128,28 @@ def run_once(keyword=None):
         data["running"] = True
         data["last_error"] = ""
         _write_state(data)
+        # Refresh B multi-source DB in-process before A reads team intel (embed).
+        try:
+            from api.b_embed import embed_enabled
+            from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
+
+            if embed_enabled() and b_monitor_on_refresh():
+                b_result = run_b_monitor_cycle()
+                data = ensure_state()
+                data["b_monitor_last_status"] = b_result.get("status")
+                data["b_monitor_last_run"] = _now()
+                _write_state(data)
+                log_line(
+                    "B 同进程多源：%s（成功 %s/%s）"
+                    % (
+                        b_result.get("status"),
+                        b_result.get("success_sources"),
+                        b_result.get("configured_sources"),
+                    )
+                )
+        except Exception as exc:
+            log_line("B 同进程多源跳过/失败：%s" % exc)
+
         result = run_collect(keyword)
         data = ensure_state()
         data["last_run"] = _now()

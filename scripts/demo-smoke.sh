@@ -25,10 +25,11 @@ check() {
   fi
 }
 
-log "smoke against B=$B_URL main=$MAIN_URL keyword=$KEYWORD"
+log "smoke against single entry main=$MAIN_URL keyword=$KEYWORD (TEAM_INTEL_MODE=${TEAM_INTEL_MODE:-embed}; no :8765 required)"
 
-curl -sf --max-time 5 "$B_URL/api/intelligence/health" -o "$OUT/b-health.json"
-check "b-health" test -s "$OUT/b-health.json"
+# Full chain via :8023 only — B is in-process; do not require :8765
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/health" -o "$OUT/b-health.json"
+check "b-health-via-8023" test -s "$OUT/b-health.json"
 python3 - <<PY
 import json,sys
 h=json.load(open("$OUT/b-health.json"))
@@ -37,7 +38,7 @@ PY
 check "b-database_available" true
 
 # Multi-source seed / live: expect more than one AI CVE when fixtures present
-curl -sf --max-time 5 "$B_URL/api/intelligence/team?q=&ai_only=true&limit=20" -o "$OUT/b-team-all.json"
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/team?q=&ai_only=true&limit=20" -o "$OUT/b-team-all.json"
 python3 - <<PY
 import json,sys
 t=json.load(open("$OUT/b-team-all.json"))
@@ -57,7 +58,7 @@ check "b-team-multi-cve" true
 # Broader keyword hits (at least one of the AI set returns items)
 python3 - <<PY
 import json,urllib.parse,urllib.request,sys
-base="$B_URL"
+base="$MAIN_URL"
 keys=[k.strip() for k in "$AI_SECURITY_KEYWORDS".split(",") if k.strip()]
 hits=[]
 for kw in keys:
@@ -74,7 +75,7 @@ sys.exit(0 if len(hits)>=3 else 1)
 PY
 check "b-team-keyword-breadth" true
 
-curl -sf --max-time 5 "$B_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" || echo '{}' >"$OUT/b-documents-stats.json"
+curl -sf --max-time 5 "$MAIN_URL/api/documents/stats" -o "$OUT/b-documents-stats.json" || echo '{}' >"$OUT/b-documents-stats.json"
 python3 - <<PY
 import json,sys
 s=json.load(open("$OUT/b-documents-stats.json"))
@@ -84,7 +85,7 @@ sys.exit(0 if total>=1 else 1)
 PY
 check "b-documents-present" true
 
-curl -sf --max-time 5 "$B_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" || echo '{}' >"$OUT/b-coverage.json"
+curl -sf --max-time 5 "$MAIN_URL/api/intelligence/coverage" -o "$OUT/b-coverage.json" || echo '{}' >"$OUT/b-coverage.json"
 
 curl -sf --max-time 5 "$MAIN_URL/api/overview" -o "$OUT/overview.json"
 check "main-overview" test -s "$OUT/overview.json"
@@ -102,15 +103,50 @@ check "overview-team-and-library" true
 
 curl -sf --max-time 5 "$MAIN_URL/" -o "$OUT/page.html"
 check "main-page" grep -q "AI 安全知识情报" "$OUT/page.html"
-check "ia-monitor-copy" grep -q "情报监测 = 自动持续采集" "$OUT/page.html"
-check "ia-library-copy" grep -q "安全资料库 = 已沉淀知识" "$OUT/page.html"
-check "ia-enrich-copy" grep -q "情报富集 = 补齐单条维度" "$OUT/page.html"
+check "ia-pipeline-rail" grep -q 'class="pipeline"' "$OUT/page.html"
+check "ia-monitor-copy" grep -q "自动监测" "$OUT/page.html"
+check "ia-library-copy" grep -q "资料库沉淀" "$OUT/page.html"
+check "ia-enrich-copy" grep -q "情报富集" "$OUT/page.html"
+check "ia-ask-copy" grep -q "证据问答" "$OUT/page.html"
+check "ia-vis-board" grep -q 'class="vis-board"' "$OUT/page.html"
+check "ia-mod-strip" grep -q 'class="mod-strip"' "$OUT/page.html"
+curl -sf --max-time 8 "$MAIN_URL/api/visibility" -o "$OUT/visibility.json"
+python3 - <<PY
+import json,sys
+v=json.load(open("$OUT/visibility.json",encoding="utf-8"))
+assert v.get("policy",{}).get("competition_passed") is None
+mods={m["id"]:m for m in v.get("modules") or []}
+assert set(mods)>= {"monitor","enrich","library","ask"}
+# Honest: latency gap or empty accuracy must appear in standards/gaps
+levels=" ".join((s.get("level") or "")+" "+(s.get("note") or "") for s in (v.get("standards") or []))
+assert "未达证" in levels or "空" in levels or "未实现" in levels
+integ={i["party"]:i for i in (v.get("integration") or [])}
+assert "A" in integ and "B" in integ and "C" in integ
+b=integ["B"]
+detail=(b.get("detail") or "") + (b.get("name") or "")
+# Default unify story: in-process embed, not forever-sidecar
+assert "同进程" in detail or "embed" in detail.lower(), detail
+assert "反代" not in detail, detail
+print("visibility_ok modules", sorted(mods), "B", b.get("status"), "detail", (b.get("detail") or "")[:80], "gaps", len(v.get("gaps") or []))
+sys.exit(0)
+PY
+check "api-visibility-honest" true
+check "api-visibility-b-embed" true
 python3 - <<PY
 import sys
 html=open("$OUT/page.html",encoding="utf-8").read()
+# Assets fold under enrich; must not be a pipeline rail nav target
 sys.exit(0 if 'data-view="assets"' not in html else 1)
 PY
 check "ia-no-assets-nav" true
+# Forbidden competitor / #8/#9 clone markers must stay out of the shell
+python3 - <<PY
+import sys
+html=open("$OUT/page.html",encoding="utf-8").read()
+banned = ["START HERE", "任务工作台", "今日优先处置", "赛题九宫格", "一键流水线"]
+sys.exit(0 if not any(b in html for b in banned) else 1)
+PY
+check "ia-no-competitor-clone" true
 curl -sf --max-time 5 "$MAIN_URL/assets/app.js" -o "$OUT/app.js"
 check "main-assets" test -s "$OUT/app.js"
 check "ui-auto-monitor" grep -q "monitor/run" "$OUT/app.js"
@@ -145,7 +181,31 @@ for s in steps:
     print("-", s.get("action"), "|", (s.get("detail") or "")[:160])
 sys.exit(0 if c.get("mode")=="auto" and team_ok and not team_fail else 1)
 PY
+python3 - <<PY
+import json,sys
+r=json.load(open("$OUT/monitor-run.json",encoding="utf-8"))
+diag=r.get("source_diag") or {}
+need=("nvd","osv","b_monitor","b_team","c_library_sync")
+ok=all(k in diag for k in need) and isinstance(diag.get("written"), int)
+bmon=(diag.get("b_monitor") or {}).get("status") or ""
+# In-process B cycle may be 成功/部分/超时/跳过 — not "未请求" under default embed
+print("source_diag", {k: (diag.get(k) or {}).get("status") for k in need}, "written", diag.get("written"))
+sys.exit(0 if ok and bmon and bmon != "未请求" else 1)
+PY
+check "monitor-run-source-diag" true
 check "auto-monitor-run-ok" true
+# Single-process: no sidecar pid when embed
+python3 - <<PY
+import os, sys
+pid = os.path.join(os.environ.get("DEMO_DIR", ".demo"), "b.pid")
+mode = os.environ.get("TEAM_INTEL_MODE", "embed")
+if mode == "embed" and os.path.isfile(pid):
+    print("unexpected b.pid in embed mode", pid)
+    sys.exit(1)
+print("single_process_ok mode", mode, "b.pid", os.path.isfile(pid))
+sys.exit(0)
+PY
+check "single-process-no-b-pid" true
 
 curl -sf --max-time 5 "$MAIN_URL/api/monitor/feed?kind=all" -o "$OUT/monitor-feed.json"
 python3 - <<PY
@@ -229,7 +289,7 @@ check "ask-demo-cve" true
 # Secondary demo CVEs from multi-source seed (best-effort presence in B)
 python3 - <<PY
 import json,urllib.request,sys
-base="$B_URL"
+base="$MAIN_URL"
 need=["CVE-2099-90002","CVE-2099-90003"]
 ok=0
 for cve in need:

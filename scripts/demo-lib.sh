@@ -10,6 +10,13 @@ B_PORT="${B_PORT:-8765}"
 MAIN_PORT="${MAIN_PORT:-8023}"
 B_URL="http://127.0.0.1:${B_PORT}"
 MAIN_URL="http://127.0.0.1:${MAIN_PORT}"
+# Default: B embedded in the main :8023 process (no separate :8765).
+export TEAM_INTEL_MODE="${TEAM_INTEL_MODE:-embed}"
+export B_MONITOR_ENABLED="${B_MONITOR_ENABLED:-1}"
+export B_MONITOR_ON_REFRESH="${B_MONITOR_ON_REFRESH:-1}"
+# Legacy sidecar vars (only used when TEAM_INTEL_MODE=sidecar).
+export TEAM_INTEL_UPSTREAM="${TEAM_INTEL_UPSTREAM:-http://127.0.0.1:${B_PORT}}"
+export TEAM_INTEL_PROXY="${TEAM_INTEL_PROXY:-0}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-ai-sec-intel-demo}"
 
 # Broader AI-security keyword set for demos (comma-separated for multi-pass collect).
@@ -43,17 +50,21 @@ wait_http() {
 }
 
 ensure_venvs() {
+  # One-venv story for demo: root .venv runs A + embedded B (query + monitor + seed).
   if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
-    log "creating root .venv"
+    log "creating root .venv (unified demo runtime)"
     python3 -m venv "$ROOT/.venv"
     "$ROOT/.venv/bin/python" -m pip install -U pip -q
     "$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/requirements.txt"
   fi
-  if [[ ! -x "$ROOT/intelligence/.venv/bin/python" ]]; then
-    log "creating intelligence/.venv"
-    python3 -m venv "$ROOT/intelligence/.venv"
-    "$ROOT/intelligence/.venv/bin/python" -m pip install -U pip -q
-    "$ROOT/intelligence/.venv/bin/python" -m pip install -q -r "$ROOT/intelligence/requirements.lock.txt"
+  # Legacy sidecar / B lockfile isolation only when explicitly requested.
+  if [[ "${TEAM_INTEL_MODE:-embed}" == "sidecar" || "${DEMO_B_SIDECAR:-0}" == "1" ]]; then
+    if [[ ! -x "$ROOT/intelligence/.venv/bin/python" ]]; then
+      log "creating intelligence/.venv (legacy sidecar only)"
+      python3 -m venv "$ROOT/intelligence/.venv"
+      "$ROOT/intelligence/.venv/bin/python" -m pip install -U pip -q
+      "$ROOT/intelligence/.venv/bin/python" -m pip install -q -r "$ROOT/intelligence/requirements.lock.txt"
+    fi
   fi
 }
 
@@ -61,8 +72,12 @@ seed_local_db() {
   ensure_venvs
   mkdir -p "$ROOT/intelligence/data"
   if [[ ! -f "$ROOT/intelligence/data/intelligence.db" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
-    log "seeding offline B demo DB"
-    "$ROOT/intelligence/.venv/bin/python" "$ROOT/intelligence/seed_demo_db.py" --force
+    log "seeding offline B demo DB (root .venv)"
+    (
+      cd "$ROOT/intelligence"
+      PYTHONPATH="$ROOT/intelligence" \
+        "$ROOT/.venv/bin/python" seed_demo_db.py --force
+    )
   else
     log "B demo DB already present (set DEMO_FORCE_SEED=1 to recreate)"
   fi

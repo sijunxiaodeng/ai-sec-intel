@@ -1,20 +1,20 @@
 var titles = {
-  overview: "总览",
-  monitor: "情报监测",
+  overview: "架构总览",
+  monitor: "自动监测",
   enrich: "情报富集",
-  library: "安全资料库",
+  library: "资料库沉淀",
   assets: "情报富集",
-  ask: "情报问答",
+  ask: "证据问答",
   settings: "模型设置"
 };
 var eyebrows = {
-  overview: "工作流一览",
-  monitor: "自动采集的 AI 安全情报流",
-  enrich: "单条漏洞补维度 · 含影响资产",
-  library: "已沉淀、可检索的知识存档",
-  assets: "单条漏洞补维度 · 含影响资产",
-  ask: "按证据回答",
-  settings: "本机模型配置"
+  overview: "A 平台架构视图",
+  monitor: "CVE + 非 CVE 情报流",
+  enrich: "EPSS / KEV / 论文 / 影响资产",
+  library: "可检索原文与片段",
+  assets: "EPSS / KEV / 论文 / 影响资产",
+  ask: "先证据后回答",
+  settings: "本机模型接口"
 };
 
 var prompts = [
@@ -104,6 +104,18 @@ function dateText(value) {
   return (value || "").slice(0, 10) || "未知";
 }
 
+function freshnessLabel(publishedAt) {
+  var raw = (publishedAt || "").trim();
+  if (!raw) return "";
+  var ms = Date.parse(raw.length === 10 ? raw + "T00:00:00Z" : raw);
+  if (!ms) return "";
+  var days = Math.floor((Date.now() - ms) / 86400000);
+  if (days <= 7) return "近7天";
+  if (days <= 30) return "近30天";
+  if (days < 0) return "日期异常";
+  return "更早";
+}
+
 function epssText(epss) {
   if (!epss) return "尚未查询";
   if (epss.status === "ok") return String(epss.score);
@@ -170,6 +182,14 @@ function renderItemRow(parent, item, onPick) {
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(kindBadge);
   }
+  var fresh = freshnessLabel(item.published_at);
+  if (fresh) {
+    var freshBadge = document.createElement("span");
+    freshBadge.className = "fresh-badge" + (fresh === "近7天" ? " is-hot" : fresh === "近30天" ? " is-warm" : "");
+    freshBadge.textContent = fresh;
+    titleLine.appendChild(document.createTextNode(" "));
+    titleLine.appendChild(freshBadge);
+  }
   add(id, "div", "meta", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "来源未写明");
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
   else add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
@@ -193,11 +213,11 @@ function setView(name) {
     if ($(key)) $(key).hidden = key !== name;
   });
   if ($("assets")) $("assets").hidden = true;
-  document.querySelectorAll(".nav button").forEach(function (button) {
+  document.querySelectorAll(".pipeline button").forEach(function (button) {
     button.className = button.getAttribute("data-view") === name ? "is-on" : "";
   });
   $("page-title").textContent = titles[name] || name;
-  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "智能体驱动的知识情报系统";
+  if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "A 平台架构视图";
   if (name === "overview") loadOverview();
   if (name === "monitor") {
     loadMonitorStatus();
@@ -208,6 +228,10 @@ function setView(name) {
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
+  if (name === "monitor" || name === "enrich" || name === "library" || name === "ask") {
+    if (visibilityCache) applyVisibility(visibilityCache);
+    else loadVisibility();
+  }
 }
 
 function setTeamHealth(team) {
@@ -215,13 +239,135 @@ function setTeamHealth(team) {
   if (!el) return;
   if (team && team.reachable === false) {
     el.hidden = false;
-    el.textContent = "团队情报服务（:8765）暂不可达"
+    el.textContent = "团队情报暂不可用（同进程嵌入库）"
       + (team.error ? "：" + team.error : "")
-      + "。自动监测仍会采集 NVD/OSV 并刷新本地资料流；B 源已跳过。";
+      + "。请用 ./scripts/demo-up.sh 起演示（会 seed intelligence.db）；自动监测仍会采集 NVD/OSV；B 源已跳过。";
   } else {
     el.hidden = true;
     el.textContent = "";
   }
+}
+
+function statusClass(status) {
+  var s = String(status || "");
+  if (s === "接通" || s.indexOf("良好") === 0 || s.indexOf("合格") === 0 || s.indexOf("优秀") === 0 || s === "可演示") return "st-ok";
+  if (s === "跳过") return "st-skip";
+  if (s === "空" || s === "未配置") return "st-empty";
+  if (s.indexOf("部分") === 0 || s === "部分可计") return "st-warn";
+  return "st-bad";
+}
+
+var visibilityCache = null;
+
+function renderIntegration(row) {
+  var host = $("integ-row");
+  if (!host) return;
+  clear(host);
+  (row || []).forEach(function (item) {
+    var chip = add(host, "div", "integ-chip");
+    add(chip, "span", "party", item.party + " · " + (item.name || ""));
+    var st = add(chip, "span", "status " + statusClass(item.status), item.status || "—");
+    st.className = "status " + statusClass(item.status);
+    add(chip, "span", "detail", item.detail || "");
+  });
+}
+
+function renderGaps(gaps, standards) {
+  var host = $("gap-row");
+  if (!host) return;
+  clear(host);
+  var list = (gaps && gaps.length) ? gaps : (standards || []);
+  if (!list.length) {
+    add(host, "p", "hint", "暂无自评缺口条目。");
+    return;
+  }
+  list.forEach(function (item) {
+    var chip = add(host, "div", "gap-chip");
+    add(chip, "span", "metric", item.metric || item.id || "");
+    var level = add(chip, "span", "level", item.level || "—");
+    level.className = "level " + statusClass(item.level);
+    add(chip, "span", "note", item.note || "");
+  });
+}
+
+function renderTriad(mod) {
+  if (!mod) return;
+  var host = document.querySelector('[data-triad="' + mod.id + '"]');
+  if (!host) return;
+  clear(host);
+  var duty = add(host, "div", "cell");
+  add(duty, "em", "", "职责");
+  duty.appendChild(document.createTextNode(mod.position || ""));
+  var std = add(host, "div", "cell");
+  add(std, "em", "", "达标");
+  var strong = document.createElement("strong");
+  strong.textContent = (mod.standard && mod.standard.level) || "—";
+  std.appendChild(strong);
+  std.appendChild(document.createTextNode(" · " + ((mod.standard && mod.standard.summary) || "")));
+  var integ = add(host, "div", "cell");
+  add(integ, "em", "", "整合");
+  var peers = ((mod.integration && mod.integration.peers) || []).map(function (p) {
+    return p.party + ":" + p.status;
+  }).join(" · ");
+  integ.appendChild(document.createTextNode(peers || ((mod.integration && mod.integration.owner) || "")));
+}
+
+function renderModStrip(mod) {
+  if (!mod) return;
+  var host = document.querySelector('.mod-strip[data-mod="' + mod.id + '"]');
+  if (!host) return;
+  clear(host);
+  var duty = add(host, "div", "cell");
+  add(duty, "em", "", "职责");
+  add(duty, "p", "", mod.duty || "");
+  add(duty, "p", "meta", mod.position || "");
+
+  var std = add(host, "div", "cell");
+  add(std, "em", "", "达标");
+  var levelLine = add(std, "p", "", "");
+  var badge = document.createElement("span");
+  badge.className = "status " + statusClass(mod.standard && mod.standard.level);
+  badge.style.display = "inline-block";
+  badge.style.padding = "2px 7px";
+  badge.style.borderRadius = "4px";
+  badge.style.fontSize = "11px";
+  badge.style.fontWeight = "700";
+  badge.textContent = (mod.standard && mod.standard.level) || "—";
+  levelLine.appendChild(badge);
+  levelLine.appendChild(document.createTextNode("  " + ((mod.standard && mod.standard.summary) || "")));
+  add(std, "p", "meta", (mod.standard && mod.standard.detail) || "");
+
+  var integ = add(host, "div", "cell");
+  add(integ, "em", "", "整合");
+  add(integ, "p", "", (mod.integration && mod.integration.owner) || "");
+  var peers = add(integ, "div", "peers");
+  ((mod.integration && mod.integration.peers) || []).forEach(function (p) {
+    var peer = add(peers, "span", "peer", p.party + " " + p.status + (p.role ? " · " + p.role : ""));
+    peer.className = "peer " + statusClass(p.status);
+  });
+}
+
+function applyVisibility(vis) {
+  visibilityCache = vis || null;
+  if (!vis) return;
+  if ($("vis-policy") && vis.policy) {
+    $("vis-policy").textContent = vis.policy.note || "对照验收包诚实自评；不自动判竞赛通过。";
+  }
+  renderIntegration(vis.integration || []);
+  renderGaps(vis.gaps || [], vis.standards || []);
+  (vis.modules || []).forEach(function (mod) {
+    renderTriad(mod);
+    renderModStrip(mod);
+  });
+}
+
+function loadVisibility() {
+  return api("/api/visibility").then(function (data) {
+    applyVisibility(data);
+    return data;
+  }).catch(function () {
+    return null;
+  });
 }
 
 function loadMonitorStatus() {
@@ -251,30 +397,27 @@ function loadOverview() {
     var cov = team.coverage || {};
     var teamBits = [];
     if (team.reachable) {
-      teamBits.push("团队情报可达");
-      if (team.team_total != null) teamBits.push("已分类 AI CVE " + team.team_total + " 条");
-      if (team.document_total != null) teamBits.push("B 文档 " + team.document_total + " 份");
+      teamBits.push("B 接通");
+      if (team.team_total != null) teamBits.push("AI CVE " + team.team_total);
       if (cov.observed_ai_category_count != null) {
-        teamBits.push("B 观测类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
+        teamBits.push("类别 " + cov.observed_ai_category_count + "/" + (cov.configured_category_count || "?"));
       }
     } else {
-      teamBits.push("团队情报暂不可达");
+      teamBits.push("B 不可达");
     }
+    var running = monitor.running ? "后台正在跑一轮" : (monitor.last_run ? "最近一轮 " + monitor.last_run : "启动后自动首轮");
     $("monitor-line").textContent =
-      "默认自动持续监测宽范围 AI 安全情报，间隔 " + (monitor.interval_hours || 6) +
-      " 小时" + (monitor.last_run ? "；最近一轮 " + monitor.last_run : "；启动后会自动跑首轮") +
-      "（开始于 " + dateText(monitor.started_at) +
-      "）。可计时效 " + data.latency_count +
-      " 条。漏洞来源标签：" +
-      ((data.sources || []).join("、") || "还没有") +
-      "。" + teamBits.join("；") +
-      "。资料库已沉淀 " + ((data.library || {}).documents || 0) +
-      " 份（" +
-      (((data.library || {}).source_categories || []).join("、") || "尚无") +
-      "）。影响资产在「情报富集」里评估。";
+      "自动监测 · " + running +
+      " · 间隔 " + (monitor.interval_hours || 6) + "h" +
+      " · 情报 " + data.items +
+      " · 资料 " + ((data.library || {}).documents || 0) +
+      " · " + teamBits.join(" · ") +
+      " · LLM " + (data.llm_ready ? "接通" : "未配置");
+    if (data.visibility) applyVisibility(data.visibility);
+    else loadVisibility();
     [
-      [String(data.items), "知识库情报"],
-      [String(data.source_count || 0), "漏洞数据库来源"],
+      [String(data.items), "情报条目"],
+      [String(data.source_count || 0), "漏洞来源"],
       [String((data.library || {}).documents || 0), "资料库文档"],
       [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "离线", "团队 AI CVE"],
       [String(data.latency_count || 0), "可计时效"],
@@ -287,7 +430,7 @@ function loadOverview() {
     var recent = $("recent");
     clear(recent);
     if (!data.recent.length) {
-      add(recent, "p", "empty", "知识库还是空的。到情报监测里运行一次。");
+      add(recent, "p", "empty", "情报库还是空的。自动监测启动后会入库，或到「自动监测」立即刷新。");
     }
     data.recent.forEach(function (item) {
       renderItemRow(recent, item, function (id) { openDetail(id); });
@@ -306,7 +449,7 @@ function setMonitorScope(scope) {
   var detail = $("monitor-detail");
   if (detail) {
     clear(detail);
-    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可去「情报富化」；论文/博客/标准等资料也可在「安全资料库」打开。");
+    add(detail, "p", "empty", "点左侧一条情报查看摘要。漏洞可送去「情报富集」；非 CVE 资料可打开「资料库沉淀」。");
   }
   loadItems("monitor");
 }
@@ -338,10 +481,16 @@ function loadItems(view) {
       var teamMeta = data.team_documents || {};
       if (teamMeta.reachable === false) setTeamHealth({ reachable: false, error: "feed 探测失败" });
       if (summary) {
-        summary.textContent = "情报流：漏洞 CVE " + (counts.cve || 0) + " · 非 CVE 资料 " + (counts.document || 0)
+        var fresh = data.freshness || {};
+        summary.textContent = "情报流（按发布时间新→旧）：CVE " + (counts.cve || 0)
+          + " · 非 CVE " + (counts.document || 0)
           + "（团队文档 " + teamTotal + "）"
-          + (query ? " · 已按「" + query + "」收窄" : " · 自动流（无需先输关键词）")
-          + "。默认自动采集；按钮仅「立即刷新一轮」。";
+          + " · 近7天 " + (fresh.days_7 || 0)
+          + " · 近30天 " + (fresh.days_30 || 0)
+          + " · 更早 " + (fresh.older || 0)
+          + " · 演示 " + (fresh.demo || 0)
+          + (query ? " · 已按「" + query + "」收窄" : "")
+          + "。CVE 编号年份≠发布时间；「演示」合成不计入实时监测成绩。点「立即刷新一轮」拉 NVD 近30天修改窗。";
       }
       if (!items.length) {
         var empty = add(target, "p", "empty", "");
@@ -355,7 +504,7 @@ function loadItems(view) {
             loadItems("monitor");
           });
         } else {
-          empty.textContent = "情报流还是空的。服务启动会自动采集；也可点「立即刷新一轮」。若 B :8765 宕机，仍应出现 NVD/OSV/本地资料。";
+          empty.textContent = "情报流还是空的。请点「立即刷新一轮」；若仍空，看横幅诊断（NVD/OSV/B同进程/C资料同步）。B 库缺失时 NVD/OSV 与本地资料库仍应有内容；全空多半是未 seed、外网不可达，或范围芯片不是「全部」。一键：./scripts/demo-up.sh（单进程只开 8023）";
         }
         return data;
       }
@@ -390,12 +539,12 @@ function openMonitorDetail(item) {
     clear(panel);
     add(panel, "h2", "", (item.category_label || "资料") + (item.demo ? "（演示）" : ""));
     add(panel, "p", "desc", item.title || "");
-    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见安全资料库）");
+    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见资料库沉淀）");
     var fields = add(panel, "div", "fields");
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
       ["来源", (item.sources || [item.source || ""]).filter(Boolean).join("、") || "未写明"],
-      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "安全资料库"],
+      ["出处", item.origin === "team_documents" ? "团队情报文档 API" : "资料库沉淀"],
       ["记录类型", item.demo ? "演示合成（非比赛监测证据）" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
@@ -406,7 +555,7 @@ function openMonitorDetail(item) {
       var link = add(panel, "a", "meta", item.url);
       link.href = item.url; link.target = "_blank"; link.rel = "noopener";
     }
-    var goLib = add(panel, "button", "ghost", "打开安全资料库");
+    var goLib = add(panel, "button", "ghost", "打开资料库沉淀");
     goLib.type = "button";
     goLib.addEventListener("click", function () { setView("library"); });
     return;
@@ -770,13 +919,29 @@ function loadSettings() {
   }).catch(showError);
 }
 
-document.querySelectorAll(".nav button").forEach(function (button) {
+document.querySelectorAll(".pipeline button").forEach(function (button) {
   button.addEventListener("click", function () {
     setView(button.getAttribute("data-view"));
   });
 });
 
-$("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+document.querySelectorAll("#arch-stack [data-go]").forEach(function (node) {
+  node.addEventListener("click", function () {
+    setView(node.getAttribute("data-go"));
+  });
+  node.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setView(node.getAttribute("data-go"));
+    }
+  });
+  if (!node.getAttribute("tabindex")) node.setAttribute("tabindex", "0");
+  if (!node.getAttribute("role")) node.setAttribute("role", "button");
+});
+
+if ($("goto-monitor")) {
+  $("goto-monitor").addEventListener("click", function () { setView("monitor"); });
+}
 
 if ($("keyword")) {
   $("keyword").addEventListener("input", function () {
@@ -795,6 +960,44 @@ if ($("clear-keyword-btn")) {
     setMonitorStatus("已清除关键词，正在显示全部情报流。");
     loadItems("monitor");
   });
+}
+
+function diagnoseEmptyFeed(runData, feed, keyword) {
+  var bits = [];
+  var diag = (runData && runData.source_diag) || {};
+  var team = (runData && runData.team) || {};
+  var teamDocs = (feed && feed.team_documents) || {};
+  var scope = monitorScope || "all";
+
+  function srcLine(label, row) {
+    if (!row) return;
+    var st = row.status || "未知";
+    bits.push(label + ":" + st);
+  }
+  srcLine("NVD", diag.nvd);
+  srcLine("OSV", diag.osv);
+  srcLine("B(经8023)", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("C资料同步", diag.c_library_sync);
+
+  if (diag.written === 0 || (runData && runData.count === 0)) {
+    bits.push("本轮 CVE 入库 0");
+  }
+  if (team.reachable === false) {
+    bits.push("B 未起则团队 CVE/文档不会进流（NVD/OSV 与本地库仍应有内容）");
+  }
+  if (teamDocs.reachable === false) {
+    bits.push("feed 探测 B 文档不可达");
+  }
+  if (keyword) {
+    bits.push("当前关键词筛选「" + keyword + "」可能过窄—可清除关键词");
+  }
+  if (scope && scope !== "all") {
+    bits.push("范围芯片=" + scope + "（可切回「全部」）");
+  }
+  if (!bits.length) {
+    bits.push("知识库/资料库可能为空；请跑 ./scripts/demo-up.sh 或查看总览编排步骤");
+  }
+  return bits.join("；");
 }
 
 function runMonitorRefresh(options) {
@@ -835,16 +1038,17 @@ function runMonitorRefresh(options) {
       setMonitorStatus(done);
       showToast(done + (warns.length ? " " + warns[0] : ""), warns.length ? "error" : "ok");
       if (!total) {
+        var why = diagnoseEmptyFeed(data, feed, keyword);
         showError(new Error(keyword
-          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。请点「清除关键词」查看全部流。"
-          : "刷新已完成，但情报流仍为空。请查看总览步骤或确认外网/NVD 可达。"));
+          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why + "。请点「清除关键词」查看全部流。"
+          : "刷新已完成，但情报流仍为空。" + why + "。"));
       }
       if ($("overview") && !$("overview").hidden) loadOverview();
       return data;
     });
   }).catch(function (error) {
     showError(error);
-    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + "（不会静默；可重试或查看 :8765 是否已启动）");
+    setMonitorStatus("刷新失败：" + (error.message || "请求失败") + "（不会静默；可重试或 ./scripts/demo-up.sh）");
     throw error;
   }).then(function (data) {
     if (button) {
