@@ -576,21 +576,38 @@ _CATEGORY_LABELS = {
 
 
 def _fetch_team_documents(q="", limit=40):
+    """List multi-source documents for the monitor feed.
+
+    Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
+    after demo-up seed when no sidecar is running).
+    """
     import json
     import urllib.error
     import urllib.parse
     import urllib.request
 
+    from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
     from collectors.intelligence import team_base_url
 
-    base = team_base_url()
-    # Fetch broad list; apply local OR-substring filter so comma keywords don't empty the feed.
-    query = urllib.parse.urlencode({"q": "", "limit": min(max(limit * 3, 40), 100), "offset": 0})
+    page_limit = min(max(limit * 3, 40), 100)
     try:
-        with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
-            payload = json.load(resp)
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        return [], {"reachable": False, "total": 0}
+        if embed_enabled():
+            prefer_root_packages()
+            payload = list_documents_page("", limit=page_limit, offset=0)
+        else:
+            base = team_base_url()
+            query = urllib.parse.urlencode({"q": "", "limit": page_limit, "offset": 0})
+            with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
+                payload = json.load(resp)
+    except Exception as exc:
+        return [], {
+            "reachable": False,
+            "total": 0,
+            "error": "%s: %s" % (type(exc).__name__, exc)[:160],
+            "mode": "embed" if embed_enabled() else "sidecar",
+        }
+    if not isinstance(payload, dict):
+        return [], {"reachable": False, "total": 0, "error": "invalid documents payload"}
     rows = payload.get("items") or []
     out = []
     for row in rows:
@@ -620,7 +637,11 @@ def _fetch_team_documents(q="", limit=40):
         })
         if len(out) >= limit:
             break
-    return out, {"reachable": True, "total": payload.get("total", len(out))}
+    return out, {
+        "reachable": True,
+        "total": payload.get("total", len(out)),
+        "mode": "embed" if embed_enabled() else "sidecar",
+    }
 
 
 def _library_documents(q="", limit=40):
