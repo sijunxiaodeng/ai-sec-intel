@@ -161,9 +161,15 @@ def extract_document(response, url):
     text = response["body"].decode(response.get("encoding", "utf-8"), errors="replace")
     if response["content_type"] == "text/plain":
         return {"title": url, "parts": [("text", text)], "published_at": None}
-    from trafilatura import extract
-    parsed = extract(text, url=url, output_format="json", with_metadata=True,
-                     include_comments=False, include_tables=True)
+    try:
+        from trafilatura import extract
+        parsed = extract(text, url=url, output_format="json", with_metadata=True,
+                         include_comments=False, include_tables=True)
+    except ImportError as exc:
+        raise ValueError(
+            "HTML 抽取依赖不可用（%s）。请安装 lxml_html_clean 或 lxml[html-clean] 后重试。"
+            % exc
+        ) from exc
     data = json.loads(parsed) if parsed else {}
     body = data.get("text") or ""
     if len(body.strip()) < 100 or re.search(r"^(just a moment|access denied|verify you are human)", body, re.I):

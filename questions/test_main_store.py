@@ -129,6 +129,20 @@ class MainStoreTest(unittest.TestCase):
         self.assertEqual(result["item"]["collected_at"], "2026-10-10T00:00:00Z")
         self.assertEqual(result["item"]["raw_data"]["cvss_score"], 7.0)
 
+    def test_feed_freshness_is_independent_of_cve_update_time(self):
+        old = _record(updated="2026-11-01T00:00:00Z")
+        old["epss"] = {"status": "ok", "score": "0.9", "retrieved_at": "2026-10-10T00:00:00Z"}
+        old["kev"] = {"status": "listed", "retrieved_at": "2026-10-10T00:00:00Z"}
+        store.upsert([old])
+        fresh = _record(updated="2026-10-01T00:00:00Z")
+        fresh["epss"] = {"status": "ok", "score": "0.2", "retrieved_at": "2026-10-11T00:00:00Z"}
+        fresh["kev"] = {"status": "not_listed", "retrieved_at": "2026-10-11T00:00:00Z"}
+        store.upsert([fresh])
+        store.upsert([old])
+        found = store.load_kb()[0]
+        self.assertEqual(found["epss"]["score"], "0.2")
+        self.assertEqual(found["kev"]["status"], "not_listed")
+
     def test_stale_or_low_authority_updates_do_not_replace_current_facts(self):
         store.upsert([_record(updated="2026-10-10T04:00:00Z", score=7.0)])
         store.upsert([_record(updated="2026-10-10T02:00:00Z", description="Stale", score=9.8)])

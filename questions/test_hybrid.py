@@ -69,6 +69,28 @@ class HybridTest(unittest.TestCase):
         self.assertEqual({r["source_id"] for r in chunks}, {"nvd", "wiz", "fix"})
         self.assertTrue(verify(result["answer"], result["evidence"])["passed"])
 
+    def test_concurrent_evidence_change_cannot_publish_stale_embeddings(self):
+        from rag.evidence import _connection
+        from rag.hybrid import update_index, MODEL_NAME
+        config_path(self.db).write_text(json.dumps({"enabled": True, "model": MODEL_NAME, "cache_dir": "unused"}))
+
+        class ConcurrentModel:
+            def passage_embed(model, texts):
+                # Simulate a document sync committing during the slow model call.
+                with _connection(self.db) as conn:
+                    rowid, payload = conn.execute("SELECT rowid,payload FROM evidence LIMIT 1").fetchone()
+                    row = json.loads(payload)
+                    row["text"] += " A newer source correction."
+                    conn.execute("UPDATE evidence SET payload=? WHERE rowid=?", (json.dumps(row), rowid))
+                return [[1.0, 0.0] for _ in texts]
+
+        with patch("rag.hybrid._model", return_value=ConcurrentModel()):
+            result = update_index(self.db)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_type"], "StaleEvidence")
+        with _connection(self.db) as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM embeddings").fetchone()[0], 0)
+
     def test_unknown_focus_does_not_pull_unrelated_record(self):
         result = qa_run("CVSS 是多少？", cve_id="CVE-2099-99999")
         self.assertEqual(result["evidence"], [])

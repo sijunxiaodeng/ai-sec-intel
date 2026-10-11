@@ -20,6 +20,9 @@ finally:
 
 
 class TeamCollectorTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict('os.environ', {'TEAM_INTEL_MODE': 'sidecar'}))
+
     def test_paginated_rows_are_normalized_and_query_encoded(self):
         rows = [{'cve_id': f'CVE-2026-{10000 + i}', 'raw_data': {}} for i in range(101)]
         responses = [io.StringIO(json.dumps({'items': rows[:100], 'total': 101})),

@@ -150,10 +150,13 @@ def _field_meta(record, field, value, observed_at):
     stamps = []
     if isinstance(value, dict):
         stamps.extend(value.get(key) for key in ("updated_at", "retrieved_at", "fetched_at", "date"))
-    stamps.extend(raw.get(key) for key in ("content_updated_at", "source_updated_at", "modified_at", "updated_at"))
-    for source in raw.get("source_evidence") or []:
-        if isinstance(source, dict) and source.get("source") == _source(record, field, value):
-            stamps.append(source.get("modified_at"))
+    # EPSS / KEV have their own publication/observation clocks. A CVE edit
+    # cannot make an older feed result appear newer than a fresh feed fetch.
+    if field not in {"epss", "kev"}:
+        stamps.extend(raw.get(key) for key in ("content_updated_at", "source_updated_at", "modified_at", "updated_at"))
+        for source in raw.get("source_evidence") or []:
+            if isinstance(source, dict) and source.get("source") == _source(record, field, value):
+                stamps.append(source.get("modified_at"))
     valid = [_time(stamp) for stamp in stamps if _time(stamp)]
     return {"updated_at": max(valid) if valid else observed_at,
             "time_basis": "source" if valid else "observed",

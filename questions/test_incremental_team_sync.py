@@ -1,7 +1,10 @@
 """Persistent delivery cursors, backlog draining and failure-safe replays."""
 import json
+import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -10,7 +13,7 @@ from collectors.intelligence import IncrementalIntelligenceCollector
 from collectors.team_documents import TEAM_MEDIA, TeamDocumentCollector, team_id
 from questions.test_team_documents import record
 from rag.evidence import _connection
-from rag.library import documents, search, sync_team, sync_team_drain
+from rag.library import documents, search, sync_team, sync_team_drain, _team_process_lock, _TEAM_SYNC_LOCK
 
 
 class ChangeDocumentFixture(TeamDocumentCollector):
@@ -45,6 +48,18 @@ class IncrementalSyncTests(unittest.TestCase):
         with _connection(self.db) as connection:
             row = connection.execute("SELECT payload FROM team_sync_cursors").fetchone()
         return json.loads(row[0]) if row else None
+
+    def test_monitor_honors_embedded_mode_without_http(self):
+        from agents import monitor_agent
+        page = {"epoch": "embedded", "reset": False, "cursor": 0, "through": 0,
+                "next_cursor": 0, "has_more": False, "changes": []}
+        with patch.dict(os.environ, {"TEAM_INTEL_MODE": "embed", "TEAM_ONLY_COLLECT": "1"}), \
+             patch("database.store.get_sync_cursor", return_value={}), \
+             patch("api.b_embed.list_changes_page", return_value=page) as local, \
+             patch("urllib.request.urlopen", side_effect=AssertionError("Unexpected HTTP")):
+            result = monitor_agent.run()
+        self.assertEqual(result["status"], "success")
+        local.assert_called_once()
 
     def test_more_than_200_documents_are_eventually_imported_across_restart(self):
         fixture = ChangeDocumentFixture()
@@ -146,7 +161,7 @@ class IncrementalSyncTests(unittest.TestCase):
         self.assertFalse(search("prompt injection", db_path=self.db)["evidence"])
 
     def test_environment_url_is_resolved_by_default_sync(self):
-        with patch.dict("os.environ", {"TEAM_INTEL_BASE_URL": "http://b-api:8765"}), \
+        with patch.dict("os.environ", {"TEAM_INTEL_MODE": "sidecar", "TEAM_INTEL_BASE_URL": "http://b-api:8765"}), \
              patch.object(TeamDocumentCollector, "collect_changes", return_value={
                  "candidates": [], "errors": [], "retracted_ids": [], "selected": 0,
                  "total": None, "remaining": None, "has_more": False, "reset": False,
@@ -154,6 +169,77 @@ class IncrementalSyncTests(unittest.TestCase):
             result = sync_team(self.db)
         called.assert_called_once()
         self.assertEqual(result["source"]["url"], "http://b-api:8765/api/documents")
+
+    def test_parallel_thread_cannot_import_an_old_document_page(self):
+        fixture = ChangeDocumentFixture(count=1)
+        with _TEAM_SYNC_LOCK:
+            with self.assertRaisesRegex(ValueError, "正在运行"):
+                sync_team(self.db, collector=fixture)
+        self.assertFalse(self.db.exists())
+        self.assertEqual(sync_team(self.db, collector=fixture)["status"], "ok")
+
+    def test_parallel_process_cannot_read_a_cursor_until_current_page_commits(self):
+        # A fresh interpreter has its own thread lock, exercising the OS lock.
+        code = """
+import sys
+from questions.test_incremental_team_sync import ChangeDocumentFixture
+from rag.library import sync_team
+try:
+    sync_team(sys.argv[1], collector=ChangeDocumentFixture(count=1))
+except ValueError as exc:
+    assert '其他进程' in str(exc), str(exc)
+else:
+    raise AssertionError('A concurrent process imported a page while locked')
+"""
+        with _team_process_lock(self.db):
+            result = subprocess.run([sys.executable, "-c", code, str(self.db)],
+                                    capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.db.exists())
+        self.assertEqual(sync_team(self.db, collector=ChangeDocumentFixture(count=1))["status"], "ok")
+        self.assertEqual(self.state()["seq"], 1)
+
+    def test_cve_page_has_original_expected_cursor_even_after_endpoint_change(self):
+        old = {"epoch": "previous", "seq": 9, "base_url": "http://b-api:8765"}
+        collector = IncrementalIntelligenceCollector(base_url="http://localhost:8023", cursor=old)
+        page = {"epoch": "new", "reset": False, "cursor": 0, "next_cursor": 0,
+                "through": 0, "has_more": False, "changes": []}
+        with patch.object(collector, "get", return_value=page):
+            result = collector.collect()
+        self.assertEqual(result["cursor"]["expected_cursor"], old)
+        self.assertEqual(result["cursor"]["base_url"], "http://localhost:8023")
+        self.assertEqual(old["seq"], 9)
+
+    def test_feed_cannot_change_epoch_without_declaring_reset(self):
+        page = {"epoch": "new", "reset": False, "cursor": 1, "next_cursor": 2,
+                "through": 2, "has_more": False, "changes": []}
+        cve = IncrementalIntelligenceCollector(cursor={"epoch": "old", "seq": 1})
+        with patch.object(cve, "get", return_value=page), self.assertRaises(ValueError):
+            cve.collect()
+        document = ChangeDocumentFixture(count=1)
+        response = {"body": json.dumps(page).encode()}
+        with patch.object(document, "get", return_value=response), self.assertRaises(ValueError):
+            document.collect_changes({"epoch": "old", "seq": 1})
+
+    def test_embed_changefeed_supports_both_document_and_cve_consumers(self):
+        document = record(number=12)
+        pages = [
+            {"epoch": "embed", "reset": False, "cursor": 0, "next_cursor": 1,
+             "through": 1, "has_more": False, "changes": [{"seq": 1,
+             "entity_id": "CVE-2026-10000", "operation": "upsert", "item": {"cve_id": "CVE-2026-10000"}}]},
+            {"epoch": "embed", "reset": False, "cursor": 0, "next_cursor": 1,
+             "through": 1, "has_more": False, "changes": [{"seq": 1,
+             "entity_id": document["document_id"], "operation": "upsert", "item": document}]},
+        ]
+        with patch.dict("os.environ", {"TEAM_INTEL_MODE": "embed"}), \
+             patch("api.b_embed.list_changes_page", side_effect=pages) as bridge:
+            cve = IncrementalIntelligenceCollector(cursor={}).collect()
+            docs = sync_team(self.db)
+        self.assertEqual(cve["items"][0]["cve_id"], "CVE-2026-10000")
+        self.assertEqual(cve["cursor"]["expected_cursor"], {})
+        self.assertEqual(docs["ok"], 1)
+        self.assertEqual(docs["source"]["url"], "inprocess://b-embed/api/documents")
+        self.assertEqual([call.kwargs["kind"] for call in bridge.call_args_list], ["cve", "document"])
 
     def test_cve_pagination_failure_returns_no_partial_or_committed_cursor(self):
         collector = IncrementalIntelligenceCollector(cursor={}, max_pages=2)

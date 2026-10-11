@@ -86,6 +86,18 @@ class ProcessingTest(unittest.TestCase):
             row = conn.execute("SELECT status,lease_token FROM processing_jobs WHERE id=?", (new["id"],)).fetchone()
             self.assertEqual(tuple(row), ("running", new["lease_token"]))
 
+    def test_new_index_request_invalidates_running_completion(self):
+        job = {"cve_id": self.record["item"]["cve_id"], "revision": "r1"}
+        processing._enqueue_index(job)
+        old = processing._claim("index", 1)[0]
+        processing._enqueue_index(job)
+        processing._finish(old)
+        new = processing._claim("index", 1)
+        self.assertEqual(len(new), 1)
+        self.assertNotEqual(new[0]["lease_token"], old["lease_token"])
+        processing._finish(new[0])
+        self.assertEqual(processing.state()["counts"], {"done": 1})
+
     def test_withdrawal_during_fetch_cannot_be_reactivated_by_worker(self):
         cve = self.record["item"]["cve_id"]
         store.upsert([self.record])

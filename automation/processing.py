@@ -64,7 +64,7 @@ def _commit_guard(job):
         record = json.loads(row[0]) if row else None
         if (not record or (record["item"].get("raw_data") or {}).get("_store", {}).get("in_scope") is False
                 or revision(record) != job["revision"] or not lease or lease[0] != "running"
-                or lease[1] != job["lease_token"] or lease[2] < time.time()):
+                or lease[1] != job["lease_token"] or (lease[2] or 0) < time.time()):
             raise StaleWork("Stale or withdrawn processing task")
         yield
         conn.commit()
@@ -113,8 +113,9 @@ def _finish(job, error="", *, skipped=False):
     delay = min(3600, 30 * 2 ** min(job["attempts"] - 1, 7)) if error else 0
     with _connection() as conn:
         conn.execute("""UPDATE processing_jobs SET status=?,error=?,available_at=?,
-            lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?""",
-                     (status, str(error)[:500], now + delay, now, job["id"], job["lease_token"]))
+            lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?
+            AND status='running' AND lease_until>=?""",
+                     (status, str(error)[:500], now + delay, now, job["id"], job["lease_token"], now))
 
 
 def _current(job):
@@ -130,7 +131,7 @@ def _enqueue_index(job):
     with _connection() as conn:
         conn.execute("""INSERT INTO processing_jobs(cve_id,revision,stage,available_at,created_at,updated_at)
             VALUES (?,?,'index',?,?,?) ON CONFLICT(cve_id,revision,stage) DO UPDATE SET
-            status=CASE WHEN status='running' THEN status ELSE 'pending' END,
+            status='pending',attempts=0,lease_token=NULL,lease_until=NULL,error='',
             available_at=excluded.available_at,updated_at=excluded.updated_at""",
                      (job["cve_id"], job["revision"], now, now, now))
 

@@ -68,11 +68,25 @@ def extract_summary(response):
                 "不能把描述当成完整条款、标准要求或本项目验证结果。"}, row
 
 
+def _embed_mode():
+    mode = os.environ.get("TEAM_INTEL_MODE", "embed").strip().lower()
+    return mode in {"embed", "inprocess", "1", "true", "yes", ""}
+
+
 class TeamDocumentCollector:
     def __init__(self, base_url=None, timeout=10, max_documents=30, use_changefeed=False):
         if type(max_documents) is not int or not 1 <= max_documents <= 200:
-            raise ValueError("每轮团队资料数量必须为 1 到 200")
-        base_url = (base_url or os.environ.get("TEAM_INTEL_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
+            raise ValueError("每轮多源资料数量必须为 1 到 200")
+        self.timeout, self.max_documents = timeout, max_documents
+        self.use_changefeed = use_changefeed
+        # Omit base_url in embed mode (in-process). An explicit base_url always
+        # selects the HTTP adapter so sidecar/tests keep host/port validation.
+        if base_url is None and _embed_mode():
+            self.embed = True
+            self.base_url = "inprocess://b-embed"
+            return
+        self.embed = False
+        base_url = (base_url or os.environ.get("TEAM_INTEL_UPSTREAM") or os.environ.get("TEAM_INTEL_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
         parsed = urllib.parse.urlsplit(base_url)
         if (
             parsed.scheme != "http"
@@ -84,8 +98,8 @@ class TeamDocumentCollector:
             or parsed.fragment
         ):
             raise ValueError("团队资料 API 仅允许本机或 compose 服务名 b-api 的 HTTP 地址")
-        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port != 8765:
-            raise ValueError("团队资料 API 本机端口必须为 8765")
+        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in (8765, 8023):
+            raise ValueError("团队资料 API 本机端口必须为 8765 或 8023")
         self.base_url, self.timeout, self.max_documents = base_url, timeout, max_documents
         self.use_changefeed = use_changefeed
 
@@ -100,6 +114,8 @@ class TeamDocumentCollector:
             params["through"] = saved["through"]
         response = self.get("/api/team/changes?" + urllib.parse.urlencode(params))
         page = validate_page(json.loads(response["body"]), params["cursor"])
+        if not page["reset"]:
+            validate_page(page, params["cursor"], saved.get("epoch"), saved.get("through"))
         candidates, errors, retracted = [], [], []
         # Defensive coalescing also supports producers that emit every event.
         # A retract followed by a successful reclassification must finish as an
@@ -138,6 +154,19 @@ class TeamDocumentCollector:
                 "coverage": "持久变更游标；首次从零导入全部有效 AI 资料，后续消费新增、更新及撤回"}
 
     def get(self, path):
+        if self.embed:
+            from api.b_embed import list_changes_page
+            parsed = urllib.parse.urlsplit(path)
+            if parsed.path != "/api/team/changes":
+                raise ValueError("嵌入资料变更读取仅支持 changefeed")
+            params = urllib.parse.parse_qs(parsed.query)
+            page = list_changes_page(
+                kind="document", cursor=int(params.get("cursor", [0])[0]),
+                through=int(params["through"][0]) if "through" in params else None,
+                epoch=params.get("epoch", [None])[0], limit=int(params.get("limit", [100])[0]),
+            )
+            return {"body": json.dumps(page, ensure_ascii=False).encode(), "url": self.base_url + path,
+                    "retrieved_at": now(), "content_type": TEAM_MEDIA}
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 raise ValueError("团队 API 不接受重定向")
@@ -149,7 +178,71 @@ class TeamDocumentCollector:
                 raise ValueError("团队 API 响应超过大小限制")
         return {"body": body, "url": url, "retrieved_at": now(), "content_type": TEAM_MEDIA}
 
+    def _collect_embed(self):
+        from api.b_embed import db_path, ensure_intelligence_path, INTEL_ROOT
+        ensure_intelligence_path()
+        from api_v6.document_repository import DocumentRepository
+
+        docs = DocumentRepository(db_path(), INTEL_ROOT)
+        records, total = [], None
+        while total is None or len(records) < min(total, self.max_documents):
+            page = docs.list_items(
+                limit=min(100, self.max_documents - len(records)),
+                offset=len(records),
+                include_raw=True,
+            )
+            if type(page.get("total")) is not int or page["total"] < 0 or not isinstance(page.get("items"), list):
+                raise ValueError("团队资料分页无效")
+            if total is not None and page["total"] != total:
+                raise ValueError("团队资料总数在分页期间改变，请重试")
+            total = page["total"]
+            rows = page["items"]
+            if not rows and len(records) < min(total, self.max_documents):
+                break
+            records.extend(rows)
+        if any(not isinstance(row, dict) or not re.fullmatch(r"doc-[0-9a-f]{64}", str(row.get("document_id", ""))) for row in records):
+            raise ValueError("团队资料列表标识无效")
+        candidates, errors = [], []
+        for current in records:
+            try:
+                if current["source_category"] not in TYPE_MAP:
+                    raise ValueError("尚不支持该团队资料类别")
+                body = json.dumps(current, ensure_ascii=False).encode("utf-8")
+                response = {
+                    "body": body,
+                    "url": "inprocess://b-embed/api/documents/" + current["document_id"],
+                    "retrieved_at": now(),
+                    "content_type": TEAM_MEDIA,
+                }
+                # Re-validate through parse_record for the same contract as HTTP path.
+                parsed = parse_record(response["body"])
+                candidates.append({
+                    "url": parsed["url"],
+                    "document_type": TYPE_MAP[parsed["source_category"]],
+                    "source_name": parsed["source"],
+                    "source_id": "team_documents",
+                    "discovery": "team_api",
+                    "team_document_id": parsed["document_id"],
+                    "discovered_at": now(),
+                    "_prefetched_response": response,
+                })
+            except Exception as exc:
+                errors.append({
+                    "document_id": team_id(str(current.get("document_id", ""))),
+                    "url": current.get("url", ""),
+                    "document_type": TYPE_MAP.get(current.get("source_category"), "unknown"),
+                    "publisher": current.get("source", "unknown"),
+                    "status": "error", "retrieved_at": now(), "error": str(exc)[:240],
+                })
+        return {
+            "candidates": candidates, "errors": errors, "total": total or 0,
+            "selected": len(records), "remaining": max(0, (total or 0) - len(records)),
+            "coverage": "同进程嵌入读取 B 资料库窗口；非全量镜像",
+        }
+
     def collect(self):
+        if self.embed:
+            return self._collect_embed()
         records, total = [], None
         while total is None or len(records) < min(total, self.max_documents):
             query = urllib.parse.urlencode({"limit": min(100, self.max_documents - len(records)),

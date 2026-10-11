@@ -1,6 +1,7 @@
 import os
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -21,6 +22,19 @@ app = FastAPI(title="AI 安全知识情报")
 
 @app.on_event("startup")
 def _startup():
+    # Optional: pull latest Actions intelligence snapshot before the monitor loop.
+    try:
+        from api.actions_ingest import maybe_pull_on_startup
+
+        result = maybe_pull_on_startup()
+        if result and result.get("status") == "ok":
+            print("Actions sync on start: installed run_id=%s" % (
+                (result.get("marker") or {}).get("run_id"),
+            ), flush=True)
+        elif result and result.get("status") == "error":
+            print("Actions sync on start failed: %s" % result.get("error"), flush=True)
+    except Exception as exc:
+        print("Actions sync on start skipped: %s" % exc, flush=True)
     start_schedule()
 
 
@@ -72,6 +86,7 @@ class LibraryAskBody(BaseModel):
     document_ids: list[str] = Field(default_factory=list, max_items=4)
     document_type: str = ""
     use_model: bool = True
+    mode: Literal["excerpts", "reasoning"] = "excerpts"
 
 
 class RelationCandidatesBody(BaseModel):
@@ -118,12 +133,69 @@ def _team_intel_snapshot():
     import urllib.error
     import urllib.request
 
+    from api.b_embed import embed_enabled, inprocess_health, list_team_page, public_b_base
     from collectors.intelligence import team_base_url
+
+    if embed_enabled():
+        health = inprocess_health()
+        out = {
+            "reachable": bool(health.get("reachable")),
+            "base_url": health.get("public_base") or public_b_base(),
+            "public_base": health.get("public_base") or public_b_base(),
+            "mode": "embed",
+            "via_proxy": False,
+            "database_available": health.get("database_available"),
+            "knowledge_documents_available": health.get("knowledge_documents_available"),
+            "team_total": None,
+            "document_total": None,
+            "coverage": None,
+            "error": health.get("error"),
+        }
+        if not out["reachable"]:
+            return out
+        try:
+            out["team_total"] = list_team_page("", limit=1, ai_only=True).get("total")
+        except Exception:
+            pass
+        try:
+            from api.b_embed import ensure_intelligence_path, db_path, INTEL_ROOT
+            ensure_intelligence_path()
+            from api_v6.document_repository import DocumentRepository
+            from api_v6.repository import IntelligenceRepository, current_classifier_version
+            from monitoring.coverage import coverage_report
+            from monitoring.source_registry import get_sources
+
+            docs = DocumentRepository(db_path(), INTEL_ROOT)
+            stats = docs.stats()
+            out["document_total"] = stats.get("total_documents")
+            cat_counts = stats.get("source_category_counts") or stats.get("source_record_counts")
+            if isinstance(cat_counts, dict):
+                out["document_categories"] = list(cat_counts.keys())
+            repo = IntelligenceRepository(db_path(), INTEL_ROOT)
+            with repo.read() as con:
+                cov = coverage_report(
+                    con, get_sources(),
+                    poll_minutes=15, source_timeout_seconds=120, worker_count=4,
+                    classifier_version=current_classifier_version(INTEL_ROOT),
+                )
+            out["coverage"] = {
+                "configured_category_count": cov.get("configured_category_count"),
+                "observed_ai_category_count": cov.get("observed_ai_category_count"),
+                "observed_ai_categories": cov.get("observed_ai_categories"),
+                "required_categories_observed": cov.get("required_categories_observed"),
+                "sla_evidence": cov.get("sla_evidence"),
+            }
+        except Exception as exc:
+            out["error"] = "%s: %s" % (type(exc).__name__, exc)[:160]
+        return out
 
     base = team_base_url()
     out = {
         "reachable": False,
         "base_url": base,
+        "public_base": public_b_base(),
+        "mode": "sidecar",
+        "via_proxy": True,
         "database_available": None,
         "team_total": None,
         "document_total": None,
@@ -177,6 +249,247 @@ def _team_intel_snapshot():
     return out
 
 
+def _enrichment_field_coverage(records):
+    """Operational field presence — not independent enrichment accuracy."""
+    keys = ("cvss", "epss", "kev", "papers", "affected", "poc")
+    counts = {k: 0 for k in keys}
+    live = 0
+    for record in records:
+        item = record.get("item") or {}
+        if (item.get("raw_data") or {}).get("sample_mode"):
+            continue
+        live += 1
+        if record.get("cvss") or item.get("cvss"):
+            counts["cvss"] += 1
+        if record.get("epss") is not None or (item.get("epss") is not None):
+            counts["epss"] += 1
+        if record.get("kev") or item.get("kev"):
+            counts["kev"] += 1
+        if record.get("papers") or item.get("papers"):
+            counts["papers"] += 1
+        if record.get("affected") or item.get("affected"):
+            counts["affected"] += 1
+        if record.get("poc") or item.get("poc"):
+            counts["poc"] += 1
+    present = [k for k, n in counts.items() if n > 0]
+    return {"live_items": live, "counts": counts, "present_dimensions": present, "dimension_count": len(present)}
+
+
+def _build_visibility(records, names, monitor, library, team, latency_count, llm_ready):
+    """Honest module board: duty / standards / integration. Never invent competition_passed."""
+    from enrichment.assets import load_assets
+
+    cov = (team or {}).get("coverage") or {}
+    observed_cats = int(cov.get("observed_ai_category_count") or 0)
+    lib_cats = len((library or {}).get("source_categories") or [])
+    # Prefer B observed categories for source-breadth narrative; fall back to library categories.
+    source_breadth = max(observed_cats, lib_cats, len(names or []))
+    if source_breadth >= 7:
+        source_level, source_note = "良好～优秀（演示）", "类别观测≥7；优秀「实时」有调度但 SLA 样本不足，非自动判竞赛分"
+    elif source_breadth >= 5:
+        source_level, source_note = "良好（演示）", "类别观测≥5；非 competition_passed"
+    elif source_breadth >= 3:
+        source_level, source_note = "合格（演示）", "类别观测≥3；非自动判竞赛分"
+    elif source_breadth > 0:
+        source_level, source_note = "缺口", "来源类别不足合格线（≥3）"
+    else:
+        source_level, source_note = "缺口", "尚无可用类别观测"
+
+    if latency_count and latency_count > 0:
+        latency_level, latency_note = "部分可计", f"可计时效样本 {latency_count}；间隔≠发布→采集延迟；新鲜度看 feed.freshness（近7/30天）"
+    else:
+        latency_level, latency_note = "未达证", "latency_count=0 / sla_evidence 不足；勿用定时间隔或 CVE 年份冒充发布→采集延迟；列表已按 published_at 排序仅改善观感"
+
+    enrich_cov = _enrichment_field_coverage(records)
+    dim_n = enrich_cov["dimension_count"]
+    if dim_n >= 5:
+        enrich_dim_level, enrich_dim_note = "良好（可演示）", f"字段维度 {dim_n}：{', '.join(enrich_cov['present_dimensions'])}；缺互联网资产发现与独立准确率"
+    elif dim_n >= 3:
+        enrich_dim_level, enrich_dim_note = "合格（可演示）", f"字段维度 {dim_n}；独立准确率仍为空"
+    else:
+        enrich_dim_level, enrich_dim_note = "缺口", f"字段维度仅 {dim_n}，低于合格线≥3"
+
+    assets = load_assets() or []
+    asset_n = len(assets) if isinstance(assets, list) else 0
+
+    b_reachable = bool((team or {}).get("reachable"))
+    b_status = "接通" if b_reachable else "不可达"
+    try:
+        from api.b_embed import embed_enabled, public_b_base, sidecar_enabled
+        from api.b_proxy import team_intel_upstream
+        b_public = public_b_base()
+        if embed_enabled() or (team or {}).get("mode") == "embed":
+            b_detail = "同进程嵌入 · %s/api/intelligence/*（无需 :8765）" % b_public
+        elif sidecar_enabled():
+            b_detail = "遗留 sidecar · %s/api/intelligence/* → %s" % (b_public, team_intel_upstream())
+        else:
+            b_detail = (team or {}).get("base_url") or "TEAM_INTEL_MODE=off"
+    except Exception:
+        b_detail = (team or {}).get("base_url") or "未配置 TEAM_INTEL_MODE"
+    if b_reachable:
+        b_detail += f" · AI CVE {(team or {}).get('team_total') if (team or {}).get('team_total') is not None else '—'} · 文档 {(team or {}).get('document_total') if (team or {}).get('document_total') is not None else '—'}"
+    elif (team or {}).get("error"):
+        b_detail += f" · {(team or {}).get('error')}"
+
+    c_local = "接通"  # C capabilities run in-process on A
+    llm_status = "接通" if llm_ready else "未配置"
+    docs_n = int((library or {}).get("documents") or 0)
+    chunks_n = int((library or {}).get("chunks") or 0)
+
+    if "缺口" in source_level and latency_level == "未达证":
+        monitor_std_level = "缺口"
+    elif latency_level == "未达证":
+        monitor_std_level = "部分"
+    else:
+        monitor_std_level = source_level
+
+    modules = [
+        {
+            "id": "monitor",
+            "title": "自动监测",
+            "position": "管线 01 · 入口情报流",
+            "duty": "宽范围 AI 安全情报流（CVE + 非 CVE）；默认自动持续采集，关键词仅可选收窄。",
+            "standard": {
+                "level": monitor_std_level,
+                "summary": f"来源类别 {source_level}；延迟 {latency_level}",
+                "detail": f"{source_note}。{latency_note}",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · monitor 角色",
+                "peers": [
+                    {"party": "A", "role": "调度 / feed / status", "status": "接通"},
+                    {"party": "B", "role": "多源情报（同进程）", "status": b_status, "detail": b_detail},
+                    {"party": "C", "role": "不经监测入口", "status": "跳过"},
+                ],
+            },
+            "signals": {
+                "items": len(records),
+                "last_run": (monitor or {}).get("last_run"),
+                "running": bool((monitor or {}).get("running")),
+                "mode": (monitor or {}).get("mode") or "automatic",
+            },
+        },
+        {
+            "id": "enrich",
+            "title": "情报富集",
+            "position": "管线 02 · 单条补维度",
+            "duty": "对单条漏洞补 EPSS / KEV / 论文等，并评估影响资产（登记匹配，非互联网发现）。",
+            "standard": {
+                "level": enrich_dim_level,
+                "summary": f"富化维度 {enrich_dim_level}；准确率 空",
+                "detail": f"{enrich_dim_note}。independent_enrichment_accuracy=null；互联网资产定位未实现；PoC 可用性未验收。已登记资产 {asset_n}。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · enrich 角色",
+                "peers": [
+                    {"party": "A", "role": "编排触发 /api/enrich", "status": "接通"},
+                    {"party": "B", "role": "监测上游输入", "status": "跳过", "detail": "富集读本地库，不直连 B"},
+                    {"party": "C", "role": "assessment / assets", "status": c_local},
+                ],
+            },
+            "signals": enrich_cov,
+        },
+        {
+            "id": "library",
+            "title": "资料库沉淀",
+            "position": "管线 03 · 可检索原文",
+            "duty": "沉淀可检索原文与片段；监测是流，这里是存档与问答底座。",
+            "standard": {
+                "level": "可演示" if docs_n >= 1 else "缺口",
+                "summary": f"文档 {docs_n} · 片段 {chunks_n} · 类别 {lib_cats}",
+                "detail": "快照级检索/资料绑定可跑；独立语义质量不由此绿。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 壳 · C 资料检索",
+                "peers": [
+                    {"party": "A", "role": "资料库页 / 同步触发", "status": "接通"},
+                    {"party": "B", "role": "多源文档同步", "status": b_status if b_reachable else "不可达", "detail": "可选 team-sync"},
+                    {"party": "C", "role": "library / chunks / RAG 底座", "status": c_local},
+                ],
+            },
+            "signals": {"documents": docs_n, "chunks": chunks_n, "categories": (library or {}).get("source_categories") or []},
+        },
+        {
+            "id": "ask",
+            "title": "证据问答",
+            "position": "管线 04 · 先证据后答",
+            "duty": "先检索证据再组织回答；编号与分数须来自证据；verifier 核对。",
+            "standard": {
+                "level": "部分（开发验证）" if docs_n >= 1 else "缺口",
+                "summary": "问答质量待独立验收；competition_passed=null",
+                "detail": ("大模型未配置，当前走原文摘录。" if not llm_ready else "大模型已配置；独立问答准确率仍为空。")
+                + " 规则/开发题可过，不冒充赛题得分。",
+                "honest": True,
+            },
+            "integration": {
+                "owner": "A 编排 · qa + verifier",
+                "peers": [
+                    {"party": "A", "role": "会话 / 核对角色壳", "status": "接通"},
+                    {"party": "B", "role": "不直连问答", "status": "跳过"},
+                    {"party": "C", "role": "检索 / 证据组装", "status": c_local},
+                    {"party": "LLM", "role": "国产模型接口", "status": llm_status},
+                ],
+            },
+            "signals": {"llm_ready": llm_ready},
+        },
+    ]
+
+    standards = [
+        {"id": "source_categories", "metric": "来源类别数", "level": source_level, "note": source_note},
+        {"id": "enrichment_dimensions", "metric": "富化维度数", "level": enrich_dim_level, "note": enrich_dim_note},
+        {"id": "latency", "metric": "发布→采集延迟", "level": latency_level, "note": latency_note},
+        {"id": "enrichment_accuracy", "metric": "富化准确率", "level": "空", "note": "independent_enrichment_accuracy=null"},
+        {"id": "qa_quality", "metric": "问答质量", "level": "部分（开发验证）" if docs_n >= 1 else "缺口", "note": "独立准确率 null；勿把规则测试当竞赛分"},
+        {"id": "internet_assets", "metric": "互联网资产定位", "level": "未实现", "note": "仅登记/预览匹配"},
+        {"id": "poc_verify", "metric": "PoC 可用验证", "level": "未验收", "note": "候选未正式验收"},
+    ]
+
+    integration = [
+        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · 对外只开 :8023"},
+        {"party": "B", "name": "多源情报（同进程嵌入）", "status": b_status, "detail": b_detail},
+        {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
+        {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
+    ]
+
+    gaps = [row for row in standards if row["level"] in ("缺口", "未达证", "空", "未实现", "未验收") or "部分" in str(row["level"])]
+
+    return {
+        "policy": {
+            "competition_passed": None,
+            "note": "对照验收包/acceptance_criteria 的工程自评；不自动判定竞赛通过。禁止假绿。",
+        },
+        "modules": modules,
+        "standards": standards,
+        "integration": integration,
+        "gaps": gaps,
+    }
+
+
+@app.get("/api/visibility")
+def visibility():
+    records = knowledge_records()
+    names = []
+    for record in records:
+        if (record.get("item", {}).get("raw_data") or {}).get("sample_mode"):
+            continue
+        for name in (record.get("item") or {}).get("sources") or []:
+            if name and name not in names:
+                names.append(name)
+    monitor = monitor_state()
+    from rag.library import overview as library_overview
+    library = library_overview()
+    team = _team_intel_snapshot()
+    return _build_visibility(
+        records, names, monitor,
+        {"documents": library["documents"], "chunks": library["chunks"],
+         "source_categories": library["source_categories"]},
+        team, countable_latency(records), configured(),
+    )
+
+
 @app.get("/api/overview")
 def overview():
     records = knowledge_records()
@@ -191,17 +504,21 @@ def overview():
     from rag.library import overview as library_overview
     library = library_overview()
     team = _team_intel_snapshot()
+    lib = {"documents": library["documents"], "chunks": library["chunks"],
+           "source_categories": library["source_categories"]}
+    latency = countable_latency(records)
+    llm_ready = configured()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
         "items": len(records),
         "source_count": len(names),
         "sources": names,
-        "latency_count": countable_latency(records),
-        "llm_ready": configured(),
+        "latency_count": latency,
+        "llm_ready": llm_ready,
         "monitor": monitor,
-        "library": {"documents": library["documents"], "chunks": library["chunks"],
-                    "source_categories": library["source_categories"]},
+        "library": lib,
         "team_intel": team,
+        "visibility": _build_visibility(records, names, monitor, lib, team, latency, llm_ready),
         "steps": last_steps(),
         "recent": [_summary(record) for record in records[:6]],
     }
@@ -267,21 +584,44 @@ _CATEGORY_LABELS = {
 
 
 def _fetch_team_documents(q="", limit=40):
+    """List multi-source documents for the monitor feed.
+
+    Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
+    after demo-up seed when no sidecar is running).
+
+    Do not import ``collectors.intelligence`` before the embed branch: during an
+    in-process B monitor cycle, intelligence/ is briefly first on ``sys.path``
+    and that import raises ModuleNotFoundError (wrong ``collectors`` package).
+    """
     import json
     import urllib.error
     import urllib.parse
     import urllib.request
 
-    from collectors.intelligence import team_base_url
+    from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
 
-    base = team_base_url()
-    # Fetch broad list; apply local OR-substring filter so comma keywords don't empty the feed.
-    query = urllib.parse.urlencode({"q": "", "limit": min(max(limit * 3, 40), 100), "offset": 0})
+    page_limit = min(max(limit * 3, 40), 100)
     try:
-        with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
-            payload = json.load(resp)
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-        return [], {"reachable": False, "total": 0}
+        if embed_enabled():
+            # list_documents_page reads api_v6 repos; avoids collectors.* clash.
+            payload = list_documents_page("", limit=page_limit, offset=0)
+        else:
+            prefer_root_packages()
+            from collectors.intelligence import team_base_url
+
+            base = team_base_url()
+            query = urllib.parse.urlencode({"q": "", "limit": page_limit, "offset": 0})
+            with urllib.request.urlopen(base + "/api/documents?" + query, timeout=8) as resp:
+                payload = json.load(resp)
+    except Exception as exc:
+        return [], {
+            "reachable": False,
+            "total": 0,
+            "error": "%s: %s" % (type(exc).__name__, exc)[:160],
+            "mode": "embed" if embed_enabled() else "sidecar",
+        }
+    if not isinstance(payload, dict):
+        return [], {"reachable": False, "total": 0, "error": "invalid documents payload"}
     rows = payload.get("items") or []
     out = []
     for row in rows:
@@ -311,7 +651,11 @@ def _fetch_team_documents(q="", limit=40):
         })
         if len(out) >= limit:
             break
-    return out, {"reachable": True, "total": payload.get("total", len(out))}
+    return out, {
+        "reachable": True,
+        "total": payload.get("total", len(out)),
+        "mode": "embed" if embed_enabled() else "sidecar",
+    }
 
 
 def _library_documents(q="", limit=40):
@@ -394,11 +738,50 @@ def monitor_feed(q: str = "", kind: str = "all"):
     elif kind == "document":
         cve_items = []
 
-    # Put non-CVE documents first on "all" so the monitor is not a CVE wall.
-    if kind == "all":
-        feed_items = doc_items + cve_items
-    else:
-        feed_items = cve_items + doc_items
+    def _pub_ts(row):
+        raw = (row.get("published_at") or "").strip()
+        if not raw:
+            return 0.0
+        text = raw.replace("Z", "+00:00")
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(text)
+            return dt.timestamp()
+        except Exception:
+            # Date-only YYYY-MM-DD
+            try:
+                from datetime import datetime, timezone
+                return datetime.fromisoformat(raw[:10]).replace(tzinfo=timezone.utc).timestamp()
+            except Exception:
+                return 0.0
+
+    def _freshness_bucket(ts, now_ts):
+        if not ts:
+            return "unknown"
+        age_days = (now_ts - ts) / 86400.0
+        if age_days <= 7:
+            return "days_7"
+        if age_days <= 30:
+            return "days_30"
+        return "older"
+
+    from datetime import datetime, timezone
+    now_ts = datetime.now(timezone.utc).timestamp()
+
+    # Recency-first across CVE + docs. CVE-2025 id ≠ old intel; sort by published_at.
+    # Demo/synthetic sinks after live items with the same timestamp.
+    feed_items = cve_items + doc_items
+    feed_items.sort(key=lambda row: (-_pub_ts(row), 1 if row.get("demo") else 0, row.get("cve_id") or row.get("title") or ""))
+
+    freshness = {"days_7": 0, "days_30": 0, "older": 0, "unknown": 0, "demo": 0}
+    for row in feed_items:
+        if row.get("demo"):
+            freshness["demo"] += 1
+        bucket = _freshness_bucket(_pub_ts(row), now_ts)
+        freshness[bucket] = freshness.get(bucket, 0) + 1
+    freshness["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    freshness["note"] = "按 published_at 新→旧；CVE 编号年份≠发布时间；近7/30天=监测新鲜度口径"
+
     return {
         "kind": kind,
         "counts": {
@@ -406,14 +789,23 @@ def monitor_feed(q: str = "", kind: str = "all"):
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
         },
+        "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
+        "sort": "published_at_desc",
     }
 
 
 @app.get("/api/items/{cve_id}")
 def item_detail(cve_id: str):
-    record = get_record(cve_id)
+    try:
+        record = get_record(cve_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="加载情报详情失败：%s。若提示 lxml.html.clean，请安装 lxml_html_clean 后重启。"
+            % exc,
+        ) from exc
     if not record:
         raise HTTPException(status_code=404, detail="知识库里没有这条情报")
     payload = _summary(record)
@@ -423,16 +815,25 @@ def item_detail(cve_id: str):
     payload["vector"] = (record.get("cvss") or {}).get("vector")
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
     from rag.ingest import document_status
-    payload["documents"] = document_status(cve_id.upper())
+    try:
+        payload["documents"] = document_status(cve_id.upper())
+    except Exception as exc:
+        payload["documents"] = {"status": "error", "detail": str(exc)[:160]}
     from enrichment.assessment import assess
-    payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+    try:
+        payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
+    except Exception as exc:
+        payload["assessment"] = {"status": "error", "detail": "自动评估暂不可用：%s" % str(exc)[:160]}
     payload["related_guidance"] = (record["item"].get("raw_data") or {}).get("related_guidance")
     return payload
 
 
 @app.get("/api/guidance/{cve_id}")
 def related_guidance(cve_id: str):
-    record = get_record(cve_id.upper())
+    try:
+        record = get_record(cve_id.upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="读取关联建议失败：%s" % exc) from exc
     if not record:
         raise HTTPException(status_code=404, detail="请先收录这条漏洞")
     return record["item"].get("raw_data", {}).get("related_guidance") or {"status": "empty", "facets": {}, "evidence": []}
@@ -444,7 +845,14 @@ def refresh_guidance(cve_id: str):
     if not record:
         raise HTTPException(status_code=404, detail="请先收录这条漏洞")
     from enrichment.guidance import refresh
-    return refresh(record)
+    try:
+        return refresh(record)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="补充关联建议失败：%s。若涉及 lxml.html.clean，请安装 lxml_html_clean。"
+            % exc,
+        ) from exc
 
 
 @app.get("/api/assessment/{cve_id}")
@@ -503,44 +911,83 @@ AUTO_MONITOR_KEYWORDS = (
 
 
 def _team_reachable_probe():
-    """Fast probe so UI can warn when B :8765 is down without freezing."""
+    """Fast probe so UI can warn when B is unavailable without freezing."""
     import json
     import urllib.error
     import urllib.request
 
+    from api.b_embed import embed_enabled, inprocess_health, public_b_base, sidecar_enabled
     from collectors.intelligence import team_base_url
 
+    if embed_enabled():
+        return inprocess_health()
+
     base = team_base_url()
+    public = public_b_base()
     try:
         with urllib.request.urlopen(base + "/api/intelligence/health", timeout=3) as resp:
             payload = json.load(resp)
         return {
             "reachable": True,
             "base_url": base,
+            "public_base": public,
+            "mode": "sidecar",
+            "via_proxy": sidecar_enabled(),
             "database_available": bool(payload.get("database_available")),
         }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        return {"reachable": False, "base_url": base, "error": str(exc)[:160]}
+        return {
+            "reachable": False,
+            "base_url": base,
+            "public_base": public,
+            "mode": "sidecar",
+            "via_proxy": sidecar_enabled(),
+            "error": str(exc)[:160],
+        }
 
 
 @app.get("/api/monitor/status")
-def monitor_status():
+def monitor_status(light: int = 0):
+    """Monitor schedule/progress.
+
+    Use ``?light=1`` while a cycle is running — skip the embed health probe so
+    progress polling is not blocked by the same-process multi-source work.
+    """
+    from automation.schedule import next_run_iso
+
     st = monitor_state()
-    team = _team_reachable_probe()
+    running = bool(st.get("running"))
+    team = None
+    if not light and not running:
+        team = _team_reachable_probe()
+    elif not light and running:
+        # Cheap stub so the UI keeps a team object without opening the intel DB.
+        from api.b_embed import embed_enabled, public_b_base
+
+        team = {
+            "reachable": True,
+            "mode": "embed" if embed_enabled() else "sidecar",
+            "public_base": public_b_base(),
+            "base_url": public_b_base(),
+            "probe": "skipped_while_running",
+        }
     return {
         "mode": "automatic",
         "interval_hours": st.get("interval_hours"),
         "interval_minutes": st.get("interval_minutes"),
         "auto_on_start": st.get("auto_on_start"),
-        "running": bool(st.get("running")),
+        "running": running,
+        "run_phase": st.get("run_phase") or "",
+        "run_started_at": st.get("run_started_at") or "",
         "last_run": st.get("last_run") or "",
+        "next_run": next_run_iso(st),
         "last_count": st.get("last_count") or 0,
         "last_error": st.get("last_error") or "",
         "last_status": st.get("last_status") or "not_run",
         "source_results": st.get("source_results") or [],
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
-        "notice": "默认持续自动监测宽范围 AI 安全情报；手动按钮仅用于立即刷新一轮。",
+        "notice": "默认每 15 分钟同步有效情报及变更，可手动立即刷新；实际来源时效另行统计。",
     }
 
 
@@ -567,58 +1014,67 @@ def health():
             "processing": state(), "last_sync": monitor.get("last_run", "")}
 
 
+@app.post("/api/monitor/b-cycle")
+def monitor_b_cycle():
+    from api.b_monitor import run_b_monitor_cycle
+    return run_b_monitor_cycle()
+
+
 @app.post("/api/monitor/run")
 def monitor_run(body: MonitorRunBody):
-    """Manual refresh of the automatic monitor cycle (broad AI-security by default)."""
+    """Immediate refresh with durable checkpoints and explicit partial/failure state."""
+    from automation.schedule import mark_phase, mark_running, mark_run
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
-    team = _team_reachable_probe()
-    warnings = []
-    if not team.get("reachable"):
-        warnings.append("团队情报服务暂不可达；旧数据保留，增量同步将在下轮重试。")
+    mark_running(phase="准备同步", keyword=keyword)
+    warnings, library, b_cycle = [], None, None
     try:
-        result = run_collect(keyword)
-    except Exception as exc:
-        from automation.schedule import mark_run
-        mark_run(keyword=keyword, error=type(exc).__name__, status="failed")
-        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
-    try:
-        from automation.schedule import mark_run
-        mark_run(count=result.get("fetched", 0), keyword=keyword,
-                 error="部分情报来源失败" if result.get("status") == "partial" else "",
-                 status=result.get("status", "success"), source_results=result.get("source_results", []))
-    except Exception:
-        pass
-    library = None
-    if body.sync_library:
+        from api.b_embed import embed_enabled
+        from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
+        if embed_enabled() and b_monitor_on_refresh():
+            mark_phase("刷新多源采集")
+            b_cycle = run_b_monitor_cycle()
+        team = _team_reachable_probe()
         if not team.get("reachable"):
-            library = {"status": "skipped", "error": "team unreachable"}
-            warnings.append("已跳过团队资料同步。")
-        else:
+            warnings.append("多源情报暂不可用；已有数据保留，增量游标不前移。")
+        mark_phase("同步全部有效 AI 情报及变更")
+        result = run_collect(keyword)
+        if body.sync_library:
             try:
-                from rag.library import sync_team
-                library = sync_team(max_documents=body.max_documents)
-            except ValueError as exc:
-                library = {"status": "busy", "error": str(exc)}
+                mark_phase("同步知识资料")
+                from rag.library import sync_team_drain
+                library = sync_team_drain(max_documents=body.max_documents)
+                if library.get("status") in {"partial", "error", "busy"}:
+                    warnings.append("部分资料仍待同步，下一轮将从已保存的进度继续。")
             except Exception as exc:
                 library = {"status": "error", "error": type(exc).__name__}
-                warnings.append("团队资料同步失败，CVE/公开源结果仍已刷新。")
-    team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
-                      for s in (result.get("steps") or []))
-    if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
-        warnings.append("团队情报源本轮失败，旧数据保留，游标未推进。")
-    return {
-        "mode": "auto",
-        "keyword": keyword,
-        "count": len(result["records"]),
-        "fetched": result.get("fetched", 0),
-        "status": result.get("status", "success"),
-        "steps": result["steps"],
-        "library_sync": library,
-        "team": team,
-        "warnings": warnings,
-        "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮按 AI 安全范围采集 CVE，并尽力同步非 CVE 资料；列表见 /api/monitor/feed。",
-    }
+                warnings.append("资料同步失败，已保存的情报和进度保留。")
+        status = result.get("status", "success")
+        if warnings or (b_cycle and b_cycle.get("status") in {"failed", "timeout", "partial"}):
+            status = "partial"
+        mark_run(count=result.get("fetched", 0), keyword=keyword, status=status,
+                 source_results=result.get("source_results", []),
+                 error="部分来源或资料未同步完成" if status == "partial" else "")
+    except Exception as exc:
+        mark_run(keyword=keyword, error=type(exc).__name__, status="failed")
+        raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc) from None
+    diagnostics = {}
+    for row in result.get("source_results", []):
+        key = {"B": "b_team", "NVD": "nvd", "OSV": "osv"}.get(row["source"], row["source"])
+        diagnostics[key] = {"status": "成功" if row["status"] == "success" else "失败",
+                            "detail": "本轮接收 %d 条" % row.get("fetched", 0)}
+    for key in ("nvd", "osv"):
+        diagnostics.setdefault(key, {"status": "未跑", "detail": "使用 B 的统一分类结果"})
+    diagnostics["b_monitor"] = {"status": (b_cycle or {}).get("status", "未请求"),
+                                "detail": "采集器由部署配置决定是否在本进程启动"}
+    diagnostics["c_library_sync"] = {"status": "未请求" if library is None else
+        "成功" if library.get("status") == "ok" else "部分", "detail": (library or {}).get("error", "")}
+    diagnostics["written"] = result.get("fetched", 0)
+    return {"mode": "auto", "keyword": keyword, "count": len(result["records"]),
+            "fetched": result.get("fetched", 0), "status": status, "steps": result["steps"],
+            "library_sync": library, "team": team, "b_monitor": b_cycle,
+            "warnings": warnings, "source_diag": diagnostics,
+            "items": [_summary(record) for record in result["records"][:10]],
+            "notice": "有效情报和变更已同步；富化及索引由持久任务队列继续处理。"}
 
 
 @app.post("/api/collect")
@@ -715,7 +1171,11 @@ def library_full_text(document_id: str):
 def library_ask(body: LibraryAskBody):
     from agents.library_qa import run
     try:
-        return run(body.question, document_ids=body.document_ids, document_type=body.document_type, use_model=body.use_model)
+        options = {"document_ids": body.document_ids, "document_type": body.document_type,
+                   "use_model": body.use_model}
+        if body.mode == "reasoning":
+            options["mode"] = body.mode
+        return run(body.question, **options)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -829,6 +1289,45 @@ def test_settings():
 @app.get("/")
 def index():
     return FileResponse(os.path.join(WEB, "index.html"))
+
+
+# Secure Actions → deploy ingest (must NOT live under /api/intelligence — that is B).
+from api.actions_ingest import router as actions_ingest_router  # noqa: E402
+
+app.include_router(actions_ingest_router)
+
+# --- B integration on :8023 ---
+# Default: ASGI-embed B in this process (TEAM_INTEL_MODE=embed).
+# Legacy: TEAM_INTEL_MODE=sidecar keeps HTTP reverse-proxy to :8765.
+from api.b_embed import EmbedBMiddleware, embed_enabled, sidecar_enabled  # noqa: E402
+from api.b_proxy import forward_async  # noqa: E402
+
+if embed_enabled():
+    app.add_middleware(EmbedBMiddleware)
+elif sidecar_enabled():
+    @app.get("/api/team/changes")
+    async def _proxy_team_changes(request: Request):
+        return await forward_async(request, "/api/team/changes")
+
+    @app.api_route("/api/intelligence", methods=["GET", "HEAD", "OPTIONS"])
+    async def _proxy_intelligence_root(request: Request):
+        return await forward_async(request, "/api/intelligence")
+
+    @app.api_route("/api/intelligence/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+    async def _proxy_intelligence(path: str, request: Request):
+        return await forward_async(request, "/api/intelligence/" + path)
+
+    @app.get("/api/documents/stats")
+    async def _proxy_documents_stats(request: Request):
+        return await forward_async(request, "/api/documents/stats")
+
+    @app.get("/api/documents/{document_id}")
+    async def _proxy_documents_one(document_id: str, request: Request):
+        return await forward_async(request, "/api/documents/" + document_id)
+
+    @app.get("/api/documents")
+    async def _proxy_documents_list(request: Request):
+        return await forward_async(request, "/api/documents")
 
 
 app.mount("/assets", StaticFiles(directory=WEB), name="assets")

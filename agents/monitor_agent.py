@@ -1,13 +1,8 @@
-"""A 监测智能体：NVD + OSV + 团队情报（B）。
-
-默认主关键词为 llm（不再只盯 ollama）。
-逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-团队情报对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
-"""
+"""同步 B 的全部有效 AI 变更；可选直采使用同一范围规则。"""
 import os
 from dataclasses import asdict
 
-from collectors.intelligence import IncrementalIntelligenceCollector, team_base_url
+from collectors.intelligence import IncrementalIntelligenceCollector
 from collectors.nvd import NVDCollector
 from collectors.osv import OSVCollector
 
@@ -98,7 +93,7 @@ def run(keyword="llm"):
             sources.append({"source": name, "status": "failed" if failed else "success",
                             "fetched": len(raw), "accepted": len(selected)})
     try:
-        changes = IncrementalIntelligenceCollector(base_url=team_base_url(), timeout=10).collect()
+        changes = IncrementalIntelligenceCollector(timeout=10).collect()
         items.extend(changes["items"])
         steps.append({"role": "监测", "action": "同步团队情报服务全部有效 AI 变更",
                       "detail": "接收 %d 条，撤回 %d 条；保存成功后才提交持久游标。" %

@@ -67,6 +67,8 @@ def ensure_state():
         data.setdefault("last_count", 0)
         data.setdefault("last_keyword", "")
         data.setdefault("running", False)
+        data.setdefault("run_phase", "")
+        data.setdefault("run_started_at", "")
         data.setdefault("mode", "automatic")
         _write_state(data)
         return data
@@ -123,7 +125,25 @@ def _patch_state(**values):
 def mark_run(*, count=0, keyword="", error="", status=None, source_results=None):
     return _patch_state(last_run=_now(), last_count=int(count or 0), last_keyword=keyword,
                         last_error=error, last_status=status or ("partial" if error else "success"),
-                        source_results=source_results or [], running=False)
+                        source_results=source_results or [], running=False, run_phase="", run_started_at="")
+
+
+def mark_running(*, phase="starting", keyword=""):
+    return _patch_state(running=True, run_phase=phase[:80], run_started_at=_now(),
+                        last_keyword=keyword or ensure_state().get("last_keyword", ""))
+
+
+def mark_phase(phase):
+    return _patch_state(run_phase=(phase or "")[:80])
+
+
+def next_run_iso(data=None):
+    from datetime import timedelta
+    data = data or ensure_state()
+    last = parse_stamp(data.get("last_run"))
+    if not last:
+        return ""
+    return (last + timedelta(minutes=float(data.get("interval_minutes") or INTERVAL_MINUTES))).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def run_once(keyword=None):
@@ -134,7 +154,7 @@ def run_once(keyword=None):
         return dict(ensure_state(), skipped="overlapping_cycle")
     collect_error = None
     try:
-        _patch_state(running=True)
+        mark_running(phase="同步多源有效情报", keyword=keyword)
         try:
             result = run_collect(keyword)
             _patch_state(last_run=_now(), last_count=result.get("fetched", 0),
@@ -159,7 +179,7 @@ def run_once(keyword=None):
             raise collect_error
         return ensure_state()
     finally:
-        _patch_state(running=False)
+        _patch_state(running=False, run_phase="", run_started_at="")
         _RUN_LOCK.release()
 
 

@@ -23,10 +23,6 @@ for name in b.pid main.pid; do
     rm -f "$DEMO_DIR/$name"
   fi
 done
-# Best-effort free fixed ports
-if command -v fuser >/dev/null 2>&1; then
-  fuser -k "${B_PORT}/tcp" 2>/dev/null || true
-  fuser -k "${MAIN_PORT}/tcp" 2>/dev/null || true
-fi
+# Only stop processes recorded by this demo; a shared port may belong to production.
 rm -f "$DEMO_DIR/mode"
 log "demo stopped"

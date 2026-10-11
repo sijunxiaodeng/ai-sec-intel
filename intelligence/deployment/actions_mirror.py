@@ -10,6 +10,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -20,10 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from .actions_state import ARTIFACT_PREFIX, GitHubClient, StateError, restore_archive
+    from .actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive
     from .state_role import claim_role
 except ImportError:  # Direct script invocation in the B container.
-    from actions_state import ARTIFACT_PREFIX, GitHubClient, StateError, restore_archive
+    from actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive
     from state_role import claim_role
 
 
@@ -87,65 +88,92 @@ def latest_snapshot(client, *, workflow="intelligence-collect.yml", branch="main
     raise StateError("No trusted completed collector snapshot is available")
 
 
-def deliver_latest(client, directory, *, workflow="intelligence-collect.yml", branch="main"):
+def install_snapshot(payload, directory, *, repository, branch, run_id,
+                     workflow="intelligence-collect.yml", collector_commit=None,
+                     run_number=None, source="authenticated-ingest"):
+    """Validate one generation and atomically publish it; never replace live DBs.
+
+    Pull binds provenance to GitHub metadata. HTTP push binds it to the configured
+    repository plus authenticated sender, and requires the same manifest lineage.
+    A separate publication lock serializes push, CLI installs and mirror polling.
+    """
     if branch != "main":
         raise StateError("Deployment mirrors consume only the main branch")
+    if len(payload) > MAX_SNAPSHOT_BYTES:
+        raise StateError("Snapshot exceeds size limit")
     directory = Path(directory).absolute()
     claim_role(directory, "actions-mirror")
+    with (directory / ".publication.lock").open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = directory / "current"
+        if current.exists() and not current.is_symlink():
+            raise StateError("Current generation must be a managed symlink")
+        previous = current.resolve() if current.is_symlink() else None
+        snapshots = directory / "snapshots"
+        snapshots.mkdir(exist_ok=True)
+        if previous and (previous.parent != snapshots.resolve() or not previous.is_dir()):
+            raise StateError("Current generation points outside the managed snapshots")
+        previous_manifest = _read_json(previous / "manifest.json") if previous else None
+        with tempfile.TemporaryDirectory(prefix=".incoming-", dir=directory) as temporary:
+            staged = Path(temporary) / "state"
+            manifest = restore_archive(payload, staged, repository=repository,
+                                       branch=branch, run_id=run_id)
+            if (manifest.get("workflow") != workflow
+                    or not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("collector_commit", "")))
+                    or type(manifest.get("run_number")) is not int
+                    or manifest["run_number"] <= 0):
+                raise StateError("Snapshot code/workflow lineage is absent or invalid")
+            if ((collector_commit is not None and manifest["collector_commit"] != collector_commit)
+                    or (run_number is not None and manifest["run_number"] != run_number)):
+                raise StateError("Snapshot code/workflow lineage does not match the verified main run")
+            result = {"run_id": int(run_id), "run_number": manifest["run_number"],
+                      "collector_commit": manifest["collector_commit"], "repository": repository,
+                      "branch": branch, "workflow": workflow, "source": source,
+                      "synced_at": datetime.now(timezone.utc).isoformat()}
+            if previous_manifest:
+                if (previous_manifest.get("repository") != repository
+                        or previous_manifest.get("branch") != branch
+                        or previous_manifest.get("workflow") != workflow):
+                    raise StateError("The existing mirror belongs to another data lineage")
+                if manifest["run_number"] < previous_manifest["run_number"]:
+                    raise StateError("Incoming workflow run would roll back the deployed data lineage")
+                if manifest["run_number"] == previous_manifest["run_number"]:
+                    if (manifest != previous_manifest):
+                        raise StateError("Workflow run identity or contents conflict with the deployed lineage")
+                    return {"changed": False, **result}
+                verify_history(previous, staged)
+            (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            target = snapshots / str(int(run_id))
+            if target.exists():
+                if previous and target.resolve() == previous:
+                    raise StateError("A conflicting active snapshot generation exists")
+                target.chmod(0o755)
+                shutil.rmtree(target)
+            staged.replace(target)
+            for path in target.iterdir():
+                path.chmod(0o444)
+            target.chmod(0o555)
+            temporary_link = directory / ".current-next"
+            temporary_link.unlink(missing_ok=True)
+            temporary_link.symlink_to(Path("snapshots") / str(int(run_id)), target_is_directory=True)
+            temporary_link.replace(current)
+        generations = sorted((path for path in snapshots.iterdir() if path.is_dir() and path.name.isdigit()),
+                             key=lambda path: int(_read_json(path / "manifest.json")["run_number"]), reverse=True)
+        for old in generations[8:]:
+            old.chmod(0o755)
+            shutil.rmtree(old)
+        return {"changed": True, **result}
+
+
+def deliver_latest(client, directory, *, workflow="intelligence-collect.yml", branch="main"):
     run, artifact = latest_snapshot(client, workflow=workflow, branch=branch)
-    current = directory / "current"
-    result = {"run_id": run["id"], "run_number": run["run_number"],
-              "artifact_id": artifact["id"], "collector_commit": run.get("head_sha"),
-              "source_run_completed_at": run.get("updated_at"),
-              "repository": client.repository, "branch": branch, "workflow": workflow}
-    previous = current.resolve() if current.is_symlink() else None
-    previous_manifest = _read_json(previous / "manifest.json") if previous else None
-    if previous_manifest:
-        if previous_manifest.get("repository") != client.repository or previous_manifest.get("workflow") != workflow:
-            raise StateError("The existing mirror belongs to another data lineage")
-        if int(run["run_number"]) < int(previous_manifest["run_number"]):
-            raise StateError("Incoming workflow run would roll back the deployed data lineage")
-        if int(run["run_number"]) == int(previous_manifest["run_number"]):
-            if int(previous_manifest["run_id"]) != int(run["id"]):
-                raise StateError("Workflow run identity conflicts with the deployed lineage")
-            return {"changed": False, **result}
-    snapshots = directory / "snapshots"
-    snapshots.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".incoming-", dir=directory) as temporary:
-        staged = Path(temporary) / "state"
-        manifest = restore_archive(client.download(artifact["id"]), staged,
-                                   repository=client.repository, branch=branch, run_id=run["id"])
-        if (manifest.get("workflow") != workflow or manifest.get("collector_commit") != run.get("head_sha")
-                or manifest.get("run_number") != run.get("run_number")):
-            raise StateError("Snapshot code/workflow lineage is absent or does not match the verified main run")
-        (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        if previous:
-            verify_history(previous, staged)
-        target = snapshots / str(run["id"])
-        if target.exists():
-            # A crash after staging but before symlink publication can leave an
-            # orphan. Rebuild only that unreferenced generation from the freshly
-            # verified download; never remove the currently served generation.
-            if previous and target == previous:
-                raise StateError("A conflicting active snapshot generation exists")
-            target.chmod(0o755)
-            shutil.rmtree(target)
-        staged.replace(target)
-        # Snapshots are immutable. API reads are mode=ro and never migrate them.
-        for path in target.iterdir():
-            path.chmod(0o444)
-        target.chmod(0o555)
-        temporary_link = directory / ".current-next"
-        temporary_link.unlink(missing_ok=True)
-        temporary_link.symlink_to(Path("snapshots") / str(run["id"]), target_is_directory=True)
-        temporary_link.replace(current)
-    # Bound local disk use. A failed validation never reaches this cleanup.
-    generations = sorted((path for path in snapshots.iterdir() if path.is_dir() and path.name.isdigit()),
-                         key=lambda path: int(_read_json(path / "manifest.json")["run_number"]), reverse=True)
-    for old in generations[8:]:
-        old.chmod(0o755)
-        shutil.rmtree(old)
-    return {"changed": True, **result}
+    result = install_snapshot(client.download(artifact["id"]), directory,
+                              repository=client.repository, branch=branch, run_id=run["id"],
+                              workflow=workflow, collector_commit=run.get("head_sha"),
+                              run_number=run.get("run_number"), source="github-artifact")
+    return {**result, "artifact_id": artifact["id"],
+            "artifact_name": artifact.get("name"), "workflow_run_url": run.get("html_url"),
+            "source_run_completed_at": run.get("updated_at")}
 
 
 def record_status(directory, **status):
