@@ -816,9 +816,9 @@ def monitor_feed(q: str = "", kind: str = "all"):
         "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
         "mix_note": (
             "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
-            "未接线的外部媒体不会伪造进流。"
+            "类型/分类与来源分两维看；聚合采集=本系统多路采集，不是第二端口。"
             if doc_items else
-            "当前几乎只有漏洞条目——请先跑多源采集或同步资料库，资料类才会进入监测流。"
+            "当前几乎只有漏洞条目——请先跑多路采集或同步资料库，资料类才会进入监测流。"
         ),
     }
 

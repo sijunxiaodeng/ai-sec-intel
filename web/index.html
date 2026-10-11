@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 安全知识情报</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20261011-feedmix1" />
+  <link rel="stylesheet" href="/assets/styles.css?v=20261011-taxonomy1" />
 </head>
 <body>
   <div class="shell">
@@ -156,21 +156,35 @@
         </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
-        <aside class="source-legend" aria-label="来源说明">
+        <aside class="source-legend" aria-label="监测维度说明">
           <header class="panel-head">
-            <h2>来源</h2>
-            <p class="hint">直连：NVD / OSV（多 AI 组件包，限单包条数）。多源另有漏洞库、厂商公告、博客、论文、社区、标准/政策等；刷新时会尽力同步公开资料进监测流。未接线的外部媒体不会出现。</p>
+            <h2>怎么读情报流</h2>
+            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。「多路采集」= 本系统自己并行跑多路采集器，不是另一个产品，也不是第二个端口。</p>
           </header>
-          <ul class="source-list">
-            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库（宽范围 AI 关键词 + 近 30/90 天变更窗）</li>
-            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（vLLM / Transformers / LangChain / Ollama 等包集合）</li>
-            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 厂商公告（经多源库）</li>
-            <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录（经多源 / 富集）</li>
-            <li><span class="src-tag src-team">多源</span> 多源情报（漏洞与资料同库）</li>
-            <li><span class="src-tag src-lib">资料库</span> 公开订阅与沉淀资料</li>
-            <li><span class="src-tag src-paper">论文</span> arXiv 等学术论文</li>
-            <li><span class="src-tag src-comm">社区</span> 安全社区 / 研究博客</li>
-          </ul>
+          <div class="tax-grid">
+            <div>
+              <h3 class="tax-title">类型 / 分类</h3>
+              <ul class="source-list">
+                <li><span class="src-tag src-nvd">漏洞</span> CVE 条目（NVD / OSV / Advisory 等采入）</li>
+                <li><span class="src-tag src-paper">论文</span> 学术论文等资料</li>
+                <li><span class="src-tag src-comm">社区/博客</span> 安全社区与研究文章</li>
+                <li><span class="src-tag src-gh">厂商公告</span> 项目安全公告 / 厂商指引</li>
+                <li><span class="src-tag src-lib">标准/政策</span> 标准、框架、政策法规</li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="tax-title">来源（公开目录 / 采集器）</h3>
+              <ul class="source-list">
+                <li><span class="src-tag src-nvd">NVD</span> 国家漏洞库（本机直连）</li>
+                <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（本机直连）</li>
+                <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 项目公告</li>
+                <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
+                <li><span class="src-tag src-team">聚合采集</span> 本系统多路采集写入的本地库（非外队）</li>
+                <li><span class="src-tag src-lib">资料库沉淀</span> 公开订阅或采集摘要落入本机资料库</li>
+              </ul>
+            </div>
+          </div>
+          <p class="hint tax-foot">对外只开 <strong>:8023</strong> 一个进程。端口不等于来源；旧的双端口只是过渡部署方式。</p>
         </aside>
 
         <details class="filter-drawer" id="monitor-filter-drawer">
@@ -188,25 +202,38 @@
         <div class="panel">
           <div class="panel-head">
             <h2>情报流</h2>
-            <div class="chip-row" id="monitor-scope">
-              <button type="button" class="chip is-on" data-monitor-scope="all">全部类型</button>
-              <button type="button" class="chip" data-monitor-scope="cve">仅 CVE</button>
-              <button type="button" class="chip" data-monitor-scope="document">仅资料</button>
-              <button type="button" class="chip" data-monitor-scope="live">联网</button>
-              <button type="button" class="chip" data-monitor-scope="demo">演示</button>
+          </div>
+          <div class="filter-block">
+            <p class="filter-label">类型（这条是什么形态）</p>
+            <div class="chip-row" id="monitor-scope" aria-label="按类型筛选">
+              <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
+              <button type="button" class="chip" data-monitor-scope="cve">漏洞 CVE</button>
+              <button type="button" class="chip" data-monitor-scope="document">资料</button>
+              <button type="button" class="chip" data-monitor-scope="live">联网采集</button>
+              <button type="button" class="chip" data-monitor-scope="demo">演示数据</button>
             </div>
           </div>
-          <div class="chip-row source-chips" id="monitor-source-filter" aria-label="按来源筛选">
-            <button type="button" class="chip is-on" data-source-filter="all">全部来源</button>
-            <button type="button" class="chip" data-source-filter="nvd">NVD</button>
-            <button type="button" class="chip" data-source-filter="osv">OSV</button>
-            <button type="button" class="chip" data-source-filter="github">GitHub</button>
-            <button type="button" class="chip" data-source-filter="kev">KEV</button>
-            <button type="button" class="chip" data-source-filter="vendor">厂商公告</button>
-            <button type="button" class="chip" data-source-filter="team">多源</button>
-            <button type="button" class="chip" data-source-filter="library">资料库</button>
-            <button type="button" class="chip" data-source-filter="paper">论文</button>
-            <button type="button" class="chip" data-source-filter="community">社区</button>
+          <div class="filter-block">
+            <p class="filter-label">分类（资料内容类别；与来源无关）</p>
+            <div class="chip-row" id="monitor-category-filter" aria-label="按内容分类筛选">
+              <button type="button" class="chip is-on" data-category-filter="all">全部分类</button>
+              <button type="button" class="chip" data-category-filter="vendor">厂商公告</button>
+              <button type="button" class="chip" data-category-filter="paper">论文</button>
+              <button type="button" class="chip" data-category-filter="community">社区/博客</button>
+              <button type="button" class="chip" data-category-filter="standard">标准/政策</button>
+            </div>
+          </div>
+          <div class="filter-block">
+            <p class="filter-label">来源（从哪个公开目录 / 采集器来）</p>
+            <div class="chip-row source-chips" id="monitor-source-filter" aria-label="按来源筛选">
+              <button type="button" class="chip is-on" data-source-filter="all">全部来源</button>
+              <button type="button" class="chip" data-source-filter="nvd">NVD</button>
+              <button type="button" class="chip" data-source-filter="osv">OSV</button>
+              <button type="button" class="chip" data-source-filter="github">GitHub</button>
+              <button type="button" class="chip" data-source-filter="kev">CISA KEV</button>
+              <button type="button" class="chip" data-source-filter="aggregate">聚合采集</button>
+              <button type="button" class="chip" data-source-filter="library">资料库沉淀</button>
+            </div>
           </div>
           <p id="monitor-summary" class="hint"></p>
           <p id="monitor-mix" class="hint"></p>
@@ -425,6 +452,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-feedmix1"></script>
+  <script src="/assets/app.js?v=20261011-taxonomy1"></script>
 </body>
 </html>

@@ -162,19 +162,20 @@ function setBusyButton(button, busy, busyLabel, idleLabel) {
   }
 }
 
-/** Map raw source ids to product labels / filter families (not A/B/C). */
+/** Origin family = where collected from (not content category). No A/B/C labels. */
 function sourceFamily(raw) {
   var s = String(raw || "").toUpperCase();
   if (!s) return "other";
   if (s === "NVD" || s.indexOf("NVD") === 0) return "nvd";
   if (s === "OSV" || s.indexOf("OSV") === 0) return "osv";
-  if (s.indexOf("VENDOR") >= 0 || s.indexOf("ADVISORY") >= 0) return "vendor";
-  if (s.indexOf("GITHUB") >= 0 || s.indexOf("GHSA") >= 0) return "github";
   if (s.indexOf("CISA") >= 0 || s.indexOf("KEV") >= 0) return "kev";
-  if (s.indexOf("TEAM") >= 0 || s.indexOf("INTELLIGENCE") >= 0) return "team";
-  if (s.indexOf("ARXIV") >= 0 || s.indexOf("PAPER") >= 0 || s.indexOf("ACADEMIC") >= 0) return "paper";
-  if (s.indexOf("HF_") >= 0 || s.indexOf("COMMUNITY") >= 0 || s.indexOf("BLOG") >= 0 || s.indexOf("TRAIL") >= 0) return "community";
-  if (s.indexOf("LIBRARY") >= 0 || s.indexOf("NIST") >= 0 || s.indexOf("FEDERAL") >= 0 || s.indexOf("POLICY") >= 0 || s.indexOf("STANDARD") >= 0) return "library";
+  if (s.indexOf("GITHUB") >= 0 || s.indexOf("GHSA") >= 0) return "github";
+  if (s.indexOf("AGGREGATE") >= 0 || s.indexOf("TEAM") >= 0 || s.indexOf("INTELLIGENCE") >= 0) return "aggregate";
+  if (s.indexOf("LIBRARY") >= 0) return "library";
+  // Collector ids that land via our aggregate multi-collector DB.
+  if (s.indexOf("ARXIV") >= 0 || s.indexOf("TRAIL") >= 0 || s.indexOf("HF_") >= 0
+      || s.indexOf("VENDOR") >= 0 || s.indexOf("NIST") >= 0 || s.indexOf("FEDERAL") >= 0
+      || s.indexOf("ADVISORY") >= 0) return "aggregate";
   return "other";
 }
 
@@ -183,12 +184,9 @@ function sourceLabel(raw) {
     nvd: "NVD",
     osv: "OSV",
     github: "GitHub Advisory",
-    vendor: "厂商公告",
     kev: "CISA KEV",
-    team: "多源情报",
-    library: "资料库",
-    paper: "论文",
-    community: "安全社区",
+    aggregate: "聚合采集",
+    library: "资料库沉淀",
     other: "其他"
   };
   var fam = sourceFamily(raw);
@@ -197,11 +195,25 @@ function sourceLabel(raw) {
   return s || "来源未写明";
 }
 
+/** Content category = what kind of intel (orthogonal to origin). */
+function contentCategory(item) {
+  if (!item) return "other";
+  if (item.kind !== "document") return "cve";
+  var cat = String(item.category || item.category_label || item.content_type || "").toLowerCase();
+  if (cat.indexOf("vendor") >= 0 || cat.indexOf("厂商") >= 0 || cat.indexOf("advisory") >= 0 || cat.indexOf("guidance") >= 0) return "vendor";
+  if (cat.indexOf("paper") >= 0 || cat.indexOf("academic") >= 0 || cat.indexOf("学术") >= 0 || cat.indexOf("论文") >= 0) return "paper";
+  if (cat.indexOf("community") >= 0 || cat.indexOf("blog") >= 0 || cat.indexOf("research") >= 0
+      || cat.indexOf("社区") >= 0 || cat.indexOf("博客") >= 0 || cat.indexOf("研究") >= 0) return "community";
+  if (cat.indexOf("standard") >= 0 || cat.indexOf("policy") >= 0 || cat.indexOf("标准") >= 0
+      || cat.indexOf("政策") >= 0 || cat.indexOf("regulation") >= 0) return "standard";
+  return "other";
+}
+
 function itemSourceLabels(item) {
   var raws = (item && item.sources) || [];
   if (!raws.length && item) {
     if (item.source) raws = [item.source];
-    else if (item.origin === "team_documents") raws = ["TEAM"];
+    else if (item.origin === "team_documents") raws = ["AGGREGATE"];
     else if (item.origin === "library") raws = ["LIBRARY"];
   }
   var labels = [];
@@ -210,28 +222,38 @@ function itemSourceLabels(item) {
     var label = sourceLabel(r);
     if (!seen[label]) { seen[label] = true; labels.push(label); }
   });
-  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["多源情报"]) {
-    labels.unshift("多源情报");
+  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["聚合采集"]) {
+    labels.unshift("聚合采集");
+  }
+  if (item && item.kind === "document" && item.origin === "library" && !seen["资料库沉淀"]) {
+    labels.unshift("资料库沉淀");
   }
   return labels.length ? labels : ["来源未写明"];
 }
 
+function itemMatchesCategoryFilter(item, filter) {
+  if (!filter || filter === "all") return true;
+  var cat = contentCategory(item);
+  if (filter === "vendor" || filter === "paper" || filter === "community" || filter === "standard") {
+    return cat === filter;
+  }
+  return true;
+}
+
 function itemMatchesSourceFilter(item, filter) {
   if (!filter || filter === "all") return true;
-  if (item.origin === "team_documents" && filter === "team") return true;
+  // Legacy chip ids from older UI → map to origin families.
+  if (filter === "team") filter = "aggregate";
+  if (filter === "vendor" || filter === "paper" || filter === "community") {
+    // Old builds mixed category into source chips; keep working if bookmarked.
+    return itemMatchesCategoryFilter(item, filter);
+  }
+  if (item.origin === "team_documents" && filter === "aggregate") return true;
   if (item.origin === "library" && filter === "library") return true;
-  var cat = String(item.category || item.category_label || item.content_type || "").toLowerCase();
-  if (filter === "vendor" && (
-    cat.indexOf("vendor") >= 0 || cat.indexOf("厂商") >= 0 || cat.indexOf("advisory") >= 0
-  )) return true;
   var raws = (item.sources || []).concat(item.source ? [item.source] : []);
   if (!raws.length && item.kind === "document") {
-    if (filter === "paper" || filter === "community" || filter === "library" || filter === "team" || filter === "vendor") {
-      if (filter === "paper" && (cat.indexOf("paper") >= 0 || cat.indexOf("学术") >= 0 || cat.indexOf("academic") >= 0)) return true;
-      if (filter === "community" && (cat.indexOf("community") >= 0 || cat.indexOf("blog") >= 0 || cat.indexOf("社区") >= 0 || cat.indexOf("研究") >= 0)) return true;
-      if (filter === "vendor" && (cat.indexOf("vendor") >= 0 || cat.indexOf("厂商") >= 0 || cat.indexOf("advisory") >= 0)) return true;
-      if (filter === "library") return true;
-    }
+    if (filter === "aggregate" && item.origin === "team_documents") return true;
+    if (filter === "library" && item.origin === "library") return true;
   }
   return raws.some(function (r) { return sourceFamily(r) === filter; });
 }
@@ -347,10 +369,8 @@ function renderItemRow(parent, item, onPick) {
     else if (label === "OSV") fam = "osv";
     else if (label.indexOf("GitHub") === 0) fam = "gh";
     else if (label.indexOf("KEV") >= 0) fam = "kev";
-    else if (label.indexOf("多源") >= 0) fam = "team";
-    else if (label.indexOf("资料") >= 0) fam = "lib";
-    else if (label.indexOf("论文") >= 0) fam = "paper";
-    else if (label.indexOf("社区") >= 0) fam = "comm";
+    else if (label.indexOf("聚合") >= 0 || label.indexOf("多源") >= 0) fam = "team";
+    else if (label.indexOf("资料库") >= 0 || label.indexOf("沉淀") >= 0) fam = "lib";
     add(srcWrap, "span", "src-tag src-" + fam, label);
   });
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
@@ -402,13 +422,13 @@ function setTeamHealth(team) {
     var err = team.error || "";
     var hint;
     if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
-      hint = "请先生成多源库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
-    } else if (/多源资料探测失败|Connection refused|8765/i.test(err)) {
-      hint = "嵌入模式下应直读本机库，无需 :8765。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
+      hint = "请先生成聚合采集库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
+    } else if (/多源资料探测失败|聚合|Connection refused|8765/i.test(err)) {
+      hint = "嵌入模式下应直读本机库，无需第二端口。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
     } else {
-      hint = "仍会采集 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查多源库。";
+      hint = "仍会采集 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查聚合采集库。";
     }
-    el.textContent = "多源情报库暂不可用"
+    el.textContent = "聚合采集库暂不可用"
       + (err ? "：" + err : "")
       + "。" + hint;
   } else {
@@ -453,7 +473,7 @@ function renderMonitorLive(data, opts) {
     if (phaseEl) {
       phaseEl.textContent = phase
         ? ("当前步骤：" + phase)
-        : "正在跑一轮（多源采集 → NVD/OSV 入库 → 可选资料同步）…";
+        : "正在跑一轮（多路采集 → NVD/OSV 入库 → 可选资料同步）…";
     }
   } else {
     stateEl.textContent = "空闲";
@@ -527,7 +547,7 @@ function loadOverview() {
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源情报 CVE"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "聚合采集 CVE"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
@@ -553,8 +573,27 @@ function loadOverview() {
 }
 
 var monitorScope = "all";
+var monitorCategoryFilter = "all";
 var monitorSourceFilter = "all";
 var lastMonitorFeed = null;
+
+var CATEGORY_FILTER_LABELS = {
+  all: "全部分类",
+  vendor: "厂商公告",
+  paper: "论文",
+  community: "社区/博客",
+  standard: "标准/政策"
+};
+var SOURCE_FILTER_LABELS = {
+  all: "全部来源",
+  nvd: "NVD",
+  osv: "OSV",
+  github: "GitHub",
+  kev: "CISA KEV",
+  aggregate: "聚合采集",
+  library: "资料库沉淀",
+  team: "聚合采集"
+};
 
 function setMonitorScope(scope) {
   monitorScope = scope || "all";
@@ -570,6 +609,17 @@ function setMonitorScope(scope) {
   loadItems("monitor");
 }
 window.setMonitorScope = setMonitorScope;
+
+function setMonitorCategoryFilter(filter) {
+  monitorCategoryFilter = filter || "all";
+  listPages.monitor = 1;
+  document.querySelectorAll("[data-category-filter]").forEach(function (node) {
+    node.className = node.getAttribute("data-category-filter") === monitorCategoryFilter ? "chip is-on" : "chip";
+  });
+  if (lastMonitorFeed) renderMonitorFeed(lastMonitorFeed);
+  else loadItems("monitor");
+}
+window.setMonitorCategoryFilter = setMonitorCategoryFilter;
 
 function setMonitorSourceFilter(filter) {
   monitorSourceFilter = filter || "all";
@@ -600,7 +650,8 @@ function renderMonitorFeed(data) {
   clear(target);
   var allItems = data.items || [];
   var items = allItems.filter(function (item) {
-    return itemMatchesSourceFilter(item, monitorSourceFilter);
+    return itemMatchesCategoryFilter(item, monitorCategoryFilter)
+      && itemMatchesSourceFilter(item, monitorSourceFilter);
   });
   var counts = data.counts || {};
   var summary = $("monitor-summary");
@@ -609,18 +660,25 @@ function renderMonitorFeed(data) {
   if (teamMeta.reachable === false) {
     setTeamHealth({
       reachable: false,
-      error: teamMeta.error || "多源资料探测失败",
+      error: teamMeta.error || "聚合采集资料探测失败",
     });
   }
   if (summary) {
-    summary.textContent = "共 CVE " + (counts.cve || 0)
+    var filterBits = [];
+    if (monitorCategoryFilter !== "all") {
+      filterBits.push("分类「" + (CATEGORY_FILTER_LABELS[monitorCategoryFilter] || monitorCategoryFilter) + "」");
+    }
+    if (monitorSourceFilter !== "all") {
+      filterBits.push("来源「" + (SOURCE_FILTER_LABELS[monitorSourceFilter] || monitorSourceFilter) + "」");
+    }
+    summary.textContent = "共漏洞 " + (counts.cve || 0)
       + " · 资料 " + (counts.document || 0)
-      + (teamTotal ? "（含多源资料 " + teamTotal + "）" : "")
-      + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
-      + "。漏洞与资料混排；监测是否最新看上方「最近更新」。";
+      + (teamTotal ? "（聚合采集资料 " + teamTotal + "）" : "")
+      + (filterBits.length ? " · " + filterBits.join(" + ") + " → 显示 " + items.length + " 条" : "")
+      + "。类型/分类与来源是两维；监测是否最新看上方「最近更新」。";
   }
   var mixEl = $("monitor-mix");
-  if (mixEl) {
+    if (mixEl) {
     var comp = data.composition || {};
     var byCat = comp.by_category || {};
     var byProd = comp.by_product || {};
@@ -632,7 +690,7 @@ function renderMonitorFeed(data) {
     });
     var ollamaShare = typeof comp.ollama_share === "number" ? Math.round(comp.ollama_share * 100) : null;
     var parts = [];
-    if (catBits.length) parts.push("资料类型：" + catBits.join("、"));
+    if (catBits.length) parts.push("分类：" + catBits.join("、"));
     if (prodBits.length) parts.push("组件：" + prodBits.join("、"));
     if (ollamaShare != null) parts.push("提及 Ollama 约 " + ollamaShare + "%");
     if (data.mix_note) parts.push(data.mix_note);
@@ -642,8 +700,8 @@ function renderMonitorFeed(data) {
   var query = monitorKeyword();
   if (!items.length) {
     var empty = add(target, "p", "empty", "");
-    if (monitorSourceFilter !== "all" && allItems.length) {
-      empty.textContent = "当前来源筛选下没有条目。可点「全部来源」查看完整情报流。";
+    if ((monitorCategoryFilter !== "all" || monitorSourceFilter !== "all") && allItems.length) {
+      empty.textContent = "当前分类/来源筛选下没有条目。可点「全部分类」与「全部来源」查看完整情报流。";
     } else if (query) {
       empty.textContent = "没有匹配「" + query + "」的条目。可清除关键词或换词后刷新。";
       var clearBtn = add(target, "button", "ghost", "清除关键词并显示全部");
@@ -713,7 +771,7 @@ function openMonitorDetail(item) {
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
       ["来源", itemSourceLabels(item).join("、")],
-      ["出处", item.origin === "team_documents" ? "多源情报" : "资料库"],
+      ["入库路径", item.origin === "team_documents" ? "聚合采集（本系统多路采集库）" : "资料库沉淀"],
       ["记录类型", item.demo ? "演示合成" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
@@ -1150,24 +1208,27 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("多源情报", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
-  srcLine("多源采集", diag.b_monitor);
+  srcLine("聚合采集库", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("多路采集周期", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
   if (diag.written === 0 || (runData && runData.count === 0)) {
     bits.push("本轮 CVE 入库 0");
   }
   if (team.reachable === false) {
-    bits.push("多源情报不可用时仍应有 NVD/OSV 与本地资料");
+    bits.push("聚合采集库不可用时仍应有 NVD/OSV 与本地资料");
   }
   if (teamDocs.reachable === false) {
-    bits.push("多源资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
+    bits.push("聚合采集资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
   }
   if (scope && scope !== "all") {
     bits.push("类型筛选=" + scope + "（可切回全部）");
+  }
+  if (monitorCategoryFilter && monitorCategoryFilter !== "all") {
+    bits.push("分类筛选=" + monitorCategoryFilter);
   }
   if (monitorSourceFilter && monitorSourceFilter !== "all") {
     bits.push("来源筛选=" + monitorSourceFilter);
@@ -1237,7 +1298,7 @@ function runMonitorRefresh(options) {
   clearError();
   var busyBase = keyword
     ? ("正在按「" + keyword + "」刷新监测，")
-    : "正在刷新一轮监测（多源 + NVD/OSV，可能需数十秒），";
+    : "正在刷新一轮监测（多路采集 + NVD/OSV，可能需数十秒），";
   startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",
@@ -1249,7 +1310,7 @@ function runMonitorRefresh(options) {
     var warns = data.warnings || [];
     var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
     setMonitorStatus("本轮完成：相关 " + (data.count || 0) + " 条"
-      + (bmon.status ? "；多源采集 " + bmon.status : "")
+      + (bmon.status ? "；多路采集 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
       + "。正在刷新情报流…");
     showToast("监测完成，正在刷新列表…", "busy");
@@ -1392,6 +1453,12 @@ document.addEventListener("click", function (event) {
   if (scopeBtn) {
     event.preventDefault();
     setMonitorScope(scopeBtn.getAttribute("data-monitor-scope") || "all");
+    return;
+  }
+  var catBtn = event.target && event.target.closest ? event.target.closest("[data-category-filter]") : null;
+  if (catBtn) {
+    event.preventDefault();
+    setMonitorCategoryFilter(catBtn.getAttribute("data-category-filter") || "all");
     return;
   }
   var srcBtn = event.target && event.target.closest ? event.target.closest("[data-source-filter]") : null;
@@ -1550,7 +1617,7 @@ on("test-llm", "click", function () {
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
-var libraryScopes = {team_summary: "多源接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryScopes = {team_summary: "聚合采集接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
 

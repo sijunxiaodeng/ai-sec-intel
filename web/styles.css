@@ -280,6 +280,29 @@ button[aria-busy="true"] { pointer-events: none; }
 .src-tag.src-paper { background: #eef3fa; color: #2f4a6e; border-color: #c5d2e6; }
 .src-tag.src-comm { background: #f7efe8; color: #6a4020; border-color: #e2cdb8; }
 
+.filter-block { margin: 0 0 10px; }
+.filter-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6570;
+  letter-spacing: 0.02em;
+}
+.tax-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+@media (max-width: 900px) {
+  .tax-grid { grid-template-columns: 1fr; }
+}
+.tax-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #243040;
+}
+.tax-foot { margin-top: 10px; }
 .source-legend {
   margin: 0 0 14px;
   padding: 12px 14px;
