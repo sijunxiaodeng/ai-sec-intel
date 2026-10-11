@@ -145,8 +145,8 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
     """Describe enabled source specs using persisted evidence, without writes.
 
     CVE AI coverage requires a current hash/version-matched classified positive.
-    Documents are locally filtered topical candidates; this is not a measured
-    AI classification accuracy. Explicit negative admission metadata is honored.
+    Documents also require current, completed, positive classifications;
+    source names and query-scoped discovery never establish AI coverage.
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -206,6 +206,14 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
                 ai_cves_by_source[name].add(row["cve_id"])
     for name, cves in ai_cves_by_source.items():
         counts[name]["ai_records"] += len(cves)
+    positive_documents = set()
+    if classifier_version and {"document_ai_classifications", "knowledge_documents"} <= tables:
+        positive_documents = {row["document_id"] for row in _rows(con, """
+            SELECT d.document_id FROM knowledge_documents d
+            JOIN document_ai_classifications a ON a.document_id=d.document_id
+              AND a.content_sha256=d.content_sha256
+            WHERE a.classifier_version=? AND a.state='classified' AND a.ai_related=1
+        """, (classifier_version,))}
     if "knowledge_documents" in tables:
         for row in _rows(con, """SELECT source,source_category,payload_json,published_at,first_seen_at
                                FROM knowledge_documents"""):
@@ -223,7 +231,7 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
                 raw = payload.get("raw_data") or {}
                 if not isinstance(payload, dict) or not isinstance(raw, dict):
                     raise ValueError("invalid document payload")
-                if raw.get("ai_security_related") is not False:
+                if payload.get("document_id") in positive_documents and raw.get("ai_security_related") is not False:
                     counts[name]["ai_records"] += 1
             except (ValueError, TypeError, AttributeError):
                 pass

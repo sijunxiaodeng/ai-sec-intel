@@ -2,7 +2,7 @@
 
 `.github/workflows/intelligence-collect.yml` 使用 GitHub 托管的 Linux runner，每小时第 7、22、37、52 分钟自动执行一次八类来源采集。任务在 GitHub 服务器运行，个人电脑无须开机。仓库已设置 Secret `DEEPSEEK_API_KEY` 后，默认在采集之后运行独立的 DeepSeek 语义复核，每轮最多两次请求；没有该 Secret 时仍执行采集和规则分类。NVD API key 可以配置在仓库 Secret `NVD_API_KEY`，不是启动的必需条件。
 
-工作流只在 `main` 分支执行。定时触发要求这个工作流文件存在于仓库**默认分支**；采集代码明确从原来的 `feat/intelligence` 分支拉取，因此不需要把 A/C 的主应用代码替换为 B 代码。仅把文件留在 B 分支不会启用定时任务。
+工作流只在 `main` 分支执行。定时触发要求这个工作流文件存在于仓库**默认分支**；采集代码固定为该次 `main` 运行的完整 `github.sha`，与发布快照的代码来源一致。仅把修复留在其他分支不会启用新版定时采集。
 
 ## 独立的 DeepSeek 语义复核
 
@@ -24,7 +24,7 @@
 
 - 完整 `intelligence.db`：漏洞、非 CVE 文档、分类结果、增量游标、每源观察基线、HTTP ETag/Last-Modified 缓存和原始首次入库时间。
 - `monitoring_baseline.json`、`monitoring_status.json`、`classification_status.json`、`deepseek_status.json`、`actions_report.json`（存在时）。
-- 带仓库、分支、运行 ID、文件大小和 SHA-256 的清单。
+- 带仓库、分支、运行 ID、运行编号、workflow 文件、采集代码 SHA、文件大小和 SHA-256 的清单。
 
 快照不包含 `.env`、密钥、PID、进程锁、源日志或虚拟环境。artifact 保存期限为 90 天，但**成功上传新状态后只保留最近八份本工作流可信快照**，避免每 15 分钟重复保存大数据库而长期累积。清理使用 `actions: write`；采集代码、状态恢复默认使用 `contents: read`。其他工作流、其他分支的 artifact、初始 Release 种子均不清理。
 
@@ -57,6 +57,8 @@ python intelligence/deployment/actions_state.py save \
 完全新部署、不迁移任何历史数据时，只有第一次运行允许创建新观察基线；此前关机产生的旧记录不会因此被修改。正式比赛时效应持续记录来源发布时间到首次实际入库的延迟，而不是从工作流启动重新计算漏洞发布时间。
 
 ## 查看结果与取回数据
+
+推荐使用根目录的 `docker-compose.actions.yml`：`b-mirror` 自动验证并交付最新主分支快照，API 只读、没有本地采集器，不会与 Actions 形成第二个写入端。它会拒绝旧代码清单、错误来源、倒退运行和重置历史；失败时继续提供上一份可信数据。启动及 token 最小权限见 [正式数据部署与交付](../../docs/正式数据部署与交付.md)。以下手动恢复仅用于迁移或离线检查。
 
 GitHub 仓库 → **Actions** → **B public intelligence collection** 可以查看每轮运行。Summary 显示本轮模型尝试与响应校验数、逐源状态、待补采、数据覆盖和实际运行间隔。去重 CVE 的时效分别显示原始完整观察期、首次云端部署后和最近 24 小时，三个范围不会互相替代；逐源记录数另外显示，不能当作去重后的漏洞数。首次云端部署时间固定为已核实的 `2026-10-09T12:05:16Z`，不会写回原观察基线。
 

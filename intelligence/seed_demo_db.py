@@ -94,7 +94,7 @@ DEMO_DOCS = (
         "category": "academic_paper",
         "content_type": "paper",
         "sid": "demo-arxiv-jailbreak",
-        "title": "【演示】越狱与对抗提示（合成论文摘要）",
+        "title": "【演示】大模型越狱与对抗提示（合成论文摘要）",
         "description": "演示用合成 arXiv 风格摘要。",
         "url": "https://arxiv.org/abs/2099.90001",
     },

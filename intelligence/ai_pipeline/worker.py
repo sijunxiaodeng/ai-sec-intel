@@ -49,7 +49,7 @@ def run_batch(
     db_path: str | Path,
     version: str,
     max_items: int = 40,
-    max_llm_calls: int = 3,
+    max_llm_calls: int = 0,
     classifier: HybridAIClassifier | None = None,
     *,
     verbose: bool = True,

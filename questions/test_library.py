@@ -209,15 +209,19 @@ class LibraryTest(unittest.TestCase):
 
 class LibraryScheduleTest(unittest.TestCase):
     def run_with(self, error=False):
-        from automation.schedule import run_once
+        from automation.schedule import run_once, run_public_once
         with patch("agents.orchestrator.run_collect", side_effect=TimeoutError("NVD unavailable") if error else None, return_value={"records": []}), \
              patch("rag.library.sync", return_value={"ok": 2, "attempted": 3, "sources": []}) as library, \
+             patch("rag.library.sync_team_drain", return_value={"status": "ok", "ok": 2}) as team, \
              patch("automation.schedule.ensure_state", return_value={}), patch("automation.schedule._write_state"), patch("automation.schedule.log_line"):
             if error:
                 with self.assertRaises(TimeoutError):
                     run_once()
             else:
                 run_once()
+            team.assert_called_once_with(max_documents=200)
+            library.assert_not_called()
+            run_public_once()
             library.assert_called_once_with(include_seeds=False)
 
     def test_schedule_syncs_library_after_success(self):

@@ -10,12 +10,9 @@ import requests
 from dotenv import load_dotenv
 
 
-VALID_AI_CATEGORIES = {
-    "ai_infrastructure",
-    "model_and_data",
-    "ai_application_agent",
-    "ai_supply_chain",
-}
+from .scope_policy import AI_CATEGORIES
+
+VALID_AI_CATEGORIES = AI_CATEGORIES
 
 
 @dataclass

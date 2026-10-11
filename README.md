@@ -2,6 +2,8 @@
 
 三人共用的仓库。目前支持 NVD/OSV 漏洞监测、关联资料抓取与证据入库、结构化富化与影响说明、登记资产版本匹配，以及带来源引用的检索问答。
 
+正式数据运行使用独立配置，避免演示种子覆盖采集历史。有持续在线机器时使用 `bash scripts/production-up.sh collector`；继续由 GitHub Actions 采集时使用 `bash scripts/production-up.sh actions` 自动校验交付云端快照。两种模式及数据迁移见 [正式数据部署与交付](docs/正式数据部署与交付.md)。
+
 ## 怎么打开系统（一键演示）
 
 固定端口：**主应用 8023**，**B 情报 API 8765**。

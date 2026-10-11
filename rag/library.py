@@ -33,6 +33,7 @@ TOPICS = {
 QUERY_ALIASES = {"prompt_injection": "prompt injection indirect", "jailbreak": "jailbreak adversarial",
                  "model_supply_chain": "model supply chain pickle deserialization", "agent_security": "agent tool call"}
 _SYNC_LOCK = threading.Lock()
+_TEAM_SYNC_LOCK = threading.Lock()
 
 
 def _schema(conn):
@@ -437,18 +438,44 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
         _SYNC_LOCK.release()
 
 
-def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url="http://127.0.0.1:8765", collector=None):
-    collector = collector or TeamDocumentCollector(base_url, max_documents=max_documents)
-    if not _SYNC_LOCK.acquire(blocking=False):
+def _team_sync_state(conn, base_url):
+    conn.execute("CREATE TABLE IF NOT EXISTS team_sync_cursors (base_url TEXT PRIMARY KEY, payload TEXT NOT NULL)")
+    row = conn.execute("SELECT payload FROM team_sync_cursors WHERE base_url=?", (base_url,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def _team_withdraw(conn, identifiers):
+    """Keep snapshots/history visible, but remove withdrawn summaries from retrieval."""
+    _schema(conn)
+    identifiers = set(identifiers)
+    previous = conn.execute("SELECT evidence_id,payload FROM evidence WHERE cve_id=''").fetchall()
+    conn.executemany("DELETE FROM evidence WHERE cve_id='' AND evidence_id=?", [
+        (eid,) for eid, payload in previous if json.loads(payload).get("document_id") in identifiers])
+    for identity in identifiers:
+        conn.execute("INSERT OR REPLACE INTO library_attempts VALUES (?,?)", (identity, json.dumps({
+            "document_id": identity, "status": "withdrawn", "invalidated_previous": True,
+            "retrieved_at": now(), "error": "团队来源当前不再属于有效 AI 安全资料；保留历史快照，不参与检索"}, ensure_ascii=False)))
+
+
+def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url=None, collector=None):
+    collector = collector or TeamDocumentCollector(base_url, max_documents=max_documents, use_changefeed=True)
+    if not _TEAM_SYNC_LOCK.acquire(blocking=False):
         raise ValueError("资料同步正在运行，请等待本轮完成")
     try:
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        source = {"id": "team_documents", "name": "队友情报服务资料", "url": base_url + "/api/documents"}
+        source = {"id": "team_documents", "name": "队友情报服务资料", "url": collector.base_url + "/api/documents"}
         status = {"source_id": source["id"], "name": source["name"], "url": source["url"],
                   "category": "team", "checked_at": now(), "discovered": 0}
         try:
-            collected = collector.collect()
+            if collector.use_changefeed:
+                with _connection(path) as conn:
+                    saved_cursor = _team_sync_state(conn, collector.base_url)
+                collected = collector.collect_changes(saved_cursor)
+            else:
+                # Explicit legacy collectors remain available for offline
+                # fixture imports; production always uses the change feed.
+                collected = collector.collect()
         except Exception as exc:
             status.update(status="error", error=str(exc)[:240])
             _record_source(source, status, None, path)
@@ -461,15 +488,67 @@ def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url="http://127.0.0.
                 error["retained_previous"] = bool(conn.execute("SELECT 1 FROM library_documents WHERE document_id=?", (error["document_id"],)).fetchone())
                 conn.execute("INSERT OR REPLACE INTO library_attempts VALUES (?,?)", (error["document_id"], json.dumps(error, ensure_ascii=False)))
             results.append(error)
-        status.update(status="partial" if any(row["status"] == "error" for row in results) else "ok",
+        successful = not any(row["status"] == "error" for row in results)
+        if collector.use_changefeed:
+            with _connection(path) as conn:
+                _schema(conn)
+                withdrawals = set(collected["retracted_ids"])
+                if collected["reset"]:
+                    withdrawals.update(json.loads(row[0])["document_id"] for row in conn.execute("SELECT payload FROM library_documents")
+                        if json.loads(row[0]).get("discovery_source_id") == "team_documents")
+                    withdrawals.difference_update(row["document_id"] for row in results if row["status"] == "ok")
+                _team_withdraw(conn, withdrawals)
+        index = update_index(path)
+        if index.get("status") == "error":
+            successful = False
+        if collector.use_changefeed and successful:
+            with _connection(path) as conn:
+                _team_sync_state(conn, collector.base_url)
+                conn.execute("INSERT OR REPLACE INTO team_sync_cursors VALUES (?,?)",
+                    (collector.base_url, json.dumps(collected["cursor"], ensure_ascii=False)))
+        status.update(status="partial" if not successful else "ok",
                       discovered=collected["selected"], total=collected["total"], remaining=collected["remaining"],
                       coverage=collected["coverage"])
+        if collector.use_changefeed:
+            status.update(cursor=collected["cursor"] if successful else saved_cursor,
+                          cursor_committed=successful, has_more=collected["has_more"],
+                          retracted=len(collected["retracted_ids"]))
+        if index.get("status") == "error":
+            status["error"] = "团队资料索引更新失败，保留游标供下轮重试"
         _record_source(source, status, None, path)
         return {"status": status["status"], "attempted": len(results), "ok": sum(row["status"] == "ok" for row in results),
                 "changed": sum(bool(row.get("changed")) for row in results), "documents": results,
-                "source": status, "index": update_index(path), "overview": overview(path)}
+                "source": status, "index": index, "overview": overview(path)}
     finally:
-        _SYNC_LOCK.release()
+        _TEAM_SYNC_LOCK.release()
+
+
+def sync_team_drain(db_path=LIBRARY_DB, *, max_documents=200, base_url=None,
+                    time_budget_seconds=60, max_pages=10000, collector=None):
+    """Drain committed document pages within a bounded background-run budget.
+
+    Each completed page checkpoints independently. Budget exhaustion never
+    advances over unprocessed changes; the next cycle resumes that high-water
+    mark. A slow page may finish after the deadline, then no next page starts.
+    """
+    if time_budget_seconds <= 0 or type(max_pages) is not int or max_pages <= 0:
+        raise ValueError("资料同步预算和页数必须为正数")
+    deadline = time.monotonic() + time_budget_seconds
+    summary = {"status": "ok", "attempted": 0, "ok": 0, "changed": 0, "documents": [], "pages": 0}
+    for _ in range(max_pages):
+        if summary["pages"] and time.monotonic() >= deadline:
+            break
+        result = sync_team(db_path, max_documents=max_documents, base_url=base_url, collector=collector)
+        summary.update({key: value for key, value in result.items()
+                        if key not in {"attempted", "ok", "changed", "documents"}})
+        summary["pages"] += 1
+        for key in ("attempted", "ok", "changed"):
+            summary[key] += result.get(key, 0)
+        summary["documents"].extend(result.get("documents", []))
+        if result["status"] != "ok" or not result.get("source", {}).get("has_more"):
+            return dict(summary, has_more=result.get("source", {}).get("has_more", False))
+    return dict(summary, status="partial", has_more=True, pending=True,
+                pending_reason="budget_exhausted", error="资料同步预算已用完，未处理变更将在下轮继续")
 
 
 def main():

@@ -8,6 +8,7 @@ from classification.ai_relevance import (
 from classification.semantic_judge import (
     SemanticJudge,
 )
+from .scope_policy import AI_ROUTE_TERMS as SCOPE_AI_ROUTE_TERMS, classify_scope, route_hits
 
 
 @dataclass
@@ -33,53 +34,8 @@ class HybridAIClassifier:
     4. Semantic failure -> needs_review=True (never silently force non-AI).
     """
 
-    # This list is intentionally BROAD.
-    # Matching here does NOT mean the item is AI-related.
-    # It only decides whether the item deserves semantic review.
-    AI_ROUTE_TERMS = [
-        "large language model",
-        "language model",
-        "llm",
-        "machine learning",
-        "deep learning",
-        "artificial intelligence",
-        "generative ai",
-        "genai",
-        "agentic",
-        "multi-agent",
-        "ai agent",
-        "agent tool",
-        "chatbot",
-        "copilot",
-        "assistant",
-        "model context protocol",
-        "mcp server",
-        "mcp client",
-        "retrieval augmented generation",
-        "rag",
-        "prompt injection",
-        "prompt leakage",
-        "system prompt",
-        "embedding",
-        "embedder",
-        "vector database",
-        "inference",
-        "model serving",
-        "model provider",
-        "multimodal",
-        "transformer",
-        "huggingface",
-        "model registry",
-        "model artifact",
-        "model hub",
-
-        # Broad ecosystem routing hints. These are NOT final labels.
-        "mlflow",
-        "litellm",
-        "mem0",
-        "openclaw",
-        "pipecat",
-    ]
+    # Shared broad routing hints are candidates, never final labels.
+    AI_ROUTE_TERMS = list(SCOPE_AI_ROUTE_TERMS)
 
     def __init__(
         self,
@@ -131,21 +87,8 @@ class HybridAIClassifier:
             " ".join(package_names),
         )
 
-        hits = []
-
-        route_terms = dict.fromkeys([
-            *self.AI_ROUTE_TERMS,
-            *(entity for entities in self.rule_classifier.AI_ENTITIES.values() for entity in entities),
-            *(concept for concepts in self.rule_classifier.AI_CONCEPTS.values() for concept in concepts),
-        ])
-        for term in route_terms:
-            if self._contains_route_term(
-                text,
-                term,
-            ):
-                hits.append(term)
-
-        return bool(hits), hits[:12]
+        hits = route_hits(text, self.rule_classifier)
+        return bool(hits), hits
 
     def classify(
         self,
@@ -162,12 +105,13 @@ class HybridAIClassifier:
         # -------------------------------------------------
         # 1. Conservative V2 rule classifier
         # -------------------------------------------------
-        rule = self.rule_classifier.classify(
+        rule = classify_scope(
             title=title,
             description=description,
             vendor=vendor,
             product=product,
             package_names=package_names,
+            classifier=self.rule_classifier,
         )
 
         if rule.is_ai_related:
@@ -176,7 +120,7 @@ class HybridAIClassifier:
                 category=rule.category,
                 confidence=max(
                     0.85,
-                    float(rule.score),
+                    float(rule.confidence),
                 ),
                 reason=(
                     "High-confidence AI entity/concept "
@@ -185,7 +129,7 @@ class HybridAIClassifier:
                 evidence=list(rule.evidence),
                 decision_source="rule_positive",
                 needs_review=False,
-                rule_score=float(rule.score),
+                rule_score=float(rule.rule_score),
             )
 
         # -------------------------------------------------
@@ -213,7 +157,7 @@ class HybridAIClassifier:
                 evidence=[],
                 decision_source="rule_negative",
                 needs_review=False,
-                rule_score=float(rule.score),
+                rule_score=float(rule.rule_score),
             )
 
         # -------------------------------------------------
@@ -234,7 +178,7 @@ class HybridAIClassifier:
                 ],
                 decision_source="semantic_unavailable",
                 needs_review=True,
-                rule_score=float(rule.score),
+                rule_score=float(rule.rule_score),
             )
 
         try:
@@ -263,7 +207,7 @@ class HybridAIClassifier:
                 ],
                 decision_source="semantic_error",
                 needs_review=True,
-                rule_score=float(rule.score),
+                rule_score=float(rule.rule_score),
             )
 
         needs_review = (
@@ -285,7 +229,7 @@ class HybridAIClassifier:
             ],
             decision_source="semantic_judge",
             needs_review=needs_review,
-            rule_score=float(rule.score),
+            rule_score=float(rule.rule_score),
         )
 
     def classify_vulnerability(

@@ -54,9 +54,9 @@ jobs:
       - name: Check out collector
         uses: actions/checkout@v4
         with:
-          # Only this small workflow needs to be in the default branch. B's
-          # runtime stays on its existing team branch; A/C are not overwritten.
-          ref: feat/intelligence
+          # The job is gated to main; pin code to this exact main workflow run.
+          # The snapshot manifest records the same SHA for deployment delivery.
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v5

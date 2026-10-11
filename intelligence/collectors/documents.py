@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 
 from collectors.http import _get
+from classification.scope_policy import classify_scope
 
 
 @dataclass
@@ -188,29 +189,13 @@ def _condition_headers(etag=None, last_modified=None) -> dict[str, str]:
     return headers
 
 
-AI_TERMS = (
-    "artificial intelligence", "machine learning", "deep learning", "large language model",
-    "llm", "generative ai", "genai", "ai", "chatbot", "ai agent", "prompt injection",
-    "model poisoning", "data poisoning", "ollama", "langchain", "pytorch", "tensorflow",
-    "huggingface", "hugging face", "vllm", "litellm", "model context protocol",
-    "人工智能", "大模型", "机器学习", "智能体", "生成式", "提示注入", "数据投毒",
-)
-SECURITY_TERMS = (
-    "security", "cybersecurity", "vulnerability", "vulnerabilities", "advisory", "attack",
-    "threat", "exploit", "poisoning", "injection", "privacy", "risk", "robustness",
-    "safety", "jailbreak", "安全", "漏洞", "攻击", "威胁", "风险", "隐私", "投毒", "越狱",
-)
-
-
 def _has_term(text, term):
     pattern = r"(?<![A-Za-z0-9_])" + re.escape(term) + r"(?![A-Za-z0-9_])"
     return bool(re.search(pattern, text, flags=re.IGNORECASE))
 
 
 def is_ai_security_related(text: str) -> bool:
-    return any(_has_term(text, term) for term in AI_TERMS) and any(
-        _has_term(text, term) for term in SECURITY_TERMS
-    )
+    return classify_scope(title=text, record_kind="document").is_ai_related is True
 
 
 class FeedCollector:
@@ -259,7 +244,12 @@ class FeedCollector:
 
     def _keep(self, document: KnowledgeDocument) -> bool:
         text = document.title + "\n" + document.description
-        if self.ai_only and not self.query_scoped and not is_ai_security_related(text):
+        scope = classify_scope(title=document.title, description=document.description,
+                               record_kind="document", content_type=document.content_type)
+        # Query-scoped entries are discovery candidates, never automatic AI
+        # positives. They are retained for the same versioned downstream policy.
+        # A broad/unknown candidate must not be lost before review.
+        if self.ai_only and not self.query_scoped and scope.is_ai_related is False:
             return False
         if self.content_terms and not any(_has_term(text, term) for term in self.content_terms):
             return False

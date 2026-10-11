@@ -26,7 +26,7 @@ coverage_note=""
 # Seed only when DB missing. Avoid DEMO_FORCE_SEED wipe after B API already started
 # (demo-up seeds once before launching processes).
 if [[ "$mode" == "local" ]]; then
-  if [[ ! -f "$ROOT/intelligence/data/intelligence.db" ]]; then
+  if [[ ! -f "$DEMO_B_DB" ]]; then
     seed_local_db
   else
     log "B demo DB present — skip re-seed in demo-collect (set DEMO_FORCE_SEED before demo-up to recreate)"
@@ -49,9 +49,9 @@ if [[ "$B_MONITOR" == "1" ]]; then
   else
     ensure_venvs
     timeout --signal=TERM --kill-after=15s "$MONITOR_TIMEOUT" \
-      env INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db" \
+      env INTELLIGENCE_DB_PATH="$DEMO_B_DB" \
       "$ROOT/intelligence/.venv/bin/python" "$ROOT/intelligence/run_monitor.py" --once \
-      --db "$ROOT/intelligence/data/intelligence.db" \
+      --db "$DEMO_B_DB" \
       --source-timeout "$SOURCE_TIMEOUT" --workers 4 \
       >"$OUT/b-monitor.log" 2>&1
     rc=$?

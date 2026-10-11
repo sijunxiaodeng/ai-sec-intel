@@ -1,0 +1,133 @@
+name: System checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  AUTO_MONITOR_ON_START: '0'
+  AUTO_INGEST_ON_COLLECT: '0'
+  AUTO_CLASSIFY_V5: '0'
+  CLASSIFY_V5_MAX_LLM_CALLS: '0'
+  CLASSIFY_V4_MAX_LLM_CALLS: '0'
+  DEEPSEEK_REVIEW_ENABLED: 'false'
+  DEEPSEEK_API_KEY: ''
+
+jobs:
+  main-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAIN_KB_DB_PATH: ${{ runner.temp }}/main-knowledge.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+      - name: Install main application test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Verify dependency compatibility
+        run: python -m pip check
+      - name: Test A and C without public network or model credentials
+        run: python scripts/run_offline_tests.py --start-directory questions
+      - name: Test fixed-window and independent-label evidence calculations
+        run: python scripts/run_offline_tests.py --start-directory scripts/tests
+
+  intelligence-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      INTELLIGENCE_DB_PATH: ${{ runner.temp }}/intelligence.sqlite3
+    defaults:
+      run:
+        working-directory: intelligence
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: intelligence/requirements.lock.txt
+      - name: Install B locked dependencies in its separate job
+        run: python -m pip install -r requirements.lock.txt
+      - name: Verify dependency compatibility
+        run: python -m pip check
+      - name: Test collection, classification, storage, API and snapshot delivery
+        run: python ../scripts/run_offline_tests.py --start-directory tests
+
+  container-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate separate demo, persistent collector and Actions-consumer configurations
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.production.yml config --quiet
+          docker compose -f docker-compose.actions.yml config --quiet
+      - name: Disable public networking and automatic collection for synthetic integration
+        run: |
+          cat > "${RUNNER_TEMP}/compose-offline.yml" <<'YAML'
+          services:
+            main-app:
+              environment:
+                AUTO_MONITOR_ON_START: "0"
+                AUTO_INGEST_ON_COLLECT: "0"
+                TEAM_ONLY_COLLECT: "1"
+          networks:
+            default:
+              internal: true
+          YAML
+      - name: Build and start the isolated demo containers
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" up --build --detach --wait --wait-timeout 180
+      - name: Verify actual B API and B-to-C document synchronization
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          def request(url, payload=None):
+              data = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return json.load(response)
+
+          health = request("http://127.0.0.1:8765/api/intelligence/health")
+          assert health.get("database_available") is True, health
+          team = request("http://127.0.0.1:8765/api/intelligence/team?ai_only=true&limit=10")
+          assert team.get("total", 0) > 0, team
+          synced = request("http://127.0.0.1:8023/api/library/team-sync", {"max_documents": 200})
+          assert synced.get("status") == "ok" and synced.get("ok", 0) > 0, synced
+          library = request("http://127.0.0.1:8023/api/library")
+          assert library.get("overview", {}).get("documents", 0) > 0, library
+          print("Synthetic B API -> C document synchronization passed; no SLA or independent accuracy claim.")
+          PY
+      - name: Save container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" logs --no-color
+      - name: Remove only this CI job's synthetic containers and volumes
+        if: always()
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" down --volumes --remove-orphans
+
+# These are development behavior checks. Passing them does not establish an
+# independent classification/enrichment/QA score or a six-hour collection SLA.

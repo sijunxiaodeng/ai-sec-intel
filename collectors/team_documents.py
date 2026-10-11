@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 
 from enrichment.documents import canonical, digest, now
+from team_change_protocol import validate_page
 
 # Local demo / compose hosts only (never arbitrary remote).
 _ALLOWED_TEAM_HOSTS = frozenset({"127.0.0.1", "localhost", "b-api"})
@@ -14,7 +15,8 @@ _ALLOWED_TEAM_HOSTS = frozenset({"127.0.0.1", "localhost", "b-api"})
 TEAM_MEDIA = "application/vnd.ai-sec-intel.team-document+json"
 TYPE_MAP = {"security_blog": "research_article", "security_community": "research_article",
             "academic_paper": "academic_paper", "technical_standard": "standard",
-            "policy_regulation": "policy", "vendor_advisory": "vendor_advisory"}
+            "policy_regulation": "policy", "vendor_advisory": "vendor_advisory",
+            "government_alert": "vendor_advisory", "vulnerability_database": "vendor_advisory"}
 
 
 def team_id(document_id):
@@ -60,13 +62,14 @@ def extract_summary(response):
             "team_document_id": row["document_id"], "team_source": row["source"],
             "team_source_category": row["source_category"], "team_first_seen_at": row.get("first_seen_at"),
             "team_content_updated_at": row.get("content_updated_at"),
+            "team_classification": row.get("classification"),
             "source_snapshot_kind": "team_api_record", "snapshot_url": response["url"],
             "extraction_notice": "当前引用来自队友接口存档的题名/描述字段，未核对原始网页、论文或法规全文；"
                 "不能把描述当成完整条款、标准要求或本项目验证结果。"}, row
 
 
 class TeamDocumentCollector:
-    def __init__(self, base_url=None, timeout=10, max_documents=30):
+    def __init__(self, base_url=None, timeout=10, max_documents=30, use_changefeed=False):
         if type(max_documents) is not int or not 1 <= max_documents <= 200:
             raise ValueError("每轮团队资料数量必须为 1 到 200")
         base_url = (base_url or os.environ.get("TEAM_INTEL_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
@@ -81,9 +84,58 @@ class TeamDocumentCollector:
             or parsed.fragment
         ):
             raise ValueError("团队资料 API 仅允许本机或 compose 服务名 b-api 的 HTTP 地址")
-        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port not in (None, 8765):
+        if parsed.hostname in {"127.0.0.1", "localhost"} and parsed.port != 8765:
             raise ValueError("团队资料 API 本机端口必须为 8765")
         self.base_url, self.timeout, self.max_documents = base_url, timeout, max_documents
+        self.use_changefeed = use_changefeed
+
+    def collect_changes(self, cursor=None):
+        saved = cursor or {}
+        if saved.get("base_url", self.base_url) != self.base_url:
+            saved = {}
+        params = {"kind": "document", "cursor": saved.get("seq", 0), "limit": min(100, self.max_documents)}
+        if saved.get("epoch"):
+            params["epoch"] = saved["epoch"]
+        if saved.get("through") is not None:
+            params["through"] = saved["through"]
+        response = self.get("/api/team/changes?" + urllib.parse.urlencode(params))
+        page = validate_page(json.loads(response["body"]), params["cursor"])
+        candidates, errors, retracted = [], [], []
+        # Defensive coalescing also supports producers that emit every event.
+        # A retract followed by a successful reclassification must finish as an
+        # upsert, irrespective of their occurrence in the same page.
+        latest = {event["entity_id"]: event for event in page["changes"]}
+        for event in latest.values():
+            if event["operation"] == "retract":
+                if not re.fullmatch(r"doc-[0-9a-f]{64}", event["entity_id"]):
+                    raise ValueError("团队撤回事件标识无效")
+                retracted.append(team_id(event["entity_id"]))
+                continue
+            row = event["item"]
+            try:
+                current = parse_record(json.dumps(row, ensure_ascii=False).encode())
+                if current["document_id"] != event["entity_id"]:
+                    raise ValueError("团队变更与资料身份不一致")
+                # Snapshot the event payload itself, so source updates between
+                # list and detail cannot change a page's imported evidence.
+                snapshot = {"body": json.dumps(current, ensure_ascii=False).encode(),
+                            "url": self.base_url + "/api/documents/" + current["document_id"],
+                            "retrieved_at": response["retrieved_at"], "content_type": TEAM_MEDIA}
+                candidates.append({"url": current["url"], "document_type": TYPE_MAP[current["source_category"]],
+                    "source_name": current["source"], "source_id": "team_documents", "discovery": "team_api",
+                    "team_document_id": current["document_id"], "discovered_at": now(), "_prefetched_response": snapshot})
+            except Exception as exc:
+                errors.append({"document_id": team_id(event["entity_id"]), "url": row.get("url", ""),
+                    "document_type": TYPE_MAP.get(row.get("source_category"), "unknown"), "publisher": row.get("source", "unknown"),
+                    "status": "error", "retrieved_at": now(), "error": str(exc)[:240]})
+        next_state = {"epoch": page["epoch"], "seq": page["next_cursor"], "base_url": self.base_url}
+        if page["has_more"]:
+            next_state["through"] = page["through"]
+        return {"candidates": candidates, "errors": errors, "retracted_ids": retracted,
+                "selected": len(page["changes"]), "total": None, "remaining": None,
+                "has_more": page["has_more"], "reset": page["reset"],
+                "cursor": next_state,
+                "coverage": "持久变更游标；首次从零导入全部有效 AI 资料，后续消费新增、更新及撤回"}
 
     def get(self, path):
         class NoRedirect(urllib.request.HTTPRedirectHandler):

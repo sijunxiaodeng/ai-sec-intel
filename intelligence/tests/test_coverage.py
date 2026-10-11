@@ -20,7 +20,8 @@ class CoverageTests(unittest.TestCase):
           CREATE TABLE source_items(source TEXT,cve_id TEXT,payload_json TEXT,first_seen_at TEXT);
           CREATE TABLE unified_vulnerabilities(cve_id TEXT,content_sha256 TEXT);
           CREATE TABLE ai_classifications(cve_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
-          CREATE TABLE knowledge_documents(source TEXT,source_category TEXT,payload_json TEXT,published_at TEXT,first_seen_at TEXT);
+          CREATE TABLE knowledge_documents(document_id TEXT,source TEXT,source_category TEXT,payload_json TEXT,published_at TEXT,first_seen_at TEXT,content_sha256 TEXT);
+          CREATE TABLE document_ai_classifications(document_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
           CREATE TABLE collector_runs(id INTEGER,collector TEXT,started_at TEXT,finished_at TEXT,status TEXT,fetched_count INTEGER,error_text TEXT);
           CREATE TABLE document_source_runs(id INTEGER,source TEXT,source_category TEXT,started_at TEXT,finished_at TEXT,status TEXT,fetched_count INTEGER,error_text TEXT);
           CREATE TABLE source_observation_baselines(source TEXT,source_category TEXT,started_at TEXT);
@@ -33,9 +34,15 @@ class CoverageTests(unittest.TestCase):
     def source_item(self, published, seen, source="NVD", cve="CVE-2026-10000"):
         self.con.execute("INSERT INTO source_items VALUES(?,?,?,?)", (source, cve, json.dumps({"published_at": published}), seen))
 
-    def doc(self, source, category, published, seen="2026-10-08T11:50:00Z", ai=True):
-        self.con.execute("INSERT INTO knowledge_documents VALUES(?,?,?,?,?)", (source, category,
-            json.dumps({"published_at": published, "raw_data": {"ai_security_related": ai}}), published, seen))
+    def doc(self, source, category, published, seen="2026-10-08T11:50:00Z", ai=True,
+            *, classified=True, digest="current", version="v1", state="classified"):
+        identifier = "doc-" + str(self.con.execute("SELECT COUNT(*) FROM knowledge_documents").fetchone()[0])
+        self.con.execute("INSERT INTO knowledge_documents VALUES(?,?,?,?,?,?,?)", (identifier, source, category,
+            json.dumps({"document_id": identifier, "published_at": published,
+                        "raw_data": {"ai_security_related": ai}}), published, seen, "current"))
+        if classified:
+            self.con.execute("INSERT INTO document_ai_classifications VALUES(?,?,?,?,?)",
+                             (identifier, digest, version, state, int(ai)))
 
     def report(self, **kwargs):
         return coverage_report(self.con, self.specs, now=NOW, classifier_version="v1", **kwargs)
@@ -85,6 +92,17 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(report["sla_evidence"], "insufficient_samples")
         self.assertEqual(report["unknown_live_timing"], 2)
         self.assertEqual(report["per_source_live_latency"]["CISA_KEV"]["live"]["samples"], 0)
+
+    def test_discovery_scope_stale_and_review_documents_do_not_prove_ai_coverage(self):
+        self.specs = [SimpleNamespace(name="BLOG", category="security_blog")]
+        for attributes in (
+            {"classified": False}, {"digest": "old"}, {"version": "v0"},
+            {"state": "review"}, {"ai": False}, {},
+        ):
+            self.doc("BLOG", "security_blog", "2026-10-08T11:40:00Z", **attributes)
+        counts = self.report()["counts_by_source"]["BLOG"]
+        self.assertEqual(counts["source_records"], 6)
+        self.assertEqual(counts["ai_records"], 1)
 
     def test_new_source_baseline_excludes_backfill_and_separates_source_categories(self):
         self.specs.append(SimpleNamespace(name="BLOG", category="security_blog"))

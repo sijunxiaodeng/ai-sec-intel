@@ -10,7 +10,9 @@ from typing import Dict, List, Literal
 from pydantic import BaseModel, Field, StrictBool, constr, validator
 from rag.evidence import _connection
 
-DEFAULT_ASSET_DB = Path(__file__).resolve().parent.parent / "data" / "assets.sqlite3"
+from config.paths import DATA_ROOT
+
+DEFAULT_ASSET_DB = DATA_ROOT / "assets.sqlite3"
 QUALIFIERS = {"update", "edition", "language", "sw_edition", "target_sw", "target_hw", "other"}
 STATUS_LABELS = {"matched_version": "版本命中，可能受影响", "not_matched": "未命中当前来源范围", "unknown": "待确认"}
 

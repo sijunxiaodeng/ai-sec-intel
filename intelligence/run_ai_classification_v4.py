@@ -23,6 +23,7 @@ def classifier_version() -> str:
         ROOT / "classification" / "ai_relevance.py",
         ROOT / "classification" / "hybrid_classifier.py",
         ROOT / "classification" / "semantic_judge.py",
+        ROOT / "classification" / "scope_policy.py",
     )
     digest = hashlib.sha256()
     for p in files:
@@ -54,7 +55,7 @@ def main(argv=None) -> int:
     p.add_argument("--max-items", type=int,
                    default=int(os.getenv("CLASSIFY_V4_MAX_ITEMS", "40")))
     p.add_argument("--max-llm-calls", type=int,
-                   default=int(os.getenv("CLASSIFY_V4_MAX_LLM_CALLS", "3")))
+                   default=int(os.getenv("CLASSIFY_V4_MAX_LLM_CALLS", "0")))
     p.add_argument("--stats", action="store_true", help="只查看统计，不分类，不调用 API")
     p.add_argument("--export", action="store_true", help="导出当前已完成分类的 JSONL")
     p.add_argument("--only-ai", action="store_true", help="导出仅 AI 相关的情报")

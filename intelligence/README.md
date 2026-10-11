@@ -21,9 +21,9 @@ INTELLIGENCE_DB_PATH=data/intelligence.db python run_intelligence_api_v6.py
 
 新增 GitHub Actions 定时任务，由 GitHub 的云端机器执行，每 15 分钟采集一轮，不依赖个人电脑开机。每轮恢复上一轮的 SQLite 数据库、增量游标和观察基线，采集后保存一致性快照，保留原始首次入库时间。状态缺失或损坏会明确失败，不以空数据库重置历史；成功上传后只保留最近八份状态快照。
 
-默认分支需要包含 `.github/workflows/intelligence-collect.yml`；该任务运行时读取 `feat/intelligence` 的 B 代码，不要求把 A/C 主应用一起部署。首次部署可迁移已有公开采集数据库；默认模型调用预算为 0。部署、迁移与查询最新云端结果见 [GitHub Actions 部署说明](deployment/ACTIONS.md)。
+默认分支需要包含 `.github/workflows/intelligence-collect.yml`；该任务固定读取该次 `main` 运行的代码 SHA。首次部署可迁移已有公开采集数据库；默认采集模型调用预算为 0。部署、迁移与查询最新云端结果见 [GitHub Actions 部署说明](deployment/ACTIONS.md)。正式数据共库与自动校验交付见 [正式数据部署与交付](../docs/正式数据部署与交付.md)。
 
-GitHub 定时任务可能排队或延迟，实际发布时间到首次入库的六小时时效继续如实统计。Actions 负责采集和持久化，不提供常驻网页或 HTTP API；本地 API 需要同步最新快照才能读取云端更新。电脑关机不会停止已启用的 GitHub 定时任务。
+GitHub 定时任务可能排队或延迟，实际发布时间到首次入库的六小时时效继续如实统计。Actions 负责采集和持久化，不提供常驻网页或 HTTP API；`docker-compose.actions.yml` 自动校验并交付最新快照到本地只读 API。电脑关机不会停止已启用的 GitHub 定时任务，但关机的电脑无法提供网页/API。
 
 ## 安装
 

@@ -111,8 +111,9 @@ def update_index(db_path=DEFAULT_DB):
                 (row["cve_id"], row["evidence_id"], MODEL_NAME, _digest(row), json.dumps(vector))
                 for row, vector in zip(changed, vectors)])
         return {"status": "ok", "updated": len(changed), "reused": len(rows) - len(changed), "chunks": len(rows)}
-    except Exception:
-        return {"status": "deferred", "detail": "向量更新未完成，检索会检查摘要并按需使用 BM25"}
+    except Exception as exc:
+        return {"status": "error", "error_type": type(exc).__name__,
+                "detail": "已配置的向量索引更新失败，任务可重试；当前使用 BM25"}
 
 
 def fuse(lexical, dense, top_k):

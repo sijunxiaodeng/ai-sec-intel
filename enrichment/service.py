@@ -2,6 +2,11 @@
 
 import json
 import urllib.request
+from datetime import datetime, timezone
+
+
+def _retrieved_at():
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 from models import enriched_record
 
@@ -37,6 +42,7 @@ def fetch_epss(cve_ids):
             "status": "ok",
             "score": row.get("epss"),
             "percentile": row.get("percentile"),
+            "retrieved_at": _retrieved_at(), "source": "FIRST",
         }
     return found, None
 
@@ -54,6 +60,7 @@ def fetch_kev():
                 "status": "listed",
                 "date_added": row.get("dateAdded") or "",
                 "name": row.get("vulnerabilityName") or "",
+                "retrieved_at": _retrieved_at(), "source": "CISA_KEV",
             }
     return found, None
 
@@ -80,7 +87,7 @@ def apply_public_feeds(records):
         elif kev_map and cve_id in kev_map:
             record["kev"] = kev_map[cve_id]
         else:
-            record["kev"] = {"status": "not_listed"}
+            record["kev"] = {"status": "not_listed", "retrieved_at": _retrieved_at(), "source": "CISA_KEV"}
     return {
         "epss_error": epss_error,
         "kev_error": kev_error,

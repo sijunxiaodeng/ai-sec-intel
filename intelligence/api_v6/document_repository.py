@@ -24,14 +24,14 @@ def escape_like(text: str) -> str:
 
 class DocumentRepository:
     def __init__(self, db_path: Path, root: Path):
-        self.db_path = Path(db_path).resolve()
+        self.db_path = Path(db_path).absolute()
         self.root = Path(root).resolve()
 
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
         if not self.db_path.is_file():
             raise FileNotFoundError(str(self.db_path))
-        with closing(sqlite3.connect(self.db_path.as_uri() + "?mode=ro", uri=True, timeout=20)) as connection:
+        with closing(sqlite3.connect(self.db_path.resolve().as_uri() + "?mode=ro", uri=True, timeout=20)) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only=ON")
             connection.execute("PRAGMA busy_timeout=20000")

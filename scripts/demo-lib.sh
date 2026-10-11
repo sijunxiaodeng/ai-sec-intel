@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DEMO_DIR="${DEMO_DIR:-$ROOT/.demo}"
+DEMO_B_DB="$DEMO_DIR/b-data/intelligence.db"
 B_PORT="${B_PORT:-8765}"
 MAIN_PORT="${MAIN_PORT:-8023}"
 B_URL="http://127.0.0.1:${B_PORT}"
@@ -59,10 +60,10 @@ ensure_venvs() {
 
 seed_local_db() {
   ensure_venvs
-  mkdir -p "$ROOT/intelligence/data"
-  if [[ ! -f "$ROOT/intelligence/data/intelligence.db" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
+  mkdir -p "$(dirname "$DEMO_B_DB")"
+  if [[ ! -f "$DEMO_B_DB" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
     log "seeding offline B demo DB"
-    "$ROOT/intelligence/.venv/bin/python" "$ROOT/intelligence/seed_demo_db.py" --force
+    "$ROOT/intelligence/.venv/bin/python" "$ROOT/intelligence/seed_demo_db.py" --db "$DEMO_B_DB" --force
   else
     log "B demo DB already present (set DEMO_FORCE_SEED=1 to recreate)"
   fi

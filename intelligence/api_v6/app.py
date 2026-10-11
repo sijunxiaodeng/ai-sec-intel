@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .repository import CVE_PATTERN, IntelligenceRepository, current_classifier_version
 from .team_adapter import to_team_item
 from .document_repository import DocumentRepository
+from .change_repository import ChangeRepository
 from monitoring.coverage import coverage_report
 from monitoring.source_registry import get_sources
 
@@ -66,9 +67,10 @@ def create_app(root: Path | None = None, db_path: Path | None = None) -> FastAPI
     target = Path(db_path or os.getenv("INTELLIGENCE_DB_PATH") or root / "data" / "intelligence.db")
     if not target.is_absolute():
         target = root / target
-    state_dir = target.resolve().parent
+    state_dir = target.absolute().parent
     repo = IntelligenceRepository(target, root)
     documents = DocumentRepository(target, root)
+    changes = ChangeRepository(repo)
 
     app = FastAPI(
         title="AI Security Intelligence · B Module Query API",
@@ -93,6 +95,21 @@ def create_app(root: Path | None = None, db_path: Path | None = None) -> FastAPI
     @app.get("/", tags=["API 信息"])
     def welcome():
         return {"service": "B-module intelligence query API", "version": "V7", "docs": "/docs"}
+
+    @app.get('/api/team/changes', tags=['团队接口'])
+    def team_changes(
+        kind: Literal['cve', 'document'] = Query(default='cve'),
+        cursor: int = Query(default=0, ge=0),
+        through: int | None = Query(default=None, ge=0),
+        epoch: str | None = Query(default=None, max_length=64),
+        limit: int = Query(default=100, ge=1, le=100),
+    ):
+        try:
+            return changes.page(kind=kind, cursor=cursor, through=through, epoch=epoch, limit=limit)
+        except (FileNotFoundError, sqlite3.Error) as exc:
+            handle_db_error(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get('/api/documents', tags=['知识文档'])
     def list_documents(

@@ -20,6 +20,7 @@ from typing import Any, Iterable
 
 from collectors.base import IntelligenceItem
 from fusion.merger import merge_by_cve
+from storage.changefeed import ensure_changefeed
 
 
 def utc_now() -> str:
@@ -104,6 +105,7 @@ class SQLiteIntelligenceStore:
                     error_text TEXT
                 );
             """)
+            ensure_changefeed(conn)
 
     @staticmethod
     def _to_item(row: sqlite3.Row) -> IntelligenceItem:

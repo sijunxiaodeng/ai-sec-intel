@@ -7,8 +7,9 @@ import math
 from pathlib import Path
 import re
 import sqlite3
+from config.paths import DATA_ROOT
 
-DEFAULT_DB = Path(__file__).resolve().parent.parent / "data" / "task_c.sqlite3"
+DEFAULT_DB = DATA_ROOT / "task_c.sqlite3"
 CVE = re.compile(r"CVE-\d{4}-\d{4,7}\b", re.I)
 ENGLISH = re.compile(r"[a-z0-9]+(?:[._-][a-z0-9]+)*", re.I)
 CHINESE = re.compile(r"[\u4e00-\u9fff]+")
@@ -16,8 +17,10 @@ CHINESE = re.compile(r"[\u4e00-\u9fff]+")
 
 @contextmanager
 def _connection(path):
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30)
     try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA journal_mode=WAL")
         with conn:
             yield conn
     finally:

@@ -7,7 +7,7 @@ from agents.enrichment_agent import run as enrich_run
 from agents.monitor_agent import run as monitor_run
 from agents.qa_agent import run as qa_run
 from agents.verifier_agent import run as verify_run
-from database.store import append_run, latest_run, load_kb, upsert
+from database.store import append_run, latest_run, load_kb, upsert, apply_sync_page, apply_enrichment
 from enrichment.papers import fetch_papers
 from enrichment.service import apply_public_feeds
 from models import enriched_record
@@ -20,14 +20,14 @@ def _auto_ingest_enabled():
     }
 
 
-def _documents_step(records, limit=3):
+def _documents_step(records):
     if not _auto_ingest_enabled():
         return [], [{"role": "编排", "action": "跳过自动抓取关联资料",
                      "detail": "AUTO_INGEST_ON_COLLECT 已关闭；可在详情页或 /api/documents 单独处理。"}]
-    results = [ingest(record, max_sources=4) for record in records[:limit]]
-    return results, [{"role": "富化", "action": "抓取关联资料并更新证据索引",
-                      "detail": "本次处理 %d 条情报，抓取成功 %d 个来源；失败状态已保留。其余情报可在详情中单独处理。" %
-                      (len(results), sum(row["ok"] for row in results))}]
+    from automation.processing import enqueue
+    count = enqueue(records)
+    return [], [{"role": "富化", "action": "加入富化与证据索引队列",
+                 "detail": "%d 个任务已持久化；所有新记录及变更均会处理，失败自动重试。" % count}]
 
 
 def run_documents(record):
@@ -42,7 +42,12 @@ def run_documents(record):
 def run_collect(keyword="llm"):
     monitored = monitor_run(keyword)
     enriched = enrich_run(monitored["items"], online=False)
-    saved = upsert(enriched["records"])
+    changes = monitored.get("team_changes")
+    if changes is not None:
+        saved = apply_sync_page(enriched["records"], source=changes["source"],
+                                cursor=changes["cursor"], retracted_ids=changes["retracted_ids"])
+    else:
+        saved = upsert(enriched["records"])
     documents, document_steps = _documents_step(enriched["records"])
     steps = monitored["steps"] + enriched["steps"] + [{
         "role": "编排",
@@ -51,11 +56,15 @@ def run_collect(keyword="llm"):
     }]
     steps += document_steps
     append_run(steps, "collect")
-    return {"records": saved, "steps": steps, "documents": documents}
+    return {"records": saved, "steps": steps, "documents": documents,
+            "status": monitored.get("status", "success"),
+            "fetched": len(monitored["items"]), "source_results": monitored.get("source_results", [])}
 
 
 def run_enrich():
     records = load_kb()
+    from automation.processing import revision
+    expected = {record["item"]["cve_id"]: revision(record) for record in records}
     feed = apply_public_feeds(records)
     cve_ids = [(record.get("item") or {}).get("cve_id") for record in records]
     papers, paper_error = fetch_papers(cve_ids)
@@ -66,7 +75,8 @@ def run_enrich():
         if found:
             record["papers"] = found
             attached += len(found)
-    saved = upsert([enriched_record(record) for record in records])
+    apply_enrichment([enriched_record(record) for record in records], expected_revisions=expected)
+    saved = load_kb()
     detail = "已查询 EPSS、CISA KEV，并按编号检索论文。对上编号的论文 %d 篇。" % attached
     if feed.get("epss_error") or feed.get("kev_error") or paper_error:
         detail = "部分公开源没有连通，失败项已跳过，已有字段仍保留。"

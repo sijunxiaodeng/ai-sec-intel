@@ -24,6 +24,12 @@ def _startup():
     start_schedule()
 
 
+@app.on_event("shutdown")
+def _shutdown():
+    from automation.schedule import stop
+    stop()
+
+
 class CollectBody(BaseModel):
     # Broader AI-security default; comma-separated multi-keyword supported by monitor_agent.
     keyword: str = "llm"
@@ -524,15 +530,41 @@ def monitor_status():
     return {
         "mode": "automatic",
         "interval_hours": st.get("interval_hours"),
+        "interval_minutes": st.get("interval_minutes"),
         "auto_on_start": st.get("auto_on_start"),
         "running": bool(st.get("running")),
         "last_run": st.get("last_run") or "",
         "last_count": st.get("last_count") or 0,
         "last_error": st.get("last_error") or "",
+        "last_status": st.get("last_status") or "not_run",
+        "source_results": st.get("source_results") or [],
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
         "notice": "默认持续自动监测宽范围 AI 安全情报；手动按钮仅用于立即刷新一轮。",
     }
+
+
+@app.get("/api/processing/status")
+def processing_status():
+    from automation.processing import state
+    return state()
+
+
+@app.post("/api/processing/retry")
+def retry_processing():
+    from automation.processing import retry_failed
+    return {"requeued": retry_failed()}
+
+
+@app.get("/api/health")
+def health():
+    from automation.processing import state
+    team = _team_reachable_probe()
+    monitor = monitor_state()
+    available = bool(team.get("reachable") and team.get("database_available"))
+    return {"status": "ok" if available and monitor.get("last_status") != "failed" else "degraded",
+            "team_database_available": available, "monitor_status": monitor.get("last_status", "not_run"),
+            "processing": state(), "last_sync": monitor.get("last_run", "")}
 
 
 @app.post("/api/monitor/run")
@@ -542,14 +574,18 @@ def monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        warnings.append("团队情报服务（:8765）暂不可达，已跳过 B 源；仍采集 NVD/OSV 并刷新本地资料流。")
+        warnings.append("团队情报服务暂不可达；旧数据保留，增量同步将在下轮重试。")
     try:
         result = run_collect(keyword)
     except Exception as exc:
+        from automation.schedule import mark_run
+        mark_run(keyword=keyword, error=type(exc).__name__, status="failed")
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     try:
         from automation.schedule import mark_run
-        mark_run(count=len(result["records"]), keyword=keyword)
+        mark_run(count=result.get("fetched", 0), keyword=keyword,
+                 error="部分情报来源失败" if result.get("status") == "partial" else "",
+                 status=result.get("status", "success"), source_results=result.get("source_results", []))
     except Exception:
         pass
     library = None
@@ -569,11 +605,13 @@ def monitor_run(body: MonitorRunBody):
     team_failed = any("团队情报" in (s.get("action") or "") and "失败" in (s.get("action") or "")
                       for s in (result.get("steps") or []))
     if team_failed and "团队情报服务（:8765）暂不可达" not in " ".join(warnings):
-        warnings.append("团队情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+        warnings.append("团队情报源本轮失败，旧数据保留，游标未推进。")
     return {
         "mode": "auto",
         "keyword": keyword,
         "count": len(result["records"]),
+        "fetched": result.get("fetched", 0),
+        "status": result.get("status", "success"),
         "steps": result["steps"],
         "library_sync": library,
         "team": team,
@@ -585,10 +623,15 @@ def monitor_run(body: MonitorRunBody):
 
 @app.post("/api/collect")
 def collect(body: CollectBody):
+    from automation.schedule import mark_run
     try:
         result = run_collect(body.keyword.strip() or AUTO_MONITOR_KEYWORDS)
     except Exception as exc:
+        mark_run(keyword=body.keyword, error=type(exc).__name__, status="failed")
         raise HTTPException(status_code=502, detail="监测没有完成：%s" % exc)
+    mark_run(count=result.get("fetched", 0), keyword=body.keyword,
+             status=result.get("status", "success"), source_results=result.get("source_results", []),
+             error="部分情报来源失败" if result.get("status") == "partial" else "")
     return {
         "count": len(result["records"]),
         "steps": result["steps"],

@@ -5,6 +5,7 @@ import copy
 import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 from enrichment.documents import (associate, canonical, digest, extract_document, fetch,
                                   fetch_url, finish, now, nvd_document, reference_candidates)
@@ -60,7 +61,8 @@ def store_document(record, doc, db_path):
             conn.execute("INSERT OR REPLACE INTO evidence VALUES (?, ?, ?)", (cve_id, chunk["evidence_id"], json.dumps(row, ensure_ascii=False)))
 
 
-def ingest(record, db_path=DEFAULT_DB, max_sources=5, fetcher=fetch):
+def ingest(record, db_path=DEFAULT_DB, max_sources=5, fetcher=fetch, *, update_index_on_ingest=True,
+           commit_guard=None):
     if not 1 <= max_sources <= 10:
         raise ValueError("max_sources 必须为 1 到 10")
     cve_id = record["item"]["cve_id"].upper()
@@ -121,9 +123,12 @@ def ingest(record, db_path=DEFAULT_DB, max_sources=5, fetcher=fetch):
     with ThreadPoolExecutor(max_workers=3) as pool:
         docs.extend(pool.map(process, refs[:max_sources - 1]))
     for doc in docs:
-        store_document(record, doc, path)
+        # Queue workers fence their short writes after fetching, so stale work
+        # cannot overwrite a newer revision or a withdrawn item.
+        with commit_guard() if commit_guard else nullcontext():
+            store_document(record, doc, path)
     from rag.hybrid import update_index
-    index = update_index(path)
+    index = update_index(path) if update_index_on_ingest else {"status": "queued"}
     statuses = document_status(cve_id, path)
     return {"cve_id": cve_id, "documents": statuses, "attempted": len(docs),
             "ok": sum(doc["status"] == "ok" for doc in docs),

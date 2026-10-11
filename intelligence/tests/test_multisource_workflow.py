@@ -15,6 +15,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from ai_pipeline.store import ClassificationStore
+from ai_pipeline.documents import run_document_batch
 from api_v6.app import create_app
 from api_v6.repository import current_classifier_version
 from collectors.base import IntelligenceItem
@@ -172,6 +173,7 @@ class KnowledgeAPITests(unittest.TestCase):
                 if spec.kind not in {'nvd', 'github', 'cisa'} and spec.category not in selected:
                     selected[spec.category] = spec
                     documents.ingest(spec.name, spec.category, [document(spec)])
+            self.assertEqual(run_document_batch(db, version)["positive"], 6)
             with TestClient(create_app(ROOT, db)) as client:
                 data = client.get('/api/documents').json()
                 self.assertEqual(data['total'], 6)

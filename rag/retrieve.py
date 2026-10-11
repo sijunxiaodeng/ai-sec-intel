@@ -3,6 +3,7 @@
 import copy
 from enrichment.guidance import library_for, report as guidance_report
 from database.store import load_kb
+from database import store as main_store
 from rag.answer import TOPIC_WORDS
 from rag.evidence import CVE, DEFAULT_DB, _tokens, load_records
 from rag.hybrid import search as search_chunks
@@ -10,9 +11,14 @@ from rag.hybrid import search as search_chunks
 
 def knowledge_records(db_path=DEFAULT_DB):
     records = copy.deepcopy(load_kb())
+    withdrawn = {row["item"]["cve_id"] for row in load_kb(include_out_of_scope=True)
+                 if (row["item"].get("raw_data") or {}).get("_store", {}).get("in_scope") is False}
+    withdrawn.update(main_store.retracted_ids())
     known = {row["item"]["cve_id"]: row for row in records}
     for row in load_records(db_path):
         key = row["item"]["cve_id"]
+        if key in withdrawn:
+            continue
         if key not in known:
             records.append(row)
             known[key] = row

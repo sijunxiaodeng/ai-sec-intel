@@ -51,7 +51,7 @@ start_local() {
     log "starting B on $B_URL"
     (
       cd "$ROOT"
-      export INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db"
+      export INTELLIGENCE_DB_PATH="$DEMO_B_DB"
       nohup "$ROOT/intelligence/.venv/bin/python" \
         "$ROOT/intelligence/run_intelligence_api_v6.py" \
         --host 127.0.0.1 --port "$B_PORT" \
@@ -68,6 +68,8 @@ start_local() {
       export APP_HOST=127.0.0.1 APP_PORT="$MAIN_PORT"
       export TEAM_INTEL_BASE_URL="http://127.0.0.1:${B_PORT}"
       export AUTO_INGEST_ON_COLLECT
+      export MAIN_IMPORT_DEMO_CARDS=1
+      export MAIN_DATA_DIR="$DEMO_DIR/main-data"
       # Prepare historical sample once (best-effort)
       "$ROOT/.venv/bin/python" -m rag.prepare >/dev/null 2>&1 || true
       nohup "$ROOT/.venv/bin/python" main.py \
