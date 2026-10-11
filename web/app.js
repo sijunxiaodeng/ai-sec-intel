@@ -266,24 +266,6 @@ function dateText(value) {
   return (value || "").slice(0, 10) || "未知";
 }
 
-function freshnessLabel(publishedAt) {
-  var raw = (publishedAt || "").trim();
-  if (!raw) return "";
-  var ms = Date.parse(raw.length === 10 ? raw + "T00:00:00Z" : raw);
-  if (!ms) return "";
-  var days = Math.floor((Date.now() - ms) / 86400000);
-  // Item publish age — not collect latency / realtime SLA.
-  if (days < 0) return "日期异常";
-  if (days <= 7) return "近7天";
-  if (days <= 30) return "近30天";
-  return "更早";
-}
-
-function freshnessTitle(publishedAt) {
-  var stamp = dateText(publishedAt);
-  return "条目发布时间 " + stamp + "（近7/30天按发布日，不是采集延迟）";
-}
-
 function epssText(epss) {
   if (!epss) return "尚未查询";
   if (epss.status === "ok") return String(epss.score);
@@ -350,15 +332,7 @@ function renderItemRow(parent, item, onPick) {
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(kindBadge);
   }
-  var fresh = freshnessLabel(item.published_at);
-  if (fresh) {
-    var freshBadge = document.createElement("span");
-    freshBadge.className = "fresh-badge" + (fresh === "近7天" ? " is-hot" : fresh === "近30天" ? " is-warm" : "");
-    freshBadge.textContent = fresh;
-    freshBadge.title = freshnessTitle(item.published_at);
-    titleLine.appendChild(document.createTextNode(" "));
-    titleLine.appendChild(freshBadge);
-  }
+  // Publish date stays in the meta line only — not a second global "时效" badge.
   var labels = itemSourceLabels(item);
   var srcWrap = add(id, "div", "src-row");
   labels.slice(0, 4).forEach(function (label) {
@@ -379,7 +353,8 @@ function renderItemRow(parent, item, onPick) {
   var headline = item.title && item.title !== item.cve_id ? item.title : (item.description || "");
   add(text, "div", "desc", (headline || "").slice(0, 140));
   var product = item.product ? (" · " + item.product) : "";
-  add(text, "div", "meta", dateText(item.published_at) + " · " + labels.join("、") + product);
+  var pub = dateText(item.published_at);
+  add(text, "div", "meta", "发布 " + pub + " · " + labels.join("、") + product);
 }
 
 function setPill(ready) {
@@ -455,7 +430,6 @@ function renderMonitorLive(data, opts) {
   opts = opts || {};
   var live = $("monitor-live");
   var stateEl = $("monitor-live-state");
-  var cadenceEl = $("monitor-live-cadence");
   var lastEl = $("monitor-live-last");
   var nextEl = $("monitor-live-next");
   var phaseEl = $("monitor-live-phase");
@@ -467,26 +441,31 @@ function renderMonitorLive(data, opts) {
   var hours = (data && data.interval_hours) || 6;
   live.classList.toggle("is-running", running);
   if (progress) progress.hidden = !running;
-  if (cadenceEl) {
-    cadenceEl.textContent = "约每 " + hours + " 小时一轮 · 手动可立即刷新 · 非实时推流";
-  }
+  // One primary clock: last collect → next scheduled refresh (not item publish age).
   if (running) {
     stateEl.textContent = "正在刷新" + (elapsed != null ? "（已 " + elapsed + " 秒）" : "") + "…";
-    phaseEl.textContent = phase
-      ? ("当前步骤：" + phase)
-      : "正在跑一轮（多源采集 → NVD/OSV 入库 → 可选资料同步），请稍候…";
+    if (phaseEl) {
+      phaseEl.textContent = phase
+        ? ("当前步骤：" + phase)
+        : "正在跑一轮（多源采集 → NVD/OSV 入库 → 可选资料同步）…";
+    }
   } else {
-    stateEl.textContent = "空闲（定时轮询，非实时推流）";
-    phaseEl.textContent = "定时约每 " + hours
-      + " 小时自动一轮；点「立即刷新一轮」可马上跑。列表「近7天」看条目发布日。";
+    stateEl.textContent = "空闲";
+    if (phaseEl) {
+      phaseEl.textContent = "约每 " + hours + " 小时自动刷新；也可点「立即刷新一轮」。非实时推流。";
+    }
   }
   if (lastEl) {
     var last = (data && data.last_run) || "";
     var count = (data && data.last_count) || 0;
-    lastEl.textContent = last ? (formatStamp(last) + " · 相关 " + count + " 条") : "尚未记录";
+    lastEl.textContent = last
+      ? (formatStamp(last) + (count ? " · 相关 " + count + " 条" : ""))
+      : "尚未刷新；可点「立即刷新一轮」";
   }
   if (nextEl) {
-    nextEl.textContent = (data && data.next_run) ? formatStamp(data.next_run) : "等待首轮完成后估算";
+    if (running) nextEl.textContent = "本轮进行中…";
+    else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（约每 " + hours + " 小时）";
+    else nextEl.textContent = "完成首轮后按约每 " + hours + " 小时估算";
   }
 }
 
@@ -499,19 +478,20 @@ function loadMonitorStatus() {
       return data;
     }
     var bits = [];
-    bits.push("模式：定时自动监测（约每 " + (data.interval_hours || 6) + " 小时，非实时推流）");
-    if (data.running) bits.push("后台正在跑：" + (data.run_phase || "进行中"));
-    else if (data.last_run) bits.push("最近一轮 " + formatStamp(data.last_run) + "，入库相关 " + (data.last_count || 0) + " 条");
-    else bits.push("尚无完成轮次；可点「立即刷新一轮」");
-    if (data.next_run) bits.push("预计下次定时 " + formatStamp(data.next_run));
+    if (data.running) bits.push("正在刷新：" + (data.run_phase || "进行中"));
+    else if (data.last_run) {
+      bits.push("最近更新 " + formatStamp(data.last_run));
+      if (data.last_count) bits.push("相关 " + data.last_count + " 条");
+    } else bits.push("尚未刷新；可点「立即刷新一轮」");
+    if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
     if (data.last_error) bits.push("上次错误：" + data.last_error);
-    setMonitorStatus(bits.join("。") + "。");
+    setMonitorStatus(bits.join(" · ") + "。");
     var line = $("monitor-line");
     if (line) {
       line.textContent = data.running
         ? ("监测进行中：" + (data.run_phase || "刷新中") + "…")
         : (data.last_run
-          ? ("最近监测 " + formatStamp(data.last_run) + " · 相关 " + (data.last_count || 0) + " 条")
+          ? ("最近更新 " + formatStamp(data.last_run) + (data.last_count ? " · 相关 " + data.last_count + " 条" : ""))
           : "可点「立即刷新监测」马上跑一轮");
     }
     return data;
@@ -627,14 +607,11 @@ function renderMonitorFeed(data) {
     });
   }
   if (summary) {
-    var fresh = data.freshness || {};
     summary.textContent = "共 CVE " + (counts.cve || 0)
       + " · 资料 " + (counts.document || 0)
       + (teamTotal ? "（含多源资料 " + teamTotal + "）" : "")
-      + " · 近7天 " + (fresh.days_7 || 0)
-      + " · 近30天 " + (fresh.days_30 || 0)
       + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
-      + "。按发布时间新→旧；近7/30天=条目发布日，采集节奏见上方「最近一轮」。";
+      + "。列表按原文发布时间排序；监测是否最新看上方「最近更新」。";
   }
   var query = monitorKeyword();
   if (!items.length) {

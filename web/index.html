@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">周期采集（默认约每 6 小时）+ 手动刷新，不是实时推流。列表「近7天/近30天」按条目发布时间，采集节奏看下方「最近一轮」。</p>
+            <p class="hint">按周期自动刷新情报（默认约每 6 小时），也可立即刷新。下方「最近更新 / 下次刷新」即监测时效；列表里的日期是各条原文发布时间。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -139,20 +139,16 @@
             <span id="monitor-live-state">空闲</span>
           </div>
           <div class="monitor-live-row">
-            <span class="monitor-live-label">采集节奏</span>
-            <span id="monitor-live-cadence">周期轮询 · 非实时</span>
-          </div>
-          <div class="monitor-live-row">
-            <span class="monitor-live-label">最近一轮</span>
+            <span class="monitor-live-label">最近更新</span>
             <span id="monitor-live-last">—</span>
           </div>
           <div class="monitor-live-row">
-            <span class="monitor-live-label">下次定时</span>
+            <span class="monitor-live-label">下次刷新</span>
             <span id="monitor-live-next">—</span>
           </div>
-          <div class="monitor-live-row">
-            <span class="monitor-live-label">进度</span>
-            <span id="monitor-live-phase">定时轮询（非实时推流）；点「立即刷新」可马上跑一轮</span>
+          <div class="monitor-live-row" id="monitor-live-phase-row">
+            <span class="monitor-live-label">说明</span>
+            <span id="monitor-live-phase">约每 6 小时自动一轮；非实时推流</span>
           </div>
           <div class="monitor-progress" id="monitor-progress" hidden>
             <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
@@ -427,6 +423,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-freshness1"></script>
+  <script src="/assets/app.js?v=20261011-freshness2"></script>
 </body>
 </html>
