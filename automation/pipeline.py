@@ -82,11 +82,41 @@ def begin_pipeline():
     return pipe
 
 
+def _stage_ids_match(pipe):
+    """True when persisted stages match current product schema (coarse only)."""
+    expected = [d["id"] for d in STAGE_DEFS]
+    got = [s.get("id") for s in (pipe.get("stages") or [])]
+    return got == expected
+
+
 def _load_pipeline():
     data = ensure_state()
     pipe = data.get("pipeline")
-    if not isinstance(pipe, dict) or not pipe.get("stages"):
+    # Migrate away from old per-source stage checklists left in monitor.json
+    # (e.g. fetch_nvd / fetch_osv / 抓取·多路采集) so UI cannot resurrect them.
+    if not isinstance(pipe, dict) or not pipe.get("stages") or not _stage_ids_match(pipe):
+        kept_metrics = {}
+        kept_summary = ""
+        kept_tech = ""
+        kept_status = "idle"
+        if isinstance(pipe, dict):
+            kept_metrics = dict(pipe.get("metrics") or {})
+            kept_summary = pipe.get("summary") or ""
+            kept_tech = pipe.get("tech_detail") or ""
+            # Never keep a "done" status that still advertised per-source rows.
+            if pipe.get("status") == "running" and _stage_ids_match(pipe):
+                kept_status = "running"
         pipe = empty_pipeline()
+        if kept_metrics:
+            pipe["metrics"].update({
+                k: int(v) for k, v in kept_metrics.items()
+                if k in pipe["metrics"] and v is not None
+            })
+        if kept_summary and "抓取" not in kept_summary:
+            pipe["summary"] = kept_summary
+        if kept_tech:
+            pipe["tech_detail"] = kept_tech[:500]
+        pipe["status"] = kept_status
         data["pipeline"] = pipe
         _write_state(data)
     return data, pipe

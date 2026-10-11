@@ -163,6 +163,31 @@ class TestPipelineState(unittest.TestCase):
         self.schedule_mod.STATE_PATH = self._state
         self.tmp.cleanup()
 
+    def test_migrates_old_per_source_stages(self):
+        # Simulate leftover monitor.json from earlier UI (抓取·NVD 等).
+        stale = {
+            "started_at": "2026-10-11T08:40:00Z",
+            "interval_hours": 6,
+            "running": False,
+            "pipeline": {
+                "status": "done",
+                "stages": [
+                    {"id": "fetch_multisource", "title": "抓取 · 多路采集", "status": "skip"},
+                    {"id": "fetch_nvd", "title": "抓取 · NVD", "status": "ok"},
+                    {"id": "fetch_osv", "title": "抓取 · OSV", "status": "ok"},
+                ],
+                "metrics": {"hit": 1942, "inserted": 0, "merged": 18},
+                "summary": "旧摘要",
+            },
+        }
+        self.schedule_mod.STATE_PATH.write_text(
+            json.dumps(stale, ensure_ascii=False), encoding="utf-8"
+        )
+        pipe = self.pipeline_mod.get_pipeline()
+        self.assertEqual([s["id"] for s in pipe["stages"]], ["monitoring", "persist", "library_sync"])
+        self.assertFalse(any("fetch_nvd" == s["id"] for s in pipe["stages"]))
+        self.assertEqual(pipe["metrics"].get("hit"), 1942)
+
     def test_begin_update_finish(self):
         pipe = self.pipeline_mod.begin_pipeline()
         self.assertEqual(pipe["status"], "running")
