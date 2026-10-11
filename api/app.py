@@ -816,9 +816,9 @@ def monitor_feed(q: str = "", kind: str = "all"):
         "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
         "mix_note": (
             "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
-            "类型/分类与来源分两维看；聚合采集=本系统多路采集，不是第二端口。"
+            "类型/分类与来源分两维看；聚合库=监测抓取的一路，不是第二套监测/端口。"
             if doc_items else
-            "当前几乎只有漏洞条目——请先跑多路采集或同步资料库，资料类才会进入监测流。"
+            "当前几乎只有漏洞条目——请先监测刷新或同步资料库，资料类才会进入监测流。"
         ),
     }
 
@@ -1044,93 +1044,93 @@ def monitor_run(body: MonitorRunBody):
     from automation.pipeline import begin_pipeline, bump_metrics, finish_pipeline, update_stage
     from automation.schedule import mark_run, mark_running
 
-    try:
-        begin_pipeline()
-        mark_running(phase="准备采集流水线", keyword=keyword)
-    except Exception:
         try:
-            mark_running(phase="starting", keyword=keyword)
+            begin_pipeline()
+            mark_running(phase="监测刷新", keyword=keyword)
         except Exception:
-            pass
+            try:
+                mark_running(phase="监测刷新", keyword=keyword)
+            except Exception:
+                pass
 
     def on_phase(stage_id, **fields):
         update_stage(stage_id, **fields)
 
+    # 聚合库抓取 = 可选刷新本地库 + 稍后读入 CVE（同属监测一步，不是「多源」产品线）。
     b_cycle = None
+    aggregate_refresh_note = ""
     if embed_enabled() and b_monitor_on_refresh():
         try:
             update_stage(
-                "fetch_multisource",
+                "fetch_aggregate",
                 status="running",
-                did="启动本机多路采集周期",
-                phase="抓取 · 多路采集",
+                did="刷新本机聚合情报，供本轮监测读入",
+                phase="抓取（聚合库）",
             )
             b_cycle = run_b_monitor_cycle()
             st = b_cycle.get("status")
             if st in {"success", "partial"}:
+                aggregate_refresh_note = "已刷新（%s，成功源 %s/%s）；接着读入 CVE" % (
+                    st, b_cycle.get("success_sources"), b_cycle.get("configured_sources"),
+                )
                 update_stage(
-                    "fetch_multisource",
-                    status="ok",
-                    did="刷新本机聚合情报库（多路采集器）",
-                    got="状态 %s；成功源 %s/%s"
-                    % (st, b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
-                    produced="库内文档/CVE 已尽力更新",
-                    impact="后续「聚合库 CVE」读取本轮结果",
-                    note="允许 partial，不因单源失败整轮作废",
+                    "fetch_aggregate",
+                    status="running",
+                    did="已刷新本机聚合情报，正在读入 CVE…",
+                    got=aggregate_refresh_note,
+                    produced="",
+                    impact="与 NVD/OSV 一并进入整理、入库",
+                    note="允许 partial，不因单路失败整轮作废",
+                    phase="抓取（聚合库）",
                 )
             elif st in {"skipped", "disabled"}:
+                aggregate_refresh_note = "本轮未另刷聚合库，直接读现有数据"
                 update_stage(
-                    "fetch_multisource",
-                    status="skip",
-                    did="多路采集未执行",
+                    "fetch_aggregate",
+                    status="running",
+                    did="读入本机聚合库 CVE",
                     got=st,
-                    produced="沿用现有库",
-                    impact="仍采集 NVD/OSV",
-                    note=b_cycle.get("error") or "",
+                    note=aggregate_refresh_note,
+                    phase="抓取（聚合库）",
                 )
             else:
+                aggregate_refresh_note = "聚合库刷新失败，仍尝试读现有数据"
                 update_stage(
-                    "fetch_multisource",
-                    status="error",
-                    did="多路采集周期失败",
+                    "fetch_aggregate",
+                    status="running",
+                    did="聚合库刷新未成功，尝试读现有 CVE",
                     got=st,
-                    produced="0",
-                    impact="仍读取现有库并采集 NVD/OSV",
                     note=(b_cycle.get("error") or "")[:200],
+                    phase="抓取（聚合库）",
                 )
         except Exception as exc:
             b_cycle = {"status": "failed", "error": "%s: %s" % (type(exc).__name__, exc)[:160]}
+            aggregate_refresh_note = "聚合库刷新异常，仍尝试读现有数据"
             update_stage(
-                "fetch_multisource",
-                status="error",
-                did="多路采集周期异常",
+                "fetch_aggregate",
+                status="running",
+                did="聚合库刷新异常，尝试读现有 CVE",
                 got="失败",
-                produced="0",
-                impact="仍采集 NVD/OSV",
                 note=b_cycle["error"],
+                phase="抓取（聚合库）",
             )
     else:
+        aggregate_refresh_note = "本轮直接读现有聚合库（未另刷）"
         update_stage(
-            "fetch_multisource",
-            status="skip",
-            did="本轮未请求多路采集刷新",
-            got="跳过",
-            produced="沿用现有库",
-            impact="仍采集 NVD/OSV",
-            note="B_MONITOR_ON_REFRESH=0 或非 embed",
+            "fetch_aggregate",
+            status="pending",
+            did="稍后读入本机聚合库 CVE",
+            note=aggregate_refresh_note,
+            phase="监测刷新",
         )
 
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        mode = (team or {}).get("mode") or "embed"
-        if mode == "embed":
-            warnings.append("多源情报库暂不可用（同进程嵌入），已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
-        else:
-            warnings.append("多源情报 sidecar 暂不可达，已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
+        warnings.append("聚合库暂不可用，本轮该路 CVE 将跳过；仍抓取 NVD/OSV 并刷新资料。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
-            "多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
+            "聚合库刷新本轮%s（%s）；仍读取现有库并抓取 NVD/OSV。"
             % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
         )
     result = None
@@ -1139,6 +1139,19 @@ def monitor_run(body: MonitorRunBody):
     try:
         result = run_collect(keyword, on_phase=on_phase)
         round_stats = result.get("round_stats") or {}
+        if aggregate_refresh_note:
+            try:
+                # Keep refresh context on the same 抓取（聚合库） step (one pipeline).
+                agg_step = next(
+                    (s for s in (result.get("steps") or []) if "聚合库" in (s.get("action") or "")),
+                    None,
+                )
+                note = aggregate_refresh_note
+                if agg_step and agg_step.get("note"):
+                    note = "%s；%s" % (aggregate_refresh_note, agg_step.get("note"))
+                update_stage("fetch_aggregate", note=note)
+            except Exception:
+                pass
         bump_metrics(
             hit=round_stats.get("hit"),
             kept=round_stats.get("kept"),
@@ -1152,7 +1165,7 @@ def monitor_run(body: MonitorRunBody):
                 "library_sync",
                 status="running",
                 did="同步公开资料与聚合摘要",
-                phase="同步 · 资料库",
+                phase="同步（资料）",
             )
             # Public library sync brings research / vendor / paper into the monitor
             # feed via _library_documents — without inventing Talos/FreeBuf.
@@ -1167,7 +1180,7 @@ def monitor_run(body: MonitorRunBody):
                 warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
             if not team.get("reachable"):
                 library["team"] = {"status": "skipped", "error": "team unreachable"}
-                warnings.append("已跳过多源资料同步。")
+                warnings.append("已跳过聚合库资料同步。")
             else:
                 try:
                     from rag.library import sync_team
@@ -1176,7 +1189,7 @@ def monitor_run(body: MonitorRunBody):
                     library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
                     library["team"] = {"status": "error", "error": type(exc).__name__}
-                    warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
+                    warnings.append("聚合库资料同步失败，CVE/公开源结果仍已刷新。")
             # Backward-compatible top-level fields for older UI.
             library["status"] = (
                 (library.get("team") or {}).get("status")
@@ -1231,12 +1244,12 @@ def monitor_run(body: MonitorRunBody):
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     steps = result.get("steps") or []
     team_failed = any(
-        ("多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
+        ("聚合库" in (s.get("action") or "") or "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
         and "失败" in (s.get("action") or "")
         for s in steps
     )
-    if team_failed and "多源情报" not in " ".join(warnings) and "团队情报" not in " ".join(warnings):
-        warnings.append("多源情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    if team_failed and "聚合库" not in " ".join(warnings):
+        warnings.append("聚合库本轮失败或跳过；NVD/OSV 与本地库仍继续。")
 
     def _step_status(name):
         for step in steps:
@@ -1252,7 +1265,9 @@ def monitor_run(body: MonitorRunBody):
 
     nvd = _step_status("NVD")
     osv = _step_status("OSV")
-    b_step = _step_status("多源情报")
+    b_step = _step_status("聚合库")
+    if b_step["status"] == "未跑":
+        b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
         b_step = _step_status("团队情报")
     if not team.get("reachable"):
@@ -1274,14 +1289,14 @@ def monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
         c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步多源/公开资料到资料库"}
+        c_sync = {"status": "成功", "detail": "已尽力同步公开/聚合资料到资料库"}
 
     if b_cycle is None:
-        b_mon = {"status": "未请求", "detail": "B_MONITOR_ON_REFRESH=0 或非 embed"}
+        b_mon = {"status": "未请求", "detail": "本轮未另刷聚合库"}
     elif b_cycle.get("status") in {"success", "partial"}:
         b_mon = {
             "status": "成功" if b_cycle.get("status") == "success" else "部分",
-            "detail": "同进程多源 %s/%s 成功"
+            "detail": "聚合库刷新 %s/%s 路成功"
             % (b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
         }
     elif b_cycle.get("status") == "skipped":
@@ -1289,7 +1304,7 @@ def monitor_run(body: MonitorRunBody):
     elif b_cycle.get("status") == "timeout":
         b_mon = {"status": "超时", "detail": b_cycle.get("error") or "overall timeout"}
     elif b_cycle.get("status") == "disabled":
-        b_mon = {"status": "禁用", "detail": "B_MONITOR_ENABLED=0"}
+        b_mon = {"status": "禁用", "detail": "聚合库刷新已关闭"}
     else:
         b_mon = {"status": "失败", "detail": b_cycle.get("error") or b_cycle.get("status")}
 
@@ -1321,7 +1336,7 @@ def monitor_run(body: MonitorRunBody):
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮含同进程多路采集刷新（可 partial）+ NVD/OSV + 聚合库读取；count=本轮新增 CVE，不是整库条数。",
+        "notice": "本轮为一条监测流水线：抓取（聚合库/NVD/OSV）→ 整理 → 入库；count=本轮新增 CVE，不是整库条数。",
     }
 
 

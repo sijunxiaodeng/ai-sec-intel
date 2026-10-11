@@ -6,40 +6,37 @@ from datetime import datetime, timezone
 
 from automation.schedule import ensure_state, _write_state
 
+# One product pipeline under 情报监测 — do not label peer stages as
+# 「主采集」vs「多源」. Internal modules may still differ.
 STAGE_DEFS = [
     {
-        "id": "fetch_multisource",
-        "title": "抓取 · 多路采集",
-        "subtitle": "刷新本机聚合情报库",
+        "id": "fetch_aggregate",
+        "title": "抓取（聚合库）",
+        "subtitle": "刷新并读入本机聚合 CVE（可选刷新）",
     },
     {
         "id": "fetch_nvd",
-        "title": "抓取 · NVD",
+        "title": "抓取（NVD）",
         "subtitle": "按关键词与变更窗取回",
     },
     {
         "id": "fetch_osv",
-        "title": "抓取 · OSV",
+        "title": "抓取（OSV）",
         "subtitle": "按 AI 组件包批量查询",
     },
     {
-        "id": "fetch_aggregate",
-        "title": "抓取 · 聚合库 CVE",
-        "subtitle": "读取本机多路采集结果",
-    },
-    {
         "id": "normalize",
-        "title": "整理 · 字段规范化",
+        "title": "整理",
         "subtitle": "统一成同一种入库格式",
     },
     {
         "id": "upsert",
-        "title": "入库 · 合并去重",
+        "title": "入库",
         "subtitle": "写入知识库并合并同编号",
     },
     {
         "id": "library_sync",
-        "title": "同步 · 资料库",
+        "title": "同步（资料）",
         "subtitle": "公开资料与聚合摘要（可选）",
     },
 ]

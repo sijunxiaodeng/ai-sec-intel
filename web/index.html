@@ -156,8 +156,8 @@
         </div>
         <div class="collect-pipeline" id="collect-pipeline" hidden>
           <header class="pipeline-head">
-            <h3 class="pipeline-title">本轮采集流水线</h3>
-            <p class="hint" id="pipeline-summary">刷新后显示抓取 → 整理 → 入库等真实步骤（状态轮询，非推流演出）。</p>
+            <h3 class="pipeline-title">本轮监测流水线</h3>
+            <p class="hint" id="pipeline-summary">监测刷新后显示抓取 → 整理 → 入库（状态轮询，非推流演出；不是两套采集）。</p>
           </header>
           <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
           <ol class="pipeline-stages" id="pipeline-stages"></ol>
@@ -167,7 +167,7 @@
         <aside class="source-legend" aria-label="监测维度说明">
           <header class="panel-head">
             <h2>怎么读情报流</h2>
-            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。「多路采集」= 本系统自己并行跑多路采集器，不是另一个产品，也不是第二个端口。</p>
+            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。监测是<strong>一条流水线</strong>（抓取 NVD/OSV/聚合库 → 整理 → 入库）；「聚合库」只是其中一路来源，不是第二套监测。</p>
           </header>
           <div class="tax-grid">
             <div>
@@ -187,7 +187,7 @@
                 <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（本机直连）</li>
                 <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 项目公告</li>
                 <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
-                <li><span class="src-tag src-team">聚合采集</span> 本系统多路采集写入的本地库（非外队）</li>
+                <li><span class="src-tag src-team">聚合库</span> 监测抓取的一路：本机聚合情报库（非外队、非第二端口）</li>
                 <li><span class="src-tag src-lib">资料库沉淀</span> 公开订阅或采集摘要落入本机资料库</li>
               </ul>
             </div>
@@ -239,7 +239,7 @@
               <button type="button" class="chip" data-source-filter="osv">OSV</button>
               <button type="button" class="chip" data-source-filter="github">GitHub</button>
               <button type="button" class="chip" data-source-filter="kev">CISA KEV</button>
-              <button type="button" class="chip" data-source-filter="aggregate">聚合采集</button>
+              <button type="button" class="chip" data-source-filter="aggregate">聚合库</button>
               <button type="button" class="chip" data-source-filter="library">资料库沉淀</button>
             </div>
           </div>
@@ -460,6 +460,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-pipeline1"></script>
+  <script src="/assets/app.js?v=20261011-pipeline2"></script>
 </body>
 </html>

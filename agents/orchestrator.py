@@ -78,7 +78,12 @@ def run_collect(keyword="llm", *, on_phase=None):
     nvd_step = next((s for s in steps_in if "NVD" in (s.get("action") or "")), None)
     osv_step = next((s for s in steps_in if "OSV" in (s.get("action") or "")), None)
     agg_step = next(
-        (s for s in steps_in if "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or "")),
+        (
+            s for s in steps_in
+            if "聚合库" in (s.get("action") or "")
+            or "多源情报" in (s.get("action") or "")
+            or "团队情报" in (s.get("action") or "")
+        ),
         None,
     )
     _fill_from_step("fetch_nvd", nvd_step, stats.get("nvd_ok", True))

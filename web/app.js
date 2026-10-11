@@ -185,7 +185,7 @@ function sourceLabel(raw) {
     osv: "OSV",
     github: "GitHub Advisory",
     kev: "CISA KEV",
-    aggregate: "聚合采集",
+    aggregate: "聚合库",
     library: "资料库沉淀",
     other: "其他"
   };
@@ -222,8 +222,8 @@ function itemSourceLabels(item) {
     var label = sourceLabel(r);
     if (!seen[label]) { seen[label] = true; labels.push(label); }
   });
-  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["聚合采集"]) {
-    labels.unshift("聚合采集");
+  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["聚合库"]) {
+    labels.unshift("聚合库");
   }
   if (item && item.kind === "document" && item.origin === "library" && !seen["资料库沉淀"]) {
     labels.unshift("资料库沉淀");
@@ -422,13 +422,13 @@ function setTeamHealth(team) {
     var err = team.error || "";
     var hint;
     if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
-      hint = "请先生成聚合采集库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
+      hint = "请先生成聚合库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
     } else if (/多源资料探测失败|聚合|Connection refused|8765/i.test(err)) {
       hint = "嵌入模式下应直读本机库，无需第二端口。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
     } else {
-      hint = "仍会采集 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查聚合采集库。";
+      hint = "仍会抓取 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查聚合库。";
     }
-    el.textContent = "聚合采集库暂不可用"
+    el.textContent = "聚合库暂不可用"
       + (err ? "：" + err : "")
       + "。" + hint;
   } else {
@@ -476,12 +476,12 @@ function renderCollectPipeline(pipeline, opts) {
   var status = pipeline.status || "";
   if (summaryEl) {
     if (pipeline.summary) summaryEl.textContent = pipeline.summary;
-    else if (status === "running") {
-      summaryEl.textContent = "正在执行：抓取 → 整理 → 入库"
+    else     if (status === "running") {
+      summaryEl.textContent = "监测刷新进行中：抓取（聚合库/NVD/OSV）→ 整理 → 入库"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
         + "。进度来自任务状态轮询。";
     } else {
-      summaryEl.textContent = "最近一轮采集步骤如下。0 新增时请看「命中 / 合并」——不等于没搜到。";
+      summaryEl.textContent = "本轮监测步骤如下（一条流水线）。0 新增时请看「命中 / 合并」——不等于没搜到。";
     }
   }
   if (metricsEl) {
@@ -564,7 +564,7 @@ function renderMonitorLive(data, opts) {
     if (phaseEl) {
       phaseEl.textContent = phase
         ? ("当前步骤：" + phase)
-        : "正在跑一轮（多路采集 → NVD/OSV 入库 → 可选资料同步）…";
+        : "正在监测刷新（抓取 → 整理 → 入库）…";
     }
   } else {
     stateEl.textContent = "空闲";
@@ -646,7 +646,7 @@ function loadOverview() {
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "聚合采集 CVE"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "聚合库 CVE"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
@@ -689,9 +689,9 @@ var SOURCE_FILTER_LABELS = {
   osv: "OSV",
   github: "GitHub",
   kev: "CISA KEV",
-  aggregate: "聚合采集",
+  aggregate: "聚合库",
   library: "资料库沉淀",
-  team: "聚合采集"
+  team: "聚合库"
 };
 
 function setMonitorScope(scope) {
@@ -759,7 +759,7 @@ function renderMonitorFeed(data) {
   if (teamMeta.reachable === false) {
     setTeamHealth({
       reachable: false,
-      error: teamMeta.error || "聚合采集资料探测失败",
+      error: teamMeta.error || "聚合库资料探测失败",
     });
   }
   if (summary) {
@@ -772,7 +772,7 @@ function renderMonitorFeed(data) {
     }
     summary.textContent = "共漏洞 " + (counts.cve || 0)
       + " · 资料 " + (counts.document || 0)
-      + (teamTotal ? "（聚合采集资料 " + teamTotal + "）" : "")
+      + (teamTotal ? "（聚合库资料 " + teamTotal + "）" : "")
       + (filterBits.length ? " · " + filterBits.join(" + ") + " → 显示 " + items.length + " 条" : "")
       + "。类型/分类与来源是两维；监测是否最新看上方「最近更新」。";
   }
@@ -870,7 +870,7 @@ function openMonitorDetail(item) {
     [
       ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
       ["来源", itemSourceLabels(item).join("、")],
-      ["入库路径", item.origin === "team_documents" ? "聚合采集（本系统多路采集库）" : "资料库沉淀"],
+      ["入库路径", item.origin === "team_documents" ? "聚合库（监测抓取的一路）" : "资料库沉淀"],
       ["记录类型", item.demo ? "演示合成" : "联网/入库资料"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
@@ -1307,8 +1307,8 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("聚合采集库", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
-  srcLine("多路采集周期", diag.b_monitor);
+  srcLine("聚合库", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("聚合库刷新", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
   var rs = (runData && runData.round_stats) || {};
@@ -1320,10 +1320,10 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
     bits.push("已查到来源数据但无新编号——多半是增量游标之后无更新，或 CVE 已在库中");
   }
   if (team.reachable === false) {
-    bits.push("聚合采集库不可用时仍应有 NVD/OSV 与本地资料");
+    bits.push("聚合库不可用时仍应有 NVD/OSV 与本地资料");
   }
   if (teamDocs.reachable === false) {
-    bits.push("聚合采集资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
+    bits.push("聚合库资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
@@ -1402,8 +1402,8 @@ function runMonitorRefresh(options) {
   setBusyButton(overviewBtn, true, "正在刷新…", "立即刷新监测");
   clearError();
   var busyBase = keyword
-    ? ("正在按「" + keyword + "」刷新监测，")
-    : "正在刷新一轮监测（多路采集 + NVD/OSV，可能需数十秒），";
+    ? ("正在按「" + keyword + "」监测刷新，")
+    : "正在监测刷新（抓取聚合库/NVD/OSV → 整理 → 入库，可能需数十秒），";
   startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",
@@ -1420,7 +1420,7 @@ function runMonitorRefresh(options) {
       + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
       + " · 合并 " + (rs.merged != null ? rs.merged : "—");
     setMonitorStatus("本轮完成：" + roundLine
-      + (bmon.status ? "；多路采集 " + bmon.status : "")
+      + (bmon.status ? "；聚合库刷新 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
       + "。正在刷新情报流…");
     showToast("监测完成：" + roundLine, "busy");
