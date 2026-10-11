@@ -1734,7 +1734,7 @@ on("test-llm", "click", function () {
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
-var libraryScopes = {team_summary: "聚合采集接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryScopes = {team_summary: "聚合库接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
 
