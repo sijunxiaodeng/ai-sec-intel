@@ -1670,30 +1670,93 @@ on("candidate-generate", "click", function () {
   api("/api/library/relations/candidates", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({topic: topic, document_ids: ids})}).then(function (data) { if (topic === $("candidate-topic").value) renderCandidates(data); }).catch(function (error) { if (topic === $("candidate-topic").value) $("candidate-status").textContent = "提取失败，请检查所选资料与来源状态。"; showError(error); }).then(function () { button.disabled = false; });
 });
 
+function renderLibrarySyncStatus(overview) {
+  var sourcesEl = $("library-sources");
+  if (!sourcesEl) return;
+  clear(sourcesEl);
+  var sources = overview.sources || [];
+  var publicSources = sources.filter(function (s) { return (s.category || "") !== "team" && s.source_id !== "team_documents" && s.name !== "多源情报资料"; });
+  var multiSources = sources.filter(function (s) { return (s.category || "") === "team" || s.source_id === "team_documents" || s.name === "多源情报资料"; });
+
+  function statusLabel(st) {
+    if (st === "ok") return "正常";
+    if (st === "partial") return "部分成功";
+    if (st === "error") return "失败";
+    return st || "未知";
+  }
+  function summarize(rows) {
+    if (!rows.length) return { ok: 0, bad: 0, last: "" };
+    var ok = 0, bad = 0, last = "";
+    rows.forEach(function (s) {
+      if (s.status === "ok") ok += 1;
+      else bad += 1;
+      if ((s.checked_at || "") > last) last = s.checked_at || "";
+    });
+    return { ok: ok, bad: bad, last: last };
+  }
+  var pub = summarize(publicSources);
+  var multi = summarize(multiSources);
+  var pubStatus = $("library-sync-public-status");
+  var multiStatus = $("library-sync-multi-status");
+  if (pubStatus) {
+    pubStatus.textContent = publicSources.length
+      ? ("最近公开同步：" + pub.ok + " 源正常" + (pub.bad ? "，" + pub.bad + " 源异常" : "") + (pub.last ? " · " + dateText(pub.last) : ""))
+      : "尚未同步公开资料。";
+  }
+  if (multiStatus) {
+    multiStatus.textContent = multiSources.length
+      ? ("最近多源摘要：" + statusLabel(multiSources[0].status) + (multiSources[0].discovered != null ? " · 窗口 " + multiSources[0].discovered + " 份" : "") + (multiSources[0].checked_at ? " · " + dateText(multiSources[0].checked_at) : ""))
+      : "尚未同步多源摘要。";
+  }
+
+  var line = add(sourcesEl, "p", "meta", "同步概览：公开源 " + pub.ok + "/" + Math.max(publicSources.length, 1) + " 正常"
+    + (multiSources.length ? " · 多源摘要 " + statusLabel(multiSources[0].status) : " · 多源摘要未跑")
+    + "。下方按类型分组浏览。");
+
+  var detail = add(sourcesEl, "details", "library-status-detail");
+  add(detail, "summary", "", "查看来源同步明细（" + sources.length + "）");
+  publicSources.concat(multiSources).forEach(function (source) {
+    var kind = ((source.category || "") === "team" || source.name === "多源情报资料") ? "多源摘要" : "公开";
+    var text = "【" + kind + "】" + source.name + " · " + statusLabel(source.status)
+      + (source.discovered != null ? " · 发现 " + source.discovered + " 份" : "")
+      + (source.checked_at ? " · " + dateText(source.checked_at) : "");
+    if (source.error) text += " · " + source.error;
+    add(detail, "p", "meta", text);
+    if (typeof source.remaining === "number" && source.remaining) {
+      add(detail, "p", "hint", "本轮只处理最近窗口 " + source.discovered + " 份，另有 " + source.remaining + " 份未纳入。");
+    }
+  });
+
+  var failedRows = overview.failed_documents || [];
+  if (!failedRows.length) return;
+  var failBox = add(sourcesEl, "details", "library-fail-detail");
+  var moduleCount = 0;
+  var realFails = [];
+  failedRows.forEach(function (row) {
+    var err = row.error || "";
+    var isModule = row.collapsed || /collectors\.team_documents|No module named/.test(err) || err.indexOf("多源资料模块暂不可用") >= 0;
+    if (isModule) { moduleCount += 1; return; }
+    realFails.push(row);
+  });
+  add(failBox, "summary", "", "同步问题 " + (realFails.length + (moduleCount ? 1 : 0)) + " 条（已折叠，不影响已入库资料）");
+  if (moduleCount) {
+    add(failBox, "p", "hint", "多源摘要同步曾暂不可用；已保留上次成功入库的资料，可稍后重试「同步多源摘要」。");
+  }
+  realFails.slice(0, 12).forEach(function (row) {
+    var block = add(failBox, "div", "meta");
+    add(block, "p", "", (row.retained_previous ? "保留旧存档 · " : "未入库 · ") + (row.error || "未知错误"));
+    if (row.url) libraryLink(block, row.url, "查看来源");
+  });
+  if (realFails.length > 12) {
+    add(failBox, "p", "hint", "另有 " + (realFails.length - 12) + " 条未展开。");
+  }
+}
+
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
     var counts = data.overview.types;
-    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段存档内容；标准 / 风险框架 " + counts.standard + "、政策法规 " + counts.policy + "。";
-    var sources = $("library-sources"); clear(sources);
-    (data.overview.sources || []).forEach(function (source) {
-      add(sources, "p", "meta", source.name + "：" + (source.status === "ok" ? "发现 " + source.discovered + " 份候选" : source.status === "partial" ? "部分资料同步失败" : "同步失败") + " · " + dateText(source.checked_at) + (source.error ? " · " + source.error : ""));
-      if (typeof source.remaining === "number" && source.remaining) add(sources, "p", "hint", "本轮只处理最近更新的 " + source.discovered + " 份，还有 " + source.remaining + " 份不在本轮窗口内。");
-    });
-    var failedRows = data.overview.failed_documents || [];
-    var moduleShown = false;
-    failedRows.forEach(function (row) {
-      var err = row.error || "";
-      var isModule = row.collapsed || /collectors\.team_documents|No module named/.test(err) || err.indexOf("多源资料模块暂不可用") >= 0;
-      if (isModule) {
-        if (moduleShown) return;
-        moduleShown = true;
-        add(sources, "p", "hint", "多源资料同步暂不可用，请稍后重试；已保留上次成功入库的资料。");
-        return;
-      }
-      var block = add(sources, "div", "meta");
-      add(block, "p", "", "资料抓取失败" + (row.retained_previous ? "，保留上次成功证据" : "，尚未入库") + "：" + err);
-      if (row.url) libraryLink(block, row.url, "查看失败来源");
-    });
+    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段存档内容；标准 / 风险框架 " + (counts.standard || 0) + "、政策法规 " + (counts.policy || 0) + "。";
+    renderLibrarySyncStatus(data.overview || {});
     var target = $("library-list"); clear(target);
     if (!data.items.length) {
       add(target, "p", "empty", "此类型尚未收录资料。");
@@ -1822,9 +1885,9 @@ on("library-sync", "click", function () {
   var idle = "同步公开资料";
   setBusyButton(button, true, "正在同步…", idle);
   clearError();
-  showToast("正在同步公开资料…", "busy");
+  showToast("正在同步公开原文（订阅 + 固定官方）…", "busy");
   api("/api/library/sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({per_source: 3, include_seeds: true})}).then(function (data) {
-    var msg = "公开资料同步完成：" + data.ok + "/" + data.attempted + " 份";
+    var msg = "公开原文同步完成：" + data.ok + "/" + data.attempted + " 份";
     showToast(msg, "ok");
     clear($("library-evidence"));
     clear($("library-relations"));
@@ -1833,27 +1896,27 @@ on("library-sync", "click", function () {
     return loadLibrary();
   }).catch(function (error) {
     showError(error);
-    showToast("公开资料同步失败：" + (error.message || "请求失败"), "error");
+    showToast("公开原文同步失败：" + (error.message || "请求失败"), "error");
   }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
 on("library-team-sync", "click", function () {
   var button = $("library-team-sync");
-  var idle = "同步多源资料";
+  var idle = "同步多源摘要";
   setBusyButton(button, true, "正在同步…", idle);
   clearError();
-  showToast("正在同步多源资料…", "busy");
+  showToast("正在同步多源摘要（题名/描述窗口）…", "busy");
   api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
     var msg = data.status === "error"
-      ? "多源资料暂不可用，已有资料仍可使用"
-      : ("多源资料同步完成：" + data.ok + "/" + data.attempted + " 份");
+      ? "多源摘要暂不可用，已有资料仍可使用"
+      : ("多源摘要同步完成：" + data.ok + "/" + data.attempted + " 份");
     showToast(msg, data.status === "error" ? "error" : "ok");
     librarySelectedDocs = []; clear($("library-evidence")); clear($("library-relations"));
-    $("library-answer").textContent = data.status === "error" ? "多源资料暂不可用，已有资料可继续使用。" : "多源资料已同步，请重新选择资料并提问。";
+    $("library-answer").textContent = data.status === "error" ? "多源摘要暂不可用，已有资料可继续使用。" : "多源摘要已同步，请重新选择资料并提问。";
     return loadLibrary();
   }).catch(function (error) {
     showError(error);
-    showToast("多源资料同步失败：" + (error.message || "请求失败"), "error");
+    showToast("多源摘要同步失败：" + (error.message || "请求失败"), "error");
   }).then(function () { setBusyButton(button, false, null, idle); });
 });
 
