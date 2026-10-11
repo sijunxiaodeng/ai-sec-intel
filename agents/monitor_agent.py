@@ -71,6 +71,8 @@ def run(keyword="llm"):
     team_keys = team_keys[:8]
 
     nvd_items, nvd_step = _safe("NVD", lambda: NVDCollector(keyword=primary).collect())
+    # OSV: primary may be a broad word like "llm" — collector expands to known
+    # AI packages (ollama/vllm/transformers/langchain) instead of an empty guess.
     osv_items, osv_step = _safe("OSV", lambda: OSVCollector(keyword=primary).collect())
 
     team_batches = []

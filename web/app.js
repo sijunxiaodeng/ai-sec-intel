@@ -272,10 +272,16 @@ function freshnessLabel(publishedAt) {
   var ms = Date.parse(raw.length === 10 ? raw + "T00:00:00Z" : raw);
   if (!ms) return "";
   var days = Math.floor((Date.now() - ms) / 86400000);
+  // Item publish age — not collect latency / realtime SLA.
+  if (days < 0) return "日期异常";
   if (days <= 7) return "近7天";
   if (days <= 30) return "近30天";
-  if (days < 0) return "日期异常";
   return "更早";
+}
+
+function freshnessTitle(publishedAt) {
+  var stamp = dateText(publishedAt);
+  return "条目发布时间 " + stamp + "（近7/30天按发布日，不是采集延迟）";
 }
 
 function epssText(epss) {
@@ -349,6 +355,7 @@ function renderItemRow(parent, item, onPick) {
     var freshBadge = document.createElement("span");
     freshBadge.className = "fresh-badge" + (fresh === "近7天" ? " is-hot" : fresh === "近30天" ? " is-warm" : "");
     freshBadge.textContent = fresh;
+    freshBadge.title = freshnessTitle(item.published_at);
     titleLine.appendChild(document.createTextNode(" "));
     titleLine.appendChild(freshBadge);
   }
@@ -448,6 +455,7 @@ function renderMonitorLive(data, opts) {
   opts = opts || {};
   var live = $("monitor-live");
   var stateEl = $("monitor-live-state");
+  var cadenceEl = $("monitor-live-cadence");
   var lastEl = $("monitor-live-last");
   var nextEl = $("monitor-live-next");
   var phaseEl = $("monitor-live-phase");
@@ -456,8 +464,12 @@ function renderMonitorLive(data, opts) {
   var running = !!(opts.running || (data && data.running) || monitorRefreshing);
   var phase = opts.phase || (data && data.run_phase) || "";
   var elapsed = opts.elapsedSec != null ? opts.elapsedSec : null;
+  var hours = (data && data.interval_hours) || 6;
   live.classList.toggle("is-running", running);
   if (progress) progress.hidden = !running;
+  if (cadenceEl) {
+    cadenceEl.textContent = "约每 " + hours + " 小时一轮 · 手动可立即刷新 · 非实时推流";
+  }
   if (running) {
     stateEl.textContent = "正在刷新" + (elapsed != null ? "（已 " + elapsed + " 秒）" : "") + "…";
     phaseEl.textContent = phase
@@ -465,8 +477,8 @@ function renderMonitorLive(data, opts) {
       : "正在跑一轮（多源采集 → NVD/OSV 入库 → 可选资料同步），请稍候…";
   } else {
     stateEl.textContent = "空闲（定时轮询，非实时推流）";
-    phaseEl.textContent = "定时约每 " + ((data && data.interval_hours) || 6)
-      + " 小时自动一轮；点「立即刷新一轮」可马上跑。";
+    phaseEl.textContent = "定时约每 " + hours
+      + " 小时自动一轮；点「立即刷新一轮」可马上跑。列表「近7天」看条目发布日。";
   }
   if (lastEl) {
     var last = (data && data.last_run) || "";
@@ -622,7 +634,7 @@ function renderMonitorFeed(data) {
       + " · 近7天 " + (fresh.days_7 || 0)
       + " · 近30天 " + (fresh.days_30 || 0)
       + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
-      + "。按发布时间新→旧。";
+      + "。按发布时间新→旧；近7/30天=条目发布日，采集节奏见上方「最近一轮」。";
   }
   var query = monitorKeyword();
   if (!items.length) {

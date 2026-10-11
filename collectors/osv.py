@@ -14,6 +14,45 @@ PACKAGES = {
     "langchain": [("PyPI", "langchain")],
 }
 
+# Broad AI-security keywords used by AUTO_MONITOR / monitor_agent primary.
+# These are not OSV package names — expanding to PACKAGES avoids empty
+# github.com/<keyword>/<keyword> queries (e.g. keyword "llm").
+BROAD_KEYWORDS = {
+    "llm",
+    "ai",
+    "adversarial",
+    "jailbreak",
+    "prompt injection",
+    "prompt-injection",
+    "huggingface",
+    "openai",
+    "genai",
+    "generative",
+}
+
+
+def _known_package_entries():
+    seen = set()
+    out = []
+    for entries in PACKAGES.values():
+        for entry in entries:
+            if entry in seen:
+                continue
+            seen.add(entry)
+            out.append(entry)
+    return out
+
+
+def resolve_packages(keyword):
+    """Map a monitor keyword to OSV (ecosystem, name) pairs."""
+    key = (keyword or "").strip().lower()
+    if key in PACKAGES:
+        return list(PACKAGES[key])
+    if key in BROAD_KEYWORDS or not key:
+        return _known_package_entries()
+    # Unknown single token: keep legacy guess (may return empty).
+    return [("GIT", "github.com/%s/%s" % (key, key))]
+
 
 def _post(ecosystem, name):
     body = json.dumps({"package": {"ecosystem": ecosystem, "name": name}}).encode("utf-8")
@@ -102,18 +141,25 @@ class OSVCollector(object):
         self.keyword = keyword or "ollama"
 
     def collect(self):
-        packages = PACKAGES.get(self.keyword.lower())
-        if not packages:
-            packages = [("GIT", "github.com/%s/%s" % (self.keyword, self.keyword))]
+        packages = resolve_packages(self.keyword)
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         items = []
         seen = set()
         for ecosystem, name in packages:
-            payload = _post(ecosystem, name)
+            try:
+                payload = _post(ecosystem, name)
+            except Exception:
+                # One package failure must not drop the rest of the AI set.
+                continue
             for vuln in payload.get("vulns") or []:
                 item = to_item(vuln, self.keyword, collected_at)
                 if not item.get("cve_id") or item["cve_id"] in seen:
                     continue
                 seen.add(item["cve_id"])
                 items.append(item)
+        # Newest published first (CVE year label ≠ freshness).
+        items.sort(
+            key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
+            reverse=True,
+        )
         return items

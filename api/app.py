@@ -772,7 +772,12 @@ def monitor_feed(q: str = "", kind: str = "all"):
         bucket = _freshness_bucket(_pub_ts(row), now_ts)
         freshness[bucket] = freshness.get(bucket, 0) + 1
     freshness["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    freshness["note"] = "按 published_at 新→旧；CVE 编号年份≠发布时间；近7/30天=监测新鲜度口径"
+    freshness["note"] = (
+        "条目新鲜度按 published_at（近7/30天）；CVE 编号年份≠发布时间；"
+        "采集节奏见定时间隔与最近一轮，非实时推流"
+    )
+    freshness["item_basis"] = "published_at"
+    freshness["cadence"] = "periodic"
 
     return {
         "kind": kind,
@@ -976,6 +981,13 @@ def monitor_status(light: int = 0):
         "last_error": st.get("last_error") or "",
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
+        "freshness_policy": {
+            "cadence": "periodic",
+            "interval_hours": st.get("interval_hours"),
+            "item_buckets": "published_at → 近7天 / 近30天 / 更早",
+            "latency_sla": "需监测开始后新发布且可计 collected−published；间隔本身≠延迟达标",
+            "realtime": False,
+        },
         "notice": "定时轮询（默认约 6 小时）+ 手动「立即刷新」；不是竞品式实时推流。",
     }
 

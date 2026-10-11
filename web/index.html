@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">默认持续采集宽范围 AI 安全情报。点「立即刷新」会立刻跑一轮并给出进度反馈。</p>
+            <p class="hint">周期采集（默认约每 6 小时）+ 手动刷新，不是实时推流。列表「近7天/近30天」按条目发布时间，采集节奏看下方「最近一轮」。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -137,6 +137,10 @@
           <div class="monitor-live-row">
             <span class="monitor-live-label">状态</span>
             <span id="monitor-live-state">空闲</span>
+          </div>
+          <div class="monitor-live-row">
+            <span class="monitor-live-label">采集节奏</span>
+            <span id="monitor-live-cadence">周期轮询 · 非实时</span>
           </div>
           <div class="monitor-live-row">
             <span class="monitor-live-label">最近一轮</span>
@@ -159,13 +163,13 @@
         <aside class="source-legend" aria-label="来源说明">
           <header class="panel-head">
             <h2>来源</h2>
-            <p class="hint">每条情报会标注来自哪里；可用下方芯片筛选。</p>
+            <p class="hint">直连漏洞库：NVD / OSV。多源库另有约 11 路（GitHub Advisory、KEV、论文、社区等）；未同步时列表会显得偏少。</p>
           </header>
           <ul class="source-list">
-            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库</li>
-            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库</li>
-            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory</li>
-            <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
+            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库（关键词 + 近 30/90 天变更窗）</li>
+            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（已知 AI 组件包集合）</li>
+            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory（经多源库）</li>
+            <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录（经多源 / 富集）</li>
             <li><span class="src-tag src-team">多源</span> 多源情报（聚合漏洞与资料）</li>
             <li><span class="src-tag src-lib">资料库</span> 本地沉淀资料</li>
             <li><span class="src-tag src-paper">论文</span> 学术论文等</li>
@@ -423,6 +427,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-library1"></script>
+  <script src="/assets/app.js?v=20261011-freshness1"></script>
 </body>
 </html>
