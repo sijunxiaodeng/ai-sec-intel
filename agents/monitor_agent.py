@@ -12,7 +12,9 @@ DEFAULT_PRIMARY = "llm"
 DEFAULT_TEAM_KEYWORDS = (
     "llm",
     "vllm",
+    "transformers",
     "langchain",
+    "llama-index",
     "huggingface",
     "openai",
     "ollama",
@@ -67,8 +69,8 @@ def _merge_by_cve(batches):
 def run(keyword="llm"):
     primary_list, team_keys = _parse_keywords(keyword)
     primary = primary_list[0]
-    # Cap team multi-pass (local B is cheap; still bound work).
-    team_keys = team_keys[:8]
+    # Cap team multi-pass (local embed is cheap; still bound work).
+    team_keys = team_keys[:10]
 
     nvd_items, nvd_step = _safe("NVD", lambda: NVDCollector(keyword=primary).collect())
     # OSV: primary may be a broad word like "llm" — collector expands to known

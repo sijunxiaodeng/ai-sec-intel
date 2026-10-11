@@ -575,7 +575,12 @@ _CATEGORY_LABELS = {
 }
 
 
-def _fetch_team_documents(q="", limit=40):
+from api.feed_mix import diversify_documents as _diversify_documents
+from api.feed_mix import feed_composition as _feed_composition
+from api.feed_mix import interleave_feed as _interleave_feed
+
+
+def _fetch_team_documents(q="", limit=48):
     """List multi-source documents for the monitor feed.
 
     Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
@@ -592,7 +597,7 @@ def _fetch_team_documents(q="", limit=40):
 
     from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
 
-    page_limit = min(max(limit * 3, 40), 100)
+    page_limit = min(max(limit * 3, 60), 120)
     try:
         if embed_enabled():
             # list_documents_page reads api_v6 repos; avoids collectors.* clash.
@@ -683,7 +688,7 @@ def _library_documents(q="", limit=40):
 
 @app.get("/api/monitor/feed")
 def monitor_feed(q: str = "", kind: str = "all"):
-    """Monitor feed: CVE cards + non-CVE documents (B team docs + C library)."""
+    """Monitor feed: CVE cards + non-CVE documents (多源文档 + 资料库)."""
     kind = (kind or "all").strip().lower()
     if kind not in {"all", "cve", "document", "demo", "live"}:
         raise HTTPException(status_code=422, detail="kind 仅支持 all/cve/document/demo/live")
@@ -708,16 +713,19 @@ def monitor_feed(q: str = "", kind: str = "all"):
     doc_items = []
     team_meta = {"reachable": False, "total": 0}
     if kind in {"all", "document", "demo", "live"}:
-        team_docs, team_meta = _fetch_team_documents(q=q, limit=40)
-        lib_docs = _library_documents(q=q, limit=40)
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=48)
+        lib_docs = _library_documents(q=q, limit=48)
         # Prefer team docs; add library docs not already present by URL/title.
         seen = set()
+        merged_docs = []
         for row in team_docs + lib_docs:
             key = (row.get("url") or "") + "|" + (row.get("title") or "")
             if key in seen:
                 continue
             seen.add(key)
-            doc_items.append(row)
+            merged_docs.append(row)
+        # Category round-robin so blogs/papers/vendor are not starved by one lane.
+        doc_items = _diversify_documents(merged_docs, limit=48)
 
     if kind == "demo":
         cve_items = [row for row in cve_items if row.get("demo")]
@@ -760,10 +768,18 @@ def monitor_feed(q: str = "", kind: str = "all"):
     from datetime import datetime, timezone
     now_ts = datetime.now(timezone.utc).timestamp()
 
-    # Recency-first across CVE + docs. CVE-2025 id ≠ old intel; sort by published_at.
-    # Demo/synthetic sinks after live items with the same timestamp.
-    feed_items = cve_items + doc_items
-    feed_items.sort(key=lambda row: (-_pub_ts(row), 1 if row.get("demo") else 0, row.get("cve_id") or row.get("title") or ""))
+    # Soft-mix CVE + 资料 when showing "全部"；纯 CVE / 纯资料仍各自按发布时间。
+    if kind in {"all", "demo", "live"} and doc_items:
+        feed_items = _interleave_feed(cve_items, doc_items)
+    else:
+        feed_items = cve_items + doc_items
+        feed_items.sort(
+            key=lambda row: (
+                -_pub_ts(row),
+                1 if row.get("demo") else 0,
+                row.get("cve_id") or row.get("title") or "",
+            )
+        )
 
     freshness = {"days_7": 0, "days_30": 0, "older": 0, "unknown": 0, "demo": 0}
     for row in feed_items:
@@ -779,6 +795,8 @@ def monitor_feed(q: str = "", kind: str = "all"):
     freshness["item_basis"] = "published_at"
     freshness["cadence"] = "periodic"
 
+    composition = _feed_composition(feed_items)
+
     return {
         "kind": kind,
         "counts": {
@@ -786,10 +804,17 @@ def monitor_feed(q: str = "", kind: str = "all"):
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
         },
+        "composition": composition,
         "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
-        "sort": "published_at_desc",
+        "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
+        "mix_note": (
+            "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
+            "未接线的外部媒体不会伪造进流。"
+            if doc_items else
+            "当前几乎只有漏洞条目——请先跑多源采集或同步资料库，资料类才会进入监测流。"
+        ),
     }
 
 
@@ -903,7 +928,8 @@ def asset_impact(cve_id: str):
 
 # Built-in AI-security scope for one-click auto monitor (comma-separated).
 AUTO_MONITOR_KEYWORDS = (
-    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection"
+    "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama,"
+    "adversarial,jailbreak,prompt injection"
 )
 
 
@@ -1040,19 +1066,38 @@ def monitor_run(body: MonitorRunBody):
         mark_phase("NVD/OSV/多源 CVE 入库")
         result = run_collect(keyword)
         if body.sync_library:
+            library = {"team": None, "public": None}
+            # Public library sync brings research / vendor / paper into the monitor
+            # feed via _library_documents — without inventing Talos/FreeBuf.
+            try:
+                mark_phase("公开资料同步")
+                from rag.library import sync as library_sync
+
+                library["public"] = library_sync(per_source=2, include_seeds=True)
+            except ValueError as exc:
+                library["public"] = {"status": "busy", "error": str(exc)}
+            except Exception as exc:
+                library["public"] = {"status": "error", "error": type(exc).__name__}
+                warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
             if not team.get("reachable"):
-                library = {"status": "skipped", "error": "team unreachable"}
+                library["team"] = {"status": "skipped", "error": "team unreachable"}
                 warnings.append("已跳过多源资料同步。")
             else:
                 try:
-                    mark_phase("资料库同步")
+                    mark_phase("多源资料同步")
                     from rag.library import sync_team
-                    library = sync_team(max_documents=body.max_documents)
+                    library["team"] = sync_team(max_documents=body.max_documents)
                 except ValueError as exc:
-                    library = {"status": "busy", "error": str(exc)}
+                    library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
-                    library = {"status": "error", "error": type(exc).__name__}
+                    library["team"] = {"status": "error", "error": type(exc).__name__}
                     warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
+            # Backward-compatible top-level fields for older UI.
+            library["status"] = (
+                (library.get("team") or {}).get("status")
+                or (library.get("public") or {}).get("status")
+                or "ok"
+            )
         mark_run(count=len(result["records"]), keyword=keyword)
     except HTTPException:
         raise

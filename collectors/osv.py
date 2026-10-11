@@ -1,4 +1,5 @@
 # OSV 是与 NVD 不同的公开来源。同一 CVE 编号在入库时合并。
+# 默认按已知 AI 组件包集合查询，并限制单包条数，避免某一组件（如 ollama）独占列表。
 
 import json
 import urllib.request
@@ -7,12 +8,22 @@ from datetime import datetime, timezone
 from models import intelligence_item
 
 QUERY_URL = "https://api.osv.dev/v1/query"
+
+# Known AI-stack packages we can maintain. Order is round-robin preference for
+# interleaving results — not a severity ranking.
 PACKAGES = {
-    "ollama": [("GIT", "github.com/ollama/ollama")],
     "vllm": [("PyPI", "vllm"), ("GIT", "github.com/vllm-project/vllm")],
     "transformers": [("PyPI", "transformers")],
     "langchain": [("PyPI", "langchain")],
+    "langgraph": [("PyPI", "langgraph")],
+    "llama-index": [("PyPI", "llama-index")],
+    "huggingface_hub": [("PyPI", "huggingface_hub")],
+    "ollama": [("GIT", "github.com/ollama/ollama")],
+    "openai": [("PyPI", "openai")],
 }
+
+# Cap per package so one ecosystem (historically ollama) cannot flood the feed.
+PER_PACKAGE_LIMIT = 6
 
 # Broad AI-security keywords used by AUTO_MONITOR / monitor_agent primary.
 # These are not OSV package names — expanding to PACKAGES avoids empty
@@ -54,6 +65,14 @@ def resolve_packages(keyword):
     return [("GIT", "github.com/%s/%s" % (key, key))]
 
 
+def _product_label(ecosystem, name):
+    """Human product slug from OSV package identity (not the search keyword)."""
+    if not name:
+        return "unknown"
+    short = name.split("/")[-1]
+    return short or name
+
+
 def _post(ecosystem, name):
     body = json.dumps({"package": {"ecosystem": ecosystem, "name": name}}).encode("utf-8")
     request = urllib.request.Request(
@@ -75,10 +94,10 @@ def _cve_id(vuln):
     return own
 
 
-def _affected(vuln, keyword):
+def _affected(vuln, product):
     names = []
     for block in vuln.get("affected") or []:
-        package = ((block.get("package") or {}).get("name") or keyword).split("/")[-1]
+        package = ((block.get("package") or {}).get("name") or product).split("/")[-1]
         events = []
         for chunk in block.get("ranges") or []:
             extra = (chunk.get("database_specific") or {}).get("extracted_events") or []
@@ -105,7 +124,7 @@ def _vector(vuln):
     return ""
 
 
-def to_item(vuln, keyword, collected_at):
+def to_item(vuln, product, collected_at):
     cve_id = _cve_id(vuln)
     links = []
     page = "https://osv.dev/vulnerability/%s" % (vuln.get("id") or cve_id)
@@ -124,40 +143,73 @@ def to_item(vuln, keyword, collected_at):
         "url": page,
         "published_at": vuln.get("published") or "",
         "collected_at": collected_at,
-        "product": keyword,
-        "affected": _affected(vuln, keyword),
+        "product": product,
+        "affected": _affected(vuln, product),
         "references": links[:8],
         "raw_data": {
             "osv_id": vuln.get("id") or "",
             "cvss_vector": _vector(vuln),
+            "osv_package": product,
         },
     })
+
+
+def _round_robin_merge(buckets):
+    """Interleave per-package lists so one package cannot occupy the whole head."""
+    out = []
+    seen = set()
+    active = [list(bucket) for bucket in buckets if bucket]
+    while active:
+        next_round = []
+        for bucket in active:
+            item = bucket.pop(0)
+            cve = item.get("cve_id") if isinstance(item, dict) else None
+            if cve and cve not in seen:
+                seen.add(cve)
+                out.append(item)
+            if bucket:
+                next_round.append(bucket)
+        active = next_round
+    return out
 
 
 class OSVCollector(object):
     """collect() 返回 IntelligenceItem 列表。查不到包时返回空列表，不编造记录。"""
 
-    def __init__(self, keyword="ollama"):
-        self.keyword = keyword or "ollama"
+    def __init__(self, keyword="llm", per_package_limit=PER_PACKAGE_LIMIT):
+        self.keyword = keyword or "llm"
+        self.per_package_limit = max(1, int(per_package_limit or PER_PACKAGE_LIMIT))
 
     def collect(self):
         packages = resolve_packages(self.keyword)
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        items = []
-        seen = set()
+        # Merge ecosystem variants (PyPI + GIT) per product before capping.
+        by_product = {}
         for ecosystem, name in packages:
+            product = _product_label(ecosystem, name)
             try:
                 payload = _post(ecosystem, name)
             except Exception:
                 # One package failure must not drop the rest of the AI set.
                 continue
+            bucket = by_product.setdefault(product, [])
+            seen_ids = {item.get("cve_id") for item in bucket}
             for vuln in payload.get("vulns") or []:
-                item = to_item(vuln, self.keyword, collected_at)
-                if not item.get("cve_id") or item["cve_id"] in seen:
+                item = to_item(vuln, product, collected_at)
+                cve = item.get("cve_id")
+                if not cve or cve in seen_ids:
                     continue
-                seen.add(item["cve_id"])
-                items.append(item)
-        # Newest published first (CVE year label ≠ freshness).
+                seen_ids.add(cve)
+                bucket.append(item)
+        buckets = []
+        for product, bucket in by_product.items():
+            bucket.sort(
+                key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
+                reverse=True,
+            )
+            buckets.append(bucket[: self.per_package_limit])
+        items = _round_robin_merge(buckets)
+        # Cap already enforces package diversity; newest published first overall.
         items.sort(
             key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
             reverse=True,

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 安全知识情报</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20261011-library1" />
+  <link rel="stylesheet" href="/assets/styles.css?v=20261011-feedmix1" />
 </head>
 <body>
   <div class="shell">
@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">按周期自动刷新情报（默认约每 6 小时），也可立即刷新。下方「最近更新 / 下次刷新」即监测时效；列表里的日期是各条原文发布时间。</p>
+            <p class="hint">按周期自动刷新情报（默认约每 6 小时），也可立即刷新。流里应同时看到漏洞与已入库资料（博客/论文/厂商公告/社区等），不是单一组件的 CVE 清单。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -159,17 +159,17 @@
         <aside class="source-legend" aria-label="来源说明">
           <header class="panel-head">
             <h2>来源</h2>
-            <p class="hint">直连漏洞库：NVD / OSV。多源库另有约 11 路（GitHub Advisory、KEV、论文、社区等）；未同步时列表会显得偏少。</p>
+            <p class="hint">直连：NVD / OSV（多 AI 组件包，限单包条数）。多源另有漏洞库、厂商公告、博客、论文、社区、标准/政策等；刷新时会尽力同步公开资料进监测流。未接线的外部媒体不会出现。</p>
           </header>
           <ul class="source-list">
-            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库（关键词 + 近 30/90 天变更窗）</li>
-            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（已知 AI 组件包集合）</li>
-            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory（经多源库）</li>
+            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库（宽范围 AI 关键词 + 近 30/90 天变更窗）</li>
+            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（vLLM / Transformers / LangChain / Ollama 等包集合）</li>
+            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 厂商公告（经多源库）</li>
             <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录（经多源 / 富集）</li>
-            <li><span class="src-tag src-team">多源</span> 多源情报（聚合漏洞与资料）</li>
-            <li><span class="src-tag src-lib">资料库</span> 本地沉淀资料</li>
-            <li><span class="src-tag src-paper">论文</span> 学术论文等</li>
-            <li><span class="src-tag src-comm">社区</span> 安全社区 / 博客</li>
+            <li><span class="src-tag src-team">多源</span> 多源情报（漏洞与资料同库）</li>
+            <li><span class="src-tag src-lib">资料库</span> 公开订阅与沉淀资料</li>
+            <li><span class="src-tag src-paper">论文</span> arXiv 等学术论文</li>
+            <li><span class="src-tag src-comm">社区</span> 安全社区 / 研究博客</li>
           </ul>
         </aside>
 
@@ -202,12 +202,14 @@
             <button type="button" class="chip" data-source-filter="osv">OSV</button>
             <button type="button" class="chip" data-source-filter="github">GitHub</button>
             <button type="button" class="chip" data-source-filter="kev">KEV</button>
+            <button type="button" class="chip" data-source-filter="vendor">厂商公告</button>
             <button type="button" class="chip" data-source-filter="team">多源</button>
             <button type="button" class="chip" data-source-filter="library">资料库</button>
             <button type="button" class="chip" data-source-filter="paper">论文</button>
             <button type="button" class="chip" data-source-filter="community">社区</button>
           </div>
           <p id="monitor-summary" class="hint"></p>
+          <p id="monitor-mix" class="hint"></p>
           <div class="split enrich-layout">
             <div id="monitor-list"></div>
             <article class="panel" id="monitor-detail">
@@ -423,6 +425,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-freshness2"></script>
+  <script src="/assets/app.js?v=20261011-feedmix1"></script>
 </body>
 </html>

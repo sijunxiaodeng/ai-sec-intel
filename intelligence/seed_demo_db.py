@@ -28,19 +28,8 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_DB = ROOT / "data" / "intelligence.db"
 
 # Non-issued years / synthetic IDs — must not collide with live NVD pulls.
+# Deliberately diversified across the AI stack (not Ollama-heavy).
 DEMO_ITEMS = (
-    {
-        "cve": "CVE-2099-90001",
-        "source": "NVD",
-        "title": "【演示】Ollama 智能体授权绕过（合成）",
-        "description": (
-            "演示用合成记录：模拟 Ollama / LLM 智能体工具链相关漏洞。"
-            "关键词：ollama、llm、agent。非真实 NVD 公告。"
-        ),
-        "product": "ollama",
-        "end": "0.1.34",
-        "score": 9.8,
-    },
     {
         "cve": "CVE-2099-90002",
         "source": "GITHUB_ADVISORY",
@@ -52,6 +41,7 @@ DEMO_ITEMS = (
         "product": "vllm",
         "end": "0.6.0",
         "score": 8.1,
+        "published_at": "2026-10-08T03:00:00Z",
     },
     {
         "cve": "CVE-2099-90003",
@@ -64,18 +54,46 @@ DEMO_ITEMS = (
         "product": "langchain",
         "end": "0.2.10",
         "score": 7.5,
+        "published_at": "2026-10-07T12:00:00Z",
     },
     {
         "cve": "CVE-2099-90004",
         "source": "NVD",
-        "title": "【演示】Hugging Face 模型供应链 pickle 风险（合成）",
+        "title": "【演示】Hugging Face Transformers 模型供应链 pickle 风险（合成）",
         "description": (
             "演示用合成记录：模拟模型权重 / pickle 反序列化供应链风险。"
-            "关键词：huggingface、pickle、supply chain。"
+            "关键词：transformers、huggingface、pickle、supply chain。"
         ),
         "product": "transformers",
         "end": "4.40.0",
         "score": 8.8,
+        "published_at": "2026-10-06T09:00:00Z",
+    },
+    {
+        "cve": "CVE-2099-90005",
+        "source": "GITHUB_ADVISORY",
+        "title": "【演示】LlamaIndex 检索链数据泄露（合成）",
+        "description": (
+            "演示用合成记录：模拟 LlamaIndex / RAG 检索链路的敏感数据暴露。"
+            "关键词：llama-index、rag、data leakage。"
+        ),
+        "product": "llama-index",
+        "end": "0.10.0",
+        "score": 7.2,
+        "published_at": "2026-10-05T15:00:00Z",
+    },
+    {
+        "cve": "CVE-2099-90001",
+        "source": "NVD",
+        "title": "【演示】Ollama 智能体授权绕过（合成）",
+        "description": (
+            "演示用合成记录：模拟 Ollama / LLM 智能体工具链相关漏洞。"
+            "关键词：ollama、llm、agent。非真实 NVD 公告。"
+        ),
+        "product": "ollama",
+        "end": "0.1.34",
+        "score": 9.8,
+        "published_at": "2026-10-04T01:00:00Z",
     },
 )
 
@@ -88,6 +106,17 @@ DEMO_DOCS = (
         "title": "【演示】LLM 应用中间接提示注入（合成博客摘要）",
         "description": "演示用合成研报摘要，供资料库 team-sync。",
         "url": "https://blog.trailofbits.com/demo-ai-sec-intel-fixture-prompt-injection",
+        "published_at": "2026-10-08",
+    },
+    {
+        "source": "VLLM_VENDOR",
+        "category": "vendor_advisory",
+        "content_type": "advisory",
+        "sid": "demo-vllm-advisory",
+        "title": "【演示】vLLM 安全公告摘要（合成厂商公告）",
+        "description": "演示用合成厂商安全公告，对应多源 VLLM_VENDOR 类别。",
+        "url": "https://github.com/vllm-project/vllm/security/advisories/demo-ai-sec-intel",
+        "published_at": "2026-10-07",
     },
     {
         "source": "ARXIV_AI_SECURITY",
@@ -97,6 +126,17 @@ DEMO_DOCS = (
         "title": "【演示】越狱与对抗提示（合成论文摘要）",
         "description": "演示用合成 arXiv 风格摘要。",
         "url": "https://arxiv.org/abs/2099.90001",
+        "published_at": "2026-10-06",
+    },
+    {
+        "source": "LANGCHAIN_VENDOR",
+        "category": "vendor_advisory",
+        "content_type": "advisory",
+        "sid": "demo-langchain-advisory",
+        "title": "【演示】LangChain 安全公告摘要（合成厂商公告）",
+        "description": "演示用合成厂商安全公告，对应多源 LANGCHAIN_VENDOR 类别。",
+        "url": "https://github.com/langchain-ai/langchain/security/advisories/demo-ai-sec-intel",
+        "published_at": "2026-10-05",
     },
     {
         "source": "NIST_CSRC_AI_STANDARDS",
@@ -106,6 +146,7 @@ DEMO_DOCS = (
         "title": "【演示】AI 风险管理节选（合成标准）",
         "description": "演示用合成 NIST 风格标准摘要。",
         "url": "https://csrc.nist.gov/demo-ai-sec-intel-fixture-rmf",
+        "published_at": "2026-10-04",
     },
     {
         "source": "HF_SECURITY_COMMUNITY",
@@ -115,6 +156,17 @@ DEMO_DOCS = (
         "title": "【演示】Hugging Face 安全讨论（合成社区帖）",
         "description": "演示用合成社区讨论摘要。",
         "url": "https://discuss.huggingface.co/demo-ai-sec-intel-fixture",
+        "published_at": "2026-10-03",
+    },
+    {
+        "source": "FEDERAL_REGISTER_AI_POLICY",
+        "category": "policy_regulation",
+        "content_type": "policy",
+        "sid": "demo-federal-ai-policy",
+        "title": "【演示】AI 相关政策节选（合成政策）",
+        "description": "演示用合成政策摘要，对应多源政策法规类别。",
+        "url": "https://www.federalregister.gov/demo-ai-sec-intel-fixture",
+        "published_at": "2026-10-02",
     },
 )
 
@@ -193,6 +245,7 @@ def _vuln_item(row: dict) -> IntelligenceItem:
         }
         source_id = cve
 
+    published = row.get("published_at") or "2026-10-08T01:00:00Z"
     return IntelligenceItem(
         source=source,
         source_id=source_id,
@@ -200,8 +253,8 @@ def _vuln_item(row: dict) -> IntelligenceItem:
         title=row["title"],
         description=row["description"],
         url=f"https://nvd.nist.gov/vuln/detail/{cve}",
-        published_at="2026-10-08T01:00:00Z",
-        modified_at="2026-10-08T02:00:00Z",
+        published_at=published,
+        modified_at=published,
         severity="HIGH",
         raw_data=raw,
         tags=["demo_fixture", "ai_security"],
@@ -218,7 +271,7 @@ def _doc(row: dict) -> KnowledgeDocument:
         title=row["title"],
         description=row["description"],
         url=row["url"],
-        published_at="2026-10-08",
+        published_at=row.get("published_at") or "2026-10-08",
         modified_at=None,
         cve_ids=[],
         raw_data={"demo_fixture": True, "notice": "synthetic offline fixture"},

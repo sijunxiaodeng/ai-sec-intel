@@ -37,7 +37,7 @@ class SourceRegistryTests(unittest.TestCase):
 
     def test_default_catalog_has_all_eight_categories_with_independent_community(self):
         sources = get_sources()
-        self.assertEqual(11, len(sources))
+        self.assertEqual(12, len(sources))
         self.assertEqual(SOURCE_CATEGORIES, {source.category for source in sources})
         self.assertEqual('vulnerability_database', get_source('GITHUB_ADVISORY').category)
         community = get_source('HF_SECURITY_COMMUNITY')
@@ -48,6 +48,7 @@ class SourceRegistryTests(unittest.TestCase):
     def test_vendor_targets_are_official_repository_advisories(self):
         for name, path in [
                 ('VLLM_VENDOR', '/repos/vllm-project/vllm/security-advisories'),
+                ('TRANSFORMERS_VENDOR', '/repos/huggingface/transformers/security-advisories'),
                 ('OLLAMA_VENDOR', '/repos/ollama/ollama/security-advisories'),
                 ('LANGCHAIN_VENDOR', '/repos/langchain-ai/langchain/security-advisories')]:
             source = get_source(name)

@@ -122,7 +122,7 @@ def to_card(item, keyword, collected_at):
 class NVDCollector(object):
     """B 的采集接口：collect() 返回 IntelligenceItem 列表。"""
 
-    def __init__(self, keyword="ollama", limit=20):
+    def __init__(self, keyword="llm", limit=20):
         self.keyword = keyword
         self.limit = limit
 

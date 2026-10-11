@@ -168,6 +168,7 @@ function sourceFamily(raw) {
   if (!s) return "other";
   if (s === "NVD" || s.indexOf("NVD") === 0) return "nvd";
   if (s === "OSV" || s.indexOf("OSV") === 0) return "osv";
+  if (s.indexOf("VENDOR") >= 0 || s.indexOf("ADVISORY") >= 0) return "vendor";
   if (s.indexOf("GITHUB") >= 0 || s.indexOf("GHSA") >= 0) return "github";
   if (s.indexOf("CISA") >= 0 || s.indexOf("KEV") >= 0) return "kev";
   if (s.indexOf("TEAM") >= 0 || s.indexOf("INTELLIGENCE") >= 0) return "team";
@@ -182,6 +183,7 @@ function sourceLabel(raw) {
     nvd: "NVD",
     osv: "OSV",
     github: "GitHub Advisory",
+    vendor: "厂商公告",
     kev: "CISA KEV",
     team: "多源情报",
     library: "资料库",
@@ -218,12 +220,16 @@ function itemMatchesSourceFilter(item, filter) {
   if (!filter || filter === "all") return true;
   if (item.origin === "team_documents" && filter === "team") return true;
   if (item.origin === "library" && filter === "library") return true;
+  var cat = String(item.category || item.category_label || item.content_type || "").toLowerCase();
+  if (filter === "vendor" && (
+    cat.indexOf("vendor") >= 0 || cat.indexOf("厂商") >= 0 || cat.indexOf("advisory") >= 0
+  )) return true;
   var raws = (item.sources || []).concat(item.source ? [item.source] : []);
   if (!raws.length && item.kind === "document") {
-    if (filter === "paper" || filter === "community" || filter === "library" || filter === "team") {
-      var cat = String(item.category || item.category_label || "").toLowerCase();
+    if (filter === "paper" || filter === "community" || filter === "library" || filter === "team" || filter === "vendor") {
       if (filter === "paper" && (cat.indexOf("paper") >= 0 || cat.indexOf("学术") >= 0 || cat.indexOf("academic") >= 0)) return true;
-      if (filter === "community" && (cat.indexOf("community") >= 0 || cat.indexOf("blog") >= 0 || cat.indexOf("社区") >= 0)) return true;
+      if (filter === "community" && (cat.indexOf("community") >= 0 || cat.indexOf("blog") >= 0 || cat.indexOf("社区") >= 0 || cat.indexOf("研究") >= 0)) return true;
+      if (filter === "vendor" && (cat.indexOf("vendor") >= 0 || cat.indexOf("厂商") >= 0 || cat.indexOf("advisory") >= 0)) return true;
       if (filter === "library") return true;
     }
   }
@@ -611,7 +617,27 @@ function renderMonitorFeed(data) {
       + " · 资料 " + (counts.document || 0)
       + (teamTotal ? "（含多源资料 " + teamTotal + "）" : "")
       + (monitorSourceFilter !== "all" ? " · 来源筛选「" + monitorSourceFilter + "」显示 " + items.length + " 条" : "")
-      + "。列表按原文发布时间排序；监测是否最新看上方「最近更新」。";
+      + "。漏洞与资料混排；监测是否最新看上方「最近更新」。";
+  }
+  var mixEl = $("monitor-mix");
+  if (mixEl) {
+    var comp = data.composition || {};
+    var byCat = comp.by_category || {};
+    var byProd = comp.by_product || {};
+    var catBits = Object.keys(byCat).slice(0, 6).map(function (k) {
+      return k + " " + byCat[k];
+    });
+    var prodBits = Object.keys(byProd).slice(0, 6).map(function (k) {
+      return k + " " + byProd[k];
+    });
+    var ollamaShare = typeof comp.ollama_share === "number" ? Math.round(comp.ollama_share * 100) : null;
+    var parts = [];
+    if (catBits.length) parts.push("资料类型：" + catBits.join("、"));
+    if (prodBits.length) parts.push("组件：" + prodBits.join("、"));
+    if (ollamaShare != null) parts.push("提及 Ollama 约 " + ollamaShare + "%");
+    if (data.mix_note) parts.push(data.mix_note);
+    mixEl.textContent = parts.join(" · ");
+    mixEl.hidden = !parts.length;
   }
   var query = monitorKeyword();
   if (!items.length) {
