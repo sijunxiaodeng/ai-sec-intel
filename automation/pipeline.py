@@ -1,43 +1,28 @@
-# Structured collect pipeline state for monitor refresh UI.
-# Honest job state on disk — UI polls; not fake websocket theater.
+# Coarse collect pipeline state for monitor refresh UI.
+# Product: one 监测 action — NOT per-source 抓取（NVD/OSV/聚合库） rows.
+# Honest job state on disk; UI polls.
 
 from copy import deepcopy
 from datetime import datetime, timezone
 
 from automation.schedule import ensure_state, _write_state
 
-# One product pipeline under 情报监测 — do not label peer stages as
-# 「主采集」vs「多源」. Internal modules may still differ.
+# Product-level stages only. Internal collectors stay in code, not in UI checklist.
 STAGE_DEFS = [
     {
-        "id": "fetch_aggregate",
-        "title": "抓取（聚合库）",
-        "subtitle": "刷新并读入本机聚合 CVE（可选刷新）",
+        "id": "monitoring",
+        "title": "监测中",
+        "subtitle": "多方面来源一并抓取",
     },
     {
-        "id": "fetch_nvd",
-        "title": "抓取（NVD）",
-        "subtitle": "按关键词与变更窗取回",
-    },
-    {
-        "id": "fetch_osv",
-        "title": "抓取（OSV）",
-        "subtitle": "按 AI 组件包批量查询",
-    },
-    {
-        "id": "normalize",
-        "title": "整理",
-        "subtitle": "统一成同一种入库格式",
-    },
-    {
-        "id": "upsert",
-        "title": "入库",
-        "subtitle": "写入知识库并合并同编号",
+        "id": "persist",
+        "title": "整理入库",
+        "subtitle": "规范化并合并写入知识库",
     },
     {
         "id": "library_sync",
-        "title": "同步（资料）",
-        "subtitle": "公开资料与聚合摘要（可选）",
+        "title": "资料同步",
+        "subtitle": "公开与聚合摘要（可选）",
     },
 ]
 
@@ -79,6 +64,8 @@ def empty_pipeline():
         },
         "stages": [_blank_stage(d) for d in STAGE_DEFS],
         "summary": "",
+        # Optional collapsed technical note (not a per-source stage list).
+        "tech_detail": "",
     }
 
 
@@ -89,7 +76,7 @@ def begin_pipeline():
     data = ensure_state()
     data["pipeline"] = pipe
     data["running"] = True
-    data["run_phase"] = "准备采集流水线"
+    data["run_phase"] = "监测刷新中"
     data["run_started_at"] = pipe["started_at"]
     _write_state(data)
     return pipe
@@ -125,15 +112,21 @@ def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="
         break
     if phase:
         data["run_phase"] = phase[:80]
-        pipe_status_phase = phase
     else:
-        # Derive short phase from stage title.
         for stage in pipe.get("stages") or []:
             if stage.get("id") == stage_id:
-                pipe_status_phase = stage.get("title") or stage_id
-                data["run_phase"] = str(pipe_status_phase)[:80]
+                data["run_phase"] = str(stage.get("title") or stage_id)[:80]
                 break
     _recount(pipe)
+    data["pipeline"] = pipe
+    _write_state(data)
+    return pipe
+
+
+def set_tech_detail(text):
+    """Single optional technical note (e.g. 多方面来源摘要), not a stage checklist."""
+    data, pipe = _load_pipeline()
+    pipe["tech_detail"] = (text or "")[:500]
     data["pipeline"] = pipe
     _write_state(data)
     return pipe
@@ -180,29 +173,29 @@ def _recount(pipe):
         pipe["elapsed_sec"] = _elapsed_sec(pipe.get("started_at"))
 
 
-def finish_pipeline(*, ok=True, summary="", metrics=None):
+def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     data, pipe = _load_pipeline()
     pipe["status"] = "done" if ok else "error"
     pipe["finished_at"] = _now()
     pipe["elapsed_sec"] = _elapsed_sec(pipe.get("started_at"), pipe["finished_at"])
     if metrics:
         pipe["metrics"].update({k: int(v) for k, v in metrics.items() if v is not None})
+    if tech_detail is not None:
+        pipe["tech_detail"] = (tech_detail or "")[:500]
     _recount(pipe)
     if summary:
         pipe["summary"] = summary
     else:
         m = pipe.get("metrics") or {}
         pipe["summary"] = (
-            "本轮命中 %(hit)s，保留 %(kept)s，新增 %(inserted)s，合并已有 %(merged)s；"
-            "外部取回 %(external_fetches)s，失败 %(failures)s，跳过 %(skipped)s。"
+            "本轮监测：命中 %(hit)s，新增 %(inserted)s，合并 %(merged)s；"
+            "外部取回 %(external_fetches)s，失败 %(failures)s。"
             % {
                 "hit": m.get("hit", 0),
-                "kept": m.get("kept", 0),
                 "inserted": m.get("inserted", 0),
                 "merged": m.get("merged", 0),
                 "external_fetches": m.get("external_fetches", 0),
                 "failures": m.get("failures", 0),
-                "skipped": m.get("skipped", 0),
             }
         )
     data["pipeline"] = pipe

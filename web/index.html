@@ -156,18 +156,22 @@
         </div>
         <div class="collect-pipeline" id="collect-pipeline" hidden>
           <header class="pipeline-head">
-            <h3 class="pipeline-title">本轮监测流水线</h3>
-            <p class="hint" id="pipeline-summary">监测刷新后显示抓取 → 整理 → 入库（状态轮询，非推流演出；不是两套采集）。</p>
+            <h3 class="pipeline-title">本轮监测</h3>
+            <p class="hint" id="pipeline-summary">点「立即刷新」后显示整体进度与命中/新增/合并（多方面来源一并跑，不按来源拆步）。</p>
           </header>
           <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
           <ol class="pipeline-stages" id="pipeline-stages"></ol>
+          <details class="pipeline-tech" id="pipeline-tech" hidden>
+            <summary>技术细节（可选）</summary>
+            <p class="hint" id="pipeline-tech-body"></p>
+          </details>
         </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
         <aside class="source-legend" aria-label="监测维度说明">
           <header class="panel-head">
             <h2>怎么读情报流</h2>
-            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。监测是<strong>一条流水线</strong>（抓取 NVD/OSV/聚合库 → 整理 → 入库）；「聚合库」只是其中一路来源，不是第二套监测。</p>
+            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。监测刷新是<strong>一次动作</strong>（多方面来源一并抓取 → 整理入库），不要理解成按来源拆开的多套监测。</p>
           </header>
           <div class="tax-grid">
             <div>
@@ -460,6 +464,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-pipeline2"></script>
+  <script src="/assets/app.js?v=20261011-pipeline3"></script>
 </body>
 </html>

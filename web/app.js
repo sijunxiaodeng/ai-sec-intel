@@ -466,6 +466,8 @@ function renderCollectPipeline(pipeline, opts) {
   var stagesEl = $("pipeline-stages");
   var metricsEl = $("pipeline-metrics");
   var summaryEl = $("pipeline-summary");
+  var techEl = $("pipeline-tech");
+  var techBody = $("pipeline-tech-body");
   if (!box || !stagesEl) return;
   if (!pipeline || !(pipeline.stages || []).length) {
     if (!opts.forceShow) box.hidden = true;
@@ -475,13 +477,14 @@ function renderCollectPipeline(pipeline, opts) {
   var metrics = pipeline.metrics || {};
   var status = pipeline.status || "";
   if (summaryEl) {
-    if (pipeline.summary) summaryEl.textContent = pipeline.summary;
-    else     if (status === "running") {
-      summaryEl.textContent = "监测刷新进行中：抓取（聚合库/NVD/OSV）→ 整理 → 入库"
+    if (status === "running") {
+      summaryEl.textContent = "监测刷新中"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
-        + "。进度来自任务状态轮询。";
+        + "——多方面来源一并跑，看下方命中/新增/合并。";
+    } else if (pipeline.summary) {
+      summaryEl.textContent = pipeline.summary;
     } else {
-      summaryEl.textContent = "本轮监测步骤如下（一条流水线）。0 新增时请看「命中 / 合并」——不等于没搜到。";
+      summaryEl.textContent = "本轮监测结果如下。0 新增时请看「命中 / 合并」——不等于没搜到。";
     }
   }
   if (metricsEl) {
@@ -489,18 +492,18 @@ function renderCollectPipeline(pipeline, opts) {
     if (pipeline.elapsed_sec != null && status !== "idle") {
       bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
     }
-    bits.push("步骤 <strong>" + (metrics.stages_done || 0) + "/" + (metrics.stages_total || 0) + "</strong>");
     bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
-    bits.push("保留 <strong>" + (metrics.kept || 0) + "</strong>");
     bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
     bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
-    bits.push("外部取回 <strong>" + (metrics.external_fetches || 0) + "</strong>");
     bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
-    bits.push("跳过 <strong>" + (metrics.skipped || 0) + "</strong>");
+    if (metrics.external_fetches) {
+      bits.push("外部取回 <strong>" + metrics.external_fetches + "</strong>");
+    }
     metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
     metricsEl.hidden = false;
   }
   clear(stagesEl);
+  // Coarse product stages only — no per-source 抓取·X rows.
   (pipeline.stages || []).forEach(function (stage) {
     var li = document.createElement("li");
     var st = stage.status || "pending";
@@ -511,11 +514,16 @@ function renderCollectPipeline(pipeline, opts) {
     title.className = "pipeline-stage-title";
     title.textContent = stage.title || stage.id || "";
     top.appendChild(title);
-    if (stage.subtitle) {
+    if (stage.got || stage.produced) {
       var sub = document.createElement("span");
       sub.className = "pipeline-stage-sub";
-      sub.textContent = stage.subtitle;
+      sub.textContent = [stage.got, stage.produced].filter(Boolean).join(" · ");
       top.appendChild(sub);
+    } else if (stage.subtitle && st === "pending") {
+      var sub2 = document.createElement("span");
+      sub2.className = "pipeline-stage-sub";
+      sub2.textContent = stage.subtitle;
+      top.appendChild(sub2);
     }
     var badge = stageStatusLabel(st);
     var stEl = document.createElement("span");
@@ -523,24 +531,25 @@ function renderCollectPipeline(pipeline, opts) {
     stEl.textContent = badge.text;
     top.appendChild(stEl);
     li.appendChild(top);
-    var qa = document.createElement("ul");
-    qa.className = "pipeline-qa";
-    [
-      ["做了什么", stage.did],
-      ["得到什么", stage.got],
-      ["产出什么", stage.produced],
-      ["有什么影响", stage.impact],
-      ["备注", stage.note],
-    ].forEach(function (pair) {
-      if (!pair[1]) return;
-      var row = document.createElement("li");
-      row.innerHTML = "<span class=\"label\">" + pair[0] + "</span> ";
-      row.appendChild(document.createTextNode(pair[1]));
-      qa.appendChild(row);
-    });
-    if (qa.childNodes.length) li.appendChild(qa);
+    if (stage.note && (st === "ok" || st === "error" || st === "skip")) {
+      var note = document.createElement("p");
+      note.className = "hint";
+      note.style.margin = "4px 0 0";
+      note.textContent = stage.note;
+      li.appendChild(note);
+    }
     stagesEl.appendChild(li);
   });
+  if (techEl && techBody) {
+    var tech = pipeline.tech_detail || "";
+    if (tech) {
+      techEl.hidden = false;
+      techBody.textContent = tech;
+    } else {
+      techEl.hidden = true;
+      techBody.textContent = "";
+    }
+  }
 }
 
 function renderMonitorLive(data, opts) {
@@ -564,7 +573,7 @@ function renderMonitorLive(data, opts) {
     if (phaseEl) {
       phaseEl.textContent = phase
         ? ("当前步骤：" + phase)
-        : "正在监测刷新（抓取 → 整理 → 入库）…";
+        : "监测刷新中（多方面来源一并跑）…";
     }
   } else {
     stateEl.textContent = "空闲";
@@ -1403,7 +1412,7 @@ function runMonitorRefresh(options) {
   clearError();
   var busyBase = keyword
     ? ("正在按「" + keyword + "」监测刷新，")
-    : "正在监测刷新（抓取聚合库/NVD/OSV → 整理 → 入库，可能需数十秒），";
+    : "监测刷新中（多方面来源一并跑，可能需数十秒），";
   startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",

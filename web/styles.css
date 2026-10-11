@@ -344,6 +344,17 @@ button[aria-busy="true"] { pointer-events: none; }
 }
 .pipeline-stage.is-running,
 .pipeline-stage.is-ok { animation: pipeline-in 0.35s ease; }
+.pipeline-tech {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pipeline-tech summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pipeline-tech[open] summary { margin-bottom: 4px; }
 
 .src-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .src-tag {

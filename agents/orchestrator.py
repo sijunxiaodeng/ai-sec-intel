@@ -43,6 +43,7 @@ def run_collect(keyword="llm", *, on_phase=None):
     """Run monitor → normalize → upsert.
 
     ``on_phase(stage_id, **fields)`` optional callback for live pipeline UI.
+    Product stages are coarse: monitoring → persist (not per-source).
     """
     def phase(stage_id, **fields):
         if on_phase:
@@ -51,69 +52,52 @@ def run_collect(keyword="llm", *, on_phase=None):
             except Exception:
                 pass
 
-    phase("fetch_nvd", status="running", did="开始查询 NVD…")
-    phase("fetch_osv", status="pending")
-    phase("fetch_aggregate", status="pending")
+    phase(
+        "monitoring",
+        status="running",
+        did="多方面来源一并抓取中…",
+        phase="监测刷新中",
+    )
     monitored = monitor_run(keyword)
     stats = monitored.get("stats") or {}
     steps_in = monitored.get("steps") or []
 
-    def _fill_from_step(stage_id, step, ok_flag):
-        if not step:
-            phase(stage_id, status="skip", note="未跑")
-            return
-        status = "ok" if ok_flag and "失败" not in (step.get("action") or "") else "error"
-        if "失败" in (step.get("action") or ""):
-            status = "error"
-        phase(
-            stage_id,
-            status=status,
-            did=step.get("did") or step.get("action") or "",
-            got=step.get("got") or step.get("detail") or "",
-            produced=step.get("produced") or "",
-            impact=step.get("impact") or "",
-            note=step.get("note") or "",
-        )
-
-    nvd_step = next((s for s in steps_in if "NVD" in (s.get("action") or "")), None)
-    osv_step = next((s for s in steps_in if "OSV" in (s.get("action") or "")), None)
-    agg_step = next(
-        (
-            s for s in steps_in
-            if "聚合库" in (s.get("action") or "")
-            or "多源情报" in (s.get("action") or "")
-            or "团队情报" in (s.get("action") or "")
-        ),
-        None,
+    failed_bits = []
+    for step in steps_in:
+        action = step.get("action") or ""
+        if "失败" in action:
+            failed_bits.append(action.replace("调用 ", "").strip())
+    # Soft-fail: any source failure alone is not a whole-stage error if others worked.
+    all_failed = bool(failed_bits) and not (
+        stats.get("nvd_ok") or stats.get("osv_ok") or stats.get("aggregate_ok")
     )
-    _fill_from_step("fetch_nvd", nvd_step, stats.get("nvd_ok", True))
-    _fill_from_step("fetch_osv", osv_step, stats.get("osv_ok", True))
-    _fill_from_step("fetch_aggregate", agg_step, stats.get("aggregate_ok", True))
+    phase(
+        "monitoring",
+        status="error" if all_failed else "ok",
+        did="多方面来源抓取已完成",
+        got="命中 %d，保留 %d" % (stats.get("hit", 0), stats.get("kept", 0)),
+        produced="进入整理入库 %d 条" % len(monitored.get("items") or []),
+        impact="本轮监测结果将规范化并写入知识库",
+        note=("部分来源未通：" + "、".join(failed_bits[:4]) if failed_bits else "多方面来源已尽力查询"),
+        phase="监测刷新中",
+    )
+    # Compact tech line for optional UI disclosure (not a stage checklist).
+    tech_bits = []
+    for step in steps_in:
+        action = step.get("action") or ""
+        detail = (step.get("detail") or "")[:80]
+        if action:
+            tech_bits.append("%s：%s" % (action.replace("调用 ", ""), detail))
+    monitored["tech_detail"] = "；".join(tech_bits)[:480]
 
     phase(
-        "normalize",
+        "persist",
         status="running",
-        did="统一来源字段名为系统标准格式",
-        got="待整理 %d 条" % len(monitored.get("items") or []),
+        did="规范化字段并合并写入知识库",
+        got="待处理 %d 条" % len(monitored.get("items") or []),
+        phase="整理入库",
     )
     enriched = enrich_run(monitored["items"], online=False)
-    enrich_step = (enriched.get("steps") or [{}])[0]
-    phase(
-        "normalize",
-        status="ok",
-        did=enrich_step.get("action") or "整理情报字段",
-        got="整理 %d 条" % len(enriched.get("records") or []),
-        produced="规范化记录 %d 条" % len(enriched.get("records") or []),
-        impact="进入入库合并；本步不查外网 EPSS/KEV",
-        note=enrich_step.get("detail") or "",
-    )
-
-    phase(
-        "upsert",
-        status="running",
-        did="按 CVE 编号合并写入知识库",
-        got="待写入 %d 条" % len(enriched.get("records") or []),
-    )
     write = upsert_stats(enriched["records"])
     saved = write["records"]
     # Advance OSV/NVD watermarks only after a successful upsert path.
@@ -126,14 +110,15 @@ def run_collect(keyword="llm", *, on_phase=None):
             except Exception:
                 pass
     phase(
-        "upsert",
+        "persist",
         status="ok",
-        did="按 CVE 编号合并写入知识库",
-        got="本轮参与合并 %d 条" % write.get("fetched", 0),
-        produced="新增 %d · 合并已有 %d · 库内共 %d"
+        did="规范化并合并写入知识库",
+        got="本轮参与 %d 条" % write.get("fetched", 0),
+        produced="新增 %d · 合并 %d · 库内共 %d"
         % (write.get("inserted", 0), write.get("merged", 0), write.get("total", len(saved))),
-        impact="情报监测流将反映库内最新合并结果",
-        note="「库内共 N」不是本轮新增；0 新增时请看命中/合并",
+        impact="情报流将反映最新合并结果",
+        note="0 新增时请看命中/合并——不等于没搜到",
+        phase="整理入库",
     )
 
     documents, document_steps = _documents_step(enriched["records"])
@@ -166,6 +151,7 @@ def run_collect(keyword="llm", *, on_phase=None):
         "documents": documents,
         "round_stats": round_stats,
         "write": write,
+        "tech_detail": monitored.get("tech_detail") or "",
     }
 
 

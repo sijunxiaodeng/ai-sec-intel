@@ -166,14 +166,22 @@ class TestPipelineState(unittest.TestCase):
     def test_begin_update_finish(self):
         pipe = self.pipeline_mod.begin_pipeline()
         self.assertEqual(pipe["status"], "running")
+        ids = [s["id"] for s in pipe["stages"]]
+        self.assertEqual(ids, ["monitoring", "persist", "library_sync"])
         self.pipeline_mod.update_stage(
-            "fetch_osv",
+            "monitoring",
             status="ok",
-            did="查询 OSV",
-            got="命中 10",
-            produced="保留 0",
-            impact="无新条",
-            note="自上次位点",
+            did="多方面来源抓取已完成",
+            got="命中 10，保留 0",
+            produced="进入整理入库 0 条",
+            note="多方面来源已尽力查询",
+        )
+        self.pipeline_mod.update_stage(
+            "persist",
+            status="ok",
+            did="规范化并合并写入",
+            got="参与 0",
+            produced="新增 0 · 合并 0",
         )
         done = self.pipeline_mod.finish_pipeline(
             ok=True,
@@ -181,9 +189,8 @@ class TestPipelineState(unittest.TestCase):
         )
         self.assertEqual(done["status"], "done")
         self.assertIn("命中 10", done["summary"])
-        self.assertEqual(done["metrics"]["kept"], 0)
-        stage = next(s for s in done["stages"] if s["id"] == "fetch_osv")
-        self.assertEqual(stage["produced"], "保留 0")
+        self.assertEqual(done["metrics"]["inserted"], 0)
+        self.assertNotIn("fetch_osv", [s["id"] for s in done["stages"]])
         raw = json.loads(self.schedule_mod.STATE_PATH.read_text(encoding="utf-8"))
         self.assertFalse(raw.get("running"))
 
