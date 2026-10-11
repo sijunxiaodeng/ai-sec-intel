@@ -78,6 +78,63 @@ def interleave_feed(cve_items, doc_items):
     return out
 
 
+def _cve_product_key(row):
+    product = (row.get("product") or "").strip().lower()
+    if product and product not in {"llm", "ai", "unknown", "?"}:
+        return product
+    blob = " ".join([
+        row.get("title") or "",
+        row.get("description") or "",
+        " ".join(row.get("affected") or []) if isinstance(row.get("affected"), list) else "",
+        row.get("cve_id") or "",
+    ]).lower()
+    for name in (
+        "vllm", "transformers", "langchain", "langgraph", "llama-index", "llamaindex",
+        "huggingface", "openai", "ollama",
+    ):
+        if name in blob:
+            return "llama-index" if name in {"llama-index", "llamaindex"} else name
+    return product or "other"
+
+
+def diversify_cves_by_product(cve_items, per_product_limit=8, limit=80):
+    """Round-robin CVE cards by product so one component cannot monopolize the stream.
+
+    Does not delete KB rows — only shapes the monitor feed window.
+    """
+    buckets = {}
+    for row in cve_items:
+        key = _cve_product_key(row)
+        buckets.setdefault(key, []).append(row)
+    for key, bucket in buckets.items():
+        # Live rows first, then newer published_at.
+        bucket.sort(
+            key=lambda r: (
+                0 if r.get("demo") else 1,
+                str(r.get("published_at") or ""),
+            ),
+            reverse=True,
+        )
+        buckets[key] = bucket[: max(1, int(per_product_limit))]
+    preferred = (
+        "vllm", "transformers", "langchain", "langgraph", "llama-index",
+        "huggingface", "openai", "ollama", "other",
+    )
+    order = [k for k in preferred if k in buckets] + sorted(k for k in buckets if k not in preferred)
+    out = []
+    while len(out) < limit and order:
+        next_order = []
+        for key in order:
+            bucket = buckets.get(key) or []
+            if not bucket:
+                continue
+            out.append(bucket.pop(0))
+            if bucket:
+                next_order.append(key)
+        order = next_order
+    return out
+
+
 def feed_composition(items):
     """Honest mix stats for UI — not a scoring board."""
     by_kind = {"cve": 0, "document": 0}

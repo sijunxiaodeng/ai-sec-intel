@@ -1,7 +1,12 @@
 """Offline monitor feed mix helpers (no network / no FastAPI)."""
 import unittest
 
-from api.feed_mix import diversify_documents, feed_composition, interleave_feed
+from api.feed_mix import (
+    diversify_cves_by_product,
+    diversify_documents,
+    feed_composition,
+    interleave_feed,
+)
 
 
 class TestFeedDiversity(unittest.TestCase):
@@ -38,6 +43,18 @@ class TestFeedDiversity(unittest.TestCase):
         self.assertEqual(comp["by_kind"]["document"], 1)
         self.assertEqual(comp["by_category"]["security_blog"], 1)
         self.assertEqual(comp["ollama_mentions"], 1)
+
+    def test_diversify_cves_caps_single_product(self):
+        rows = (
+            [{"kind": "cve", "product": "ollama", "cve_id": "CVE-O-%d" % i, "published_at": "2026-10-01"} for i in range(20)]
+            + [{"kind": "cve", "product": "vllm", "cve_id": "CVE-V-%d" % i, "published_at": "2026-10-02"} for i in range(5)]
+            + [{"kind": "cve", "product": "langchain", "cve_id": "CVE-L-%d" % i, "published_at": "2026-10-03"} for i in range(5)]
+        )
+        out = diversify_cves_by_product(rows, per_product_limit=3, limit=12)
+        products = [r["product"] for r in out]
+        self.assertLessEqual(products.count("ollama"), 3)
+        self.assertIn("vllm", products)
+        self.assertIn("langchain", products)
 
 
 if __name__ == "__main__":

@@ -575,6 +575,7 @@ _CATEGORY_LABELS = {
 }
 
 
+from api.feed_mix import diversify_cves_by_product as _diversify_cves_by_product
 from api.feed_mix import diversify_documents as _diversify_documents
 from api.feed_mix import feed_composition as _feed_composition
 from api.feed_mix import interleave_feed as _interleave_feed
@@ -737,6 +738,10 @@ def monitor_feed(q: str = "", kind: str = "all"):
         doc_items = []
     elif kind == "document":
         cve_items = []
+
+    # Soft product balance for the monitor stream (KB still holds the full set).
+    if kind in {"all", "cve", "demo", "live"} and cve_items:
+        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=6, limit=60)
 
     def _pub_ts(row):
         raw = (row.get("published_at") or "").strip()
