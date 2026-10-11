@@ -452,6 +452,97 @@ function formatStamp(value) {
   return text.length > 22 ? text.slice(0, 19) + " UTC" : text;
 }
 
+function stageStatusLabel(status) {
+  if (status === "running") return { text: "进行中", cls: "st-run" };
+  if (status === "ok") return { text: "完成", cls: "st-ok" };
+  if (status === "skip") return { text: "跳过", cls: "st-skip" };
+  if (status === "error") return { text: "失败", cls: "st-err" };
+  return { text: "等待", cls: "st-pend" };
+}
+
+function renderCollectPipeline(pipeline, opts) {
+  opts = opts || {};
+  var box = $("collect-pipeline");
+  var stagesEl = $("pipeline-stages");
+  var metricsEl = $("pipeline-metrics");
+  var summaryEl = $("pipeline-summary");
+  if (!box || !stagesEl) return;
+  if (!pipeline || !(pipeline.stages || []).length) {
+    if (!opts.forceShow) box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  var metrics = pipeline.metrics || {};
+  var status = pipeline.status || "";
+  if (summaryEl) {
+    if (pipeline.summary) summaryEl.textContent = pipeline.summary;
+    else if (status === "running") {
+      summaryEl.textContent = "正在执行：抓取 → 整理 → 入库"
+        + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
+        + "。进度来自任务状态轮询。";
+    } else {
+      summaryEl.textContent = "最近一轮采集步骤如下。0 新增时请看「命中 / 合并」——不等于没搜到。";
+    }
+  }
+  if (metricsEl) {
+    var bits = [];
+    if (pipeline.elapsed_sec != null && status !== "idle") {
+      bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
+    }
+    bits.push("步骤 <strong>" + (metrics.stages_done || 0) + "/" + (metrics.stages_total || 0) + "</strong>");
+    bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
+    bits.push("保留 <strong>" + (metrics.kept || 0) + "</strong>");
+    bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
+    bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
+    bits.push("外部取回 <strong>" + (metrics.external_fetches || 0) + "</strong>");
+    bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
+    bits.push("跳过 <strong>" + (metrics.skipped || 0) + "</strong>");
+    metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
+    metricsEl.hidden = false;
+  }
+  clear(stagesEl);
+  (pipeline.stages || []).forEach(function (stage) {
+    var li = document.createElement("li");
+    var st = stage.status || "pending";
+    li.className = "pipeline-stage is-" + st;
+    var top = document.createElement("div");
+    top.className = "pipeline-stage-top";
+    var title = document.createElement("span");
+    title.className = "pipeline-stage-title";
+    title.textContent = stage.title || stage.id || "";
+    top.appendChild(title);
+    if (stage.subtitle) {
+      var sub = document.createElement("span");
+      sub.className = "pipeline-stage-sub";
+      sub.textContent = stage.subtitle;
+      top.appendChild(sub);
+    }
+    var badge = stageStatusLabel(st);
+    var stEl = document.createElement("span");
+    stEl.className = "pipeline-stage-status " + badge.cls;
+    stEl.textContent = badge.text;
+    top.appendChild(stEl);
+    li.appendChild(top);
+    var qa = document.createElement("ul");
+    qa.className = "pipeline-qa";
+    [
+      ["做了什么", stage.did],
+      ["得到什么", stage.got],
+      ["产出什么", stage.produced],
+      ["有什么影响", stage.impact],
+      ["备注", stage.note],
+    ].forEach(function (pair) {
+      if (!pair[1]) return;
+      var row = document.createElement("li");
+      row.innerHTML = "<span class=\"label\">" + pair[0] + "</span> ";
+      row.appendChild(document.createTextNode(pair[1]));
+      qa.appendChild(row);
+    });
+    if (qa.childNodes.length) li.appendChild(qa);
+    stagesEl.appendChild(li);
+  });
+}
+
 function renderMonitorLive(data, opts) {
   opts = opts || {};
   var live = $("monitor-live");
@@ -485,13 +576,18 @@ function renderMonitorLive(data, opts) {
     var last = (data && data.last_run) || "";
     var count = (data && data.last_count) || 0;
     lastEl.textContent = last
-      ? (formatStamp(last) + (count ? " · 相关 " + count + " 条" : ""))
+      ? (formatStamp(last) + (count ? " · 本轮新增 " + count + " 条" : " · 本轮新增 0"))
       : "尚未刷新；可点「立即刷新一轮」";
   }
   if (nextEl) {
     if (running) nextEl.textContent = "本轮进行中…";
     else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（约每 " + hours + " 小时）";
     else nextEl.textContent = "完成首轮后按约每 " + hours + " 小时估算";
+  }
+  if (data && data.pipeline) {
+    renderCollectPipeline(data.pipeline, { forceShow: running || data.pipeline.status === "done" });
+  } else if (opts.pipeline) {
+    renderCollectPipeline(opts.pipeline, { forceShow: true });
   }
 }
 
@@ -507,7 +603,10 @@ function loadMonitorStatus() {
     if (data.running) bits.push("正在刷新：" + (data.run_phase || "进行中"));
     else if (data.last_run) {
       bits.push("最近更新 " + formatStamp(data.last_run));
-      if (data.last_count) bits.push("相关 " + data.last_count + " 条");
+      bits.push("上次新增 " + (data.last_count || 0) + " 条");
+      var pm = (data.pipeline && data.pipeline.metrics) || {};
+      if (pm.hit != null) bits.push("命中 " + (pm.hit || 0));
+      if (pm.merged != null) bits.push("合并 " + (pm.merged || 0));
     } else bits.push("尚未刷新；可点「立即刷新一轮」");
     if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
     if (data.last_error) bits.push("上次错误：" + data.last_error);
@@ -517,7 +616,7 @@ function loadMonitorStatus() {
       line.textContent = data.running
         ? ("监测进行中：" + (data.run_phase || "刷新中") + "…")
         : (data.last_run
-          ? ("最近更新 " + formatStamp(data.last_run) + (data.last_count ? " · 相关 " + data.last_count + " 条" : ""))
+          ? ("最近更新 " + formatStamp(data.last_run) + " · 上次新增 " + (data.last_count || 0) + " 条")
           : "可点「立即刷新监测」马上跑一轮");
     }
     return data;
@@ -1212,8 +1311,13 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   srcLine("多路采集周期", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
-  if (diag.written === 0 || (runData && runData.count === 0)) {
-    bits.push("本轮 CVE 入库 0");
+  var rs = (runData && runData.round_stats) || {};
+  if ((diag.written === 0 || (runData && runData.count === 0)) && (rs.inserted === 0 || rs.inserted == null)) {
+    bits.push("本轮 CVE 新增 0"
+      + (rs.hit != null ? "（命中 " + rs.hit + "，合并 " + (rs.merged || 0) + "）" : ""));
+  }
+  if (rs.hit > 0 && (rs.inserted || 0) === 0) {
+    bits.push("已查到来源数据但无新编号——多半是增量游标之后无更新，或 CVE 已在库中");
   }
   if (team.reachable === false) {
     bits.push("聚合采集库不可用时仍应有 NVD/OSV 与本地资料");
@@ -1271,6 +1375,7 @@ function startMonitorProgressTimers(busyBase) {
         elapsedSec: sec,
         phase: data.run_phase || "监测执行中",
       });
+      if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
       if (data.run_phase) {
         showToast("监测进行中：" + data.run_phase + "（" + sec + " 秒）", "busy");
       }
@@ -1309,23 +1414,35 @@ function runMonitorRefresh(options) {
     var lib = data.library_sync || {};
     var warns = data.warnings || [];
     var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
-    setMonitorStatus("本轮完成：相关 " + (data.count || 0) + " 条"
+    var rs = data.round_stats || {};
+    if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
+    var roundLine = "本轮命中 " + (rs.hit != null ? rs.hit : "—")
+      + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
+      + " · 合并 " + (rs.merged != null ? rs.merged : "—");
+    setMonitorStatus("本轮完成：" + roundLine
       + (bmon.status ? "；多路采集 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
       + "。正在刷新情报流…");
-    showToast("监测完成，正在刷新列表…", "busy");
+    showToast("监测完成：" + roundLine, "busy");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
-      var done = "刷新完成：写入相关 " + (data.count || 0) + " 条；当前显示 "
+      var done = "刷新完成：" + roundLine + "；当前显示 "
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
+      if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
+        done += " 已查到来源数据但无新 CVE 编号（增量位点之后无更新，或已在库中合并）。";
+      }
       setMonitorStatus(done);
-      showToast(done + (warns.length ? " " + warns[0] : ""), warns.length ? "error" : "ok");
+      var toastKind = warns.length ? "error" : (((data.count || 0) === 0 && total === 0) ? "error" : "ok");
+      showToast(done + (warns.length ? " " + warns[0] : ""), toastKind);
       if (!total) {
         var why = diagnoseEmptyFeed(data, feed, keyword);
         showError(new Error(keyword
           ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why
           : "刷新已完成，但情报流仍为空。" + why));
+      } else if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
+        // Visible work, empty keep — not an error, but surface explanation.
+        clearError();
       }
       return data;
     });

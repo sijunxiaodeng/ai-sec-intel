@@ -173,28 +173,56 @@ def _round_robin_merge(buckets):
     return out
 
 
-class OSVCollector(object):
-    """collect() 返回 IntelligenceItem 列表。查不到包时返回空列表，不编造记录。"""
+def _vuln_stamp(vuln):
+    """Prefer OSV modified time; fall back to published for incremental cut."""
+    return str(vuln.get("modified") or vuln.get("published") or "")
 
-    def __init__(self, keyword="llm", per_package_limit=PER_PACKAGE_LIMIT):
+
+class OSVCollector(object):
+    """collect() 返回 IntelligenceItem 列表。查不到包时返回空列表，不编造记录。
+
+    When a watermark exists (data/collect_cursors.json → osv), only vulns with
+    modified/published **after** that stamp are kept for upsert — still counts
+    every API hit so the UI can show「命中多 / 保留 0」honestly.
+    """
+
+    def __init__(self, keyword="llm", per_package_limit=PER_PACKAGE_LIMIT, use_cursor=True):
         self.keyword = keyword or "llm"
         self.per_package_limit = max(1, int(per_package_limit or PER_PACKAGE_LIMIT))
+        self.use_cursor = bool(use_cursor)
+        self.last_stats = {}
 
     def collect(self):
+        from collectors.cursors import get_cursor
+
         packages = resolve_packages(self.keyword)
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        watermark = get_cursor("osv") if self.use_cursor else ""
+        fetched = 0
+        package_ok = 0
+        package_fail = 0
+        max_stamp = watermark
         # Merge ecosystem variants (PyPI + GIT) per product before capping.
         by_product = {}
         for ecosystem, name in packages:
             product = _product_label(ecosystem, name)
             try:
                 payload = _post(ecosystem, name)
+                package_ok += 1
             except Exception:
                 # One package failure must not drop the rest of the AI set.
+                package_fail += 1
                 continue
             bucket = by_product.setdefault(product, [])
             seen_ids = {item.get("cve_id") for item in bucket}
             for vuln in payload.get("vulns") or []:
+                fetched += 1
+                stamp = _vuln_stamp(vuln)
+                if stamp and (not max_stamp or stamp > max_stamp):
+                    max_stamp = stamp
+                # Incremental: skip records at/before last successful position.
+                if watermark and stamp and stamp <= watermark:
+                    continue
                 item = to_item(vuln, product, collected_at)
                 cve = item.get("cve_id")
                 if not cve or cve in seen_ids:
@@ -214,4 +242,33 @@ class OSVCollector(object):
             key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
             reverse=True,
         )
+        self.last_stats = {
+            "source": "OSV",
+            "fetched": fetched,
+            "kept": len(items),
+            "packages_queried": package_ok,
+            "packages_failed": package_fail,
+            "packages_planned": len(packages),
+            "watermark_before": watermark,
+            "watermark_candidate": max_stamp or collected_at,
+            "incremental": bool(watermark),
+            "external_fetches": package_ok,
+        }
         return items
+
+    def commit_cursor(self):
+        """Advance watermark after a successful upsert that included this collect."""
+        from collectors.cursors import set_cursor
+
+        candidate = (self.last_stats or {}).get("watermark_candidate")
+        if not candidate:
+            return
+        set_cursor(
+            "osv",
+            candidate,
+            meta={
+                "fetched": (self.last_stats or {}).get("fetched"),
+                "kept": (self.last_stats or {}).get("kept"),
+                "keyword": self.keyword,
+            },
+        )

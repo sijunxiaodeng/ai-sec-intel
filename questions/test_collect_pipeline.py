@@ -1,0 +1,192 @@
+"""Offline tests for collect pipeline state, cursors, and upsert round stats."""
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from collectors import cursors as cursors_mod
+from collectors.osv import OSVCollector
+from database import store as store_mod
+from models import enriched_record, intelligence_item
+
+
+class TestCollectCursors(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "collect_cursors.json"
+        self._old = cursors_mod.CURSOR_PATH
+        cursors_mod.CURSOR_PATH = self.path
+
+    def tearDown(self):
+        cursors_mod.CURSOR_PATH = self._old
+        self.tmp.cleanup()
+
+    def test_monotonic_advance(self):
+        cursors_mod.set_cursor("osv", "2024-01-01T00:00:00Z")
+        cursors_mod.set_cursor("osv", "2023-01-01T00:00:00Z")
+        self.assertEqual(cursors_mod.get_cursor("osv"), "2024-01-01T00:00:00Z")
+        cursors_mod.set_cursor("osv", "2025-06-01T12:00:00Z")
+        self.assertEqual(cursors_mod.get_cursor("osv"), "2025-06-01T12:00:00Z")
+
+
+class TestOSVIncremental(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "collect_cursors.json"
+        self._old = cursors_mod.CURSOR_PATH
+        cursors_mod.CURSOR_PATH = self.path
+
+    def tearDown(self):
+        cursors_mod.CURSOR_PATH = self._old
+        self.tmp.cleanup()
+
+    def test_watermark_filters_kept_but_counts_fetched(self):
+        cursors_mod.set_cursor("osv", "2024-06-01T00:00:00Z")
+
+        def fake_post(eco, name):
+            return {
+                "vulns": [
+                    {
+                        "id": "CVE-2023-0001",
+                        "summary": "old",
+                        "published": "2023-01-01T00:00:00Z",
+                        "modified": "2023-02-01T00:00:00Z",
+                    },
+                    {
+                        "id": "CVE-2024-9999",
+                        "summary": "new",
+                        "published": "2024-07-01T00:00:00Z",
+                        "modified": "2024-07-02T00:00:00Z",
+                    },
+                ]
+            }
+
+        coll = OSVCollector(keyword="vllm", per_package_limit=10)
+        with patch("collectors.osv._post", side_effect=fake_post):
+            with patch("collectors.osv.resolve_packages", return_value=[("PyPI", "vllm")]):
+                items = coll.collect()
+        self.assertEqual(coll.last_stats["fetched"], 2)
+        self.assertEqual(coll.last_stats["kept"], 1)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["cve_id"], "CVE-2024-9999")
+        self.assertTrue(coll.last_stats["incremental"])
+
+    def test_second_run_can_keep_zero(self):
+        cursors_mod.set_cursor("osv", "2025-01-01T00:00:00Z")
+
+        def fake_post(eco, name):
+            return {
+                "vulns": [
+                    {
+                        "id": "CVE-2024-1111",
+                        "summary": "older",
+                        "published": "2024-01-01T00:00:00Z",
+                        "modified": "2024-06-01T00:00:00Z",
+                    }
+                ]
+            }
+
+        coll = OSVCollector(keyword="vllm", per_package_limit=10)
+        with patch("collectors.osv._post", side_effect=fake_post):
+            with patch("collectors.osv.resolve_packages", return_value=[("PyPI", "vllm")]):
+                items = coll.collect()
+        self.assertEqual(items, [])
+        self.assertEqual(coll.last_stats["fetched"], 1)
+        self.assertEqual(coll.last_stats["kept"], 0)
+
+
+class TestUpsertStats(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self._paths = (
+            store_mod.DATA,
+            store_mod.KB_PATH,
+            store_mod.CARDS_PATH,
+            store_mod.CARDS_JS_PATH,
+            store_mod.RUNS_PATH,
+        )
+        store_mod.DATA = root / "data"
+        store_mod.KB_PATH = store_mod.DATA / "knowledge.json"
+        store_mod.CARDS_PATH = root / "cards.json"
+        store_mod.CARDS_JS_PATH = root / "cards.js"
+        store_mod.RUNS_PATH = store_mod.DATA / "runs.json"
+        store_mod.DATA.mkdir(parents=True, exist_ok=True)
+        store_mod.KB_PATH.write_text("[]", encoding="utf-8")
+
+    def tearDown(self):
+        (
+            store_mod.DATA,
+            store_mod.KB_PATH,
+            store_mod.CARDS_PATH,
+            store_mod.CARDS_JS_PATH,
+            store_mod.RUNS_PATH,
+        ) = self._paths
+        self.tmp.cleanup()
+
+    def _rec(self, cve, title="t"):
+        return enriched_record(intelligence_item({
+            "cve_id": cve,
+            "title": title,
+            "description": "d",
+            "source": "OSV",
+            "sources": ["OSV"],
+            "published_at": "2024-01-01T00:00:00Z",
+            "collected_at": "2024-01-02T00:00:00Z",
+            "product": "vllm",
+        }))
+
+    def test_inserted_vs_merged(self):
+        first = store_mod.upsert_stats([self._rec("CVE-2024-1")])
+        self.assertEqual(first["inserted"], 1)
+        self.assertEqual(first["merged"], 0)
+        second = store_mod.upsert_stats([self._rec("CVE-2024-1", "again"), self._rec("CVE-2024-2")])
+        self.assertEqual(second["inserted"], 1)
+        self.assertEqual(second["merged"], 1)
+        self.assertEqual(second["total"], 2)
+
+
+class TestPipelineState(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        from automation import schedule as schedule_mod
+        from automation import pipeline as pipeline_mod
+
+        self.schedule_mod = schedule_mod
+        self.pipeline_mod = pipeline_mod
+        self._state = schedule_mod.STATE_PATH
+        schedule_mod.STATE_PATH = Path(self.tmp.name) / "monitor.json"
+        schedule_mod.STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self):
+        self.schedule_mod.STATE_PATH = self._state
+        self.tmp.cleanup()
+
+    def test_begin_update_finish(self):
+        pipe = self.pipeline_mod.begin_pipeline()
+        self.assertEqual(pipe["status"], "running")
+        self.pipeline_mod.update_stage(
+            "fetch_osv",
+            status="ok",
+            did="查询 OSV",
+            got="命中 10",
+            produced="保留 0",
+            impact="无新条",
+            note="自上次位点",
+        )
+        done = self.pipeline_mod.finish_pipeline(
+            ok=True,
+            metrics={"hit": 10, "kept": 0, "inserted": 0, "merged": 0, "external_fetches": 3},
+        )
+        self.assertEqual(done["status"], "done")
+        self.assertIn("命中 10", done["summary"])
+        self.assertEqual(done["metrics"]["kept"], 0)
+        stage = next(s for s in done["stages"] if s["id"] == "fetch_osv")
+        self.assertEqual(stage["produced"], "保留 0")
+        raw = json.loads(self.schedule_mod.STATE_PATH.read_text(encoding="utf-8"))
+        self.assertFalse(raw.get("running"))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -154,6 +154,14 @@
             <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
           </div>
         </div>
+        <div class="collect-pipeline" id="collect-pipeline" hidden>
+          <header class="pipeline-head">
+            <h3 class="pipeline-title">本轮采集流水线</h3>
+            <p class="hint" id="pipeline-summary">刷新后显示抓取 → 整理 → 入库等真实步骤（状态轮询，非推流演出）。</p>
+          </header>
+          <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
+          <ol class="pipeline-stages" id="pipeline-stages"></ol>
+        </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
         <aside class="source-legend" aria-label="监测维度说明">
@@ -452,6 +460,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-taxonomy1"></script>
+  <script src="/assets/app.js?v=20261011-pipeline1"></script>
 </body>
 </html>

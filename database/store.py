@@ -168,6 +168,49 @@ def upsert(records):
     return save_kb(current + list(records))
 
 
+def upsert_stats(records):
+    """Merge incoming records; return saved rows plus per-round counts.
+
+    - inserted: CVE id not previously in the knowledge base
+    - merged: CVE id already present (fields unioned)
+    - fetched: incoming rows with a CVE id
+    - total: knowledge base size after save
+
+    Use this for monitor UI「本轮命中 / 新增 / 合并」— do not treat total as
+    「本轮新写入」.
+    """
+    current = load_kb()
+    existing = set()
+    for row in current:
+        cve = (row.get("item") or {}).get("cve_id")
+        if cve:
+            existing.add(cve)
+    incoming = list(records or [])
+    fetched = 0
+    inserted = 0
+    merged = 0
+    for record in incoming:
+        record = enriched_record(record)
+        cve = (record.get("item") or {}).get("cve_id") or ""
+        if not cve:
+            continue
+        fetched += 1
+        if cve in existing:
+            merged += 1
+        else:
+            inserted += 1
+            existing.add(cve)
+    saved = save_kb(current + incoming)
+    return {
+        "records": saved,
+        "fetched": fetched,
+        "inserted": inserted,
+        "merged": merged,
+        "skipped_dup": merged,
+        "total": len(saved),
+    }
+
+
 def get_record(cve_id):
     for record in load_kb():
         if (record.get("item") or {}).get("cve_id") == cve_id:
