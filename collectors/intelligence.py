@@ -1,7 +1,7 @@
 """Read local multi-source CVE library (embed by default; HTTP sidecar optional).
 
 Implementation names still use team_* / TEAM_INTEL_* (compat). Product copy is
-「本机库」, not team collaboration.
+「多源情报 / 知识库」, not team collaboration.
 """
 import json
 import os

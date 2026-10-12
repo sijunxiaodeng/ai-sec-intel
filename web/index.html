@@ -191,8 +191,8 @@
                 <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（本机直连）</li>
                 <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 项目公告</li>
                 <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
-                <li><span class="src-tag src-team">本机库</span> 监测读本地情报库（非外队、非第二端口）</li>
-                <li><span class="src-tag src-lib">资料库沉淀</span> 公开订阅或采集摘要落入本机资料库</li>
+                <li><span class="src-tag src-team">多源情报</span> 多源情报一并读入（非外队、非第二端口）</li>
+                <li><span class="src-tag src-lib">资料存档</span> 公开订阅或采集摘要落入资料存档</li>
               </ul>
             </div>
           </div>
@@ -243,8 +243,8 @@
               <button type="button" class="chip" data-source-filter="osv">OSV</button>
               <button type="button" class="chip" data-source-filter="github">GitHub</button>
               <button type="button" class="chip" data-source-filter="kev">CISA KEV</button>
-              <button type="button" class="chip" data-source-filter="aggregate">本机库</button>
-              <button type="button" class="chip" data-source-filter="library">资料库沉淀</button>
+              <button type="button" class="chip" data-source-filter="aggregate">多源情报</button>
+              <button type="button" class="chip" data-source-filter="library">资料存档</button>
             </div>
           </div>
           <p id="monitor-summary" class="hint"></p>
@@ -357,7 +357,7 @@
             <li><span class="src-tag src-lib">公开订阅</span> vLLM / Transformers 安全公告、Trail of Bits 博客、arXiv AI 安全论文</li>
             <li><span class="src-tag src-lib">固定官方</span> 网信办办法、NIST AI 600-1、国标目录等固定原文监测</li>
             <li><span class="src-tag src-nvd">历史种子</span> 演示用起始资料（Wiz / 官方文档 / 论文），非实时新发现</li>
-            <li><span class="src-tag src-team">本机库摘要</span> 本机情报库题名/描述窗口；默认不是全文镜像</li>
+            <li><span class="src-tag src-team">资料摘要</span> 题名/描述窗口；默认不是全文镜像</li>
           </ul>
         </aside>
 
@@ -369,9 +369,9 @@
             <p id="library-sync-public-status" class="hint"></p>
           </div>
           <div class="sync-card">
-            <h3>本机库摘要同步</h3>
-            <p class="hint">从本机情报库导入最近窗口的题名/描述；需要全文时再单独获取。</p>
-            <button type="button" class="ghost" id="library-team-sync">同步本机库摘要</button>
+            <h3>资料摘要同步</h3>
+            <p class="hint">导入最近窗口的题名/描述；需要全文时再单独获取。</p>
+            <button type="button" class="ghost" id="library-team-sync">同步资料摘要</button>
             <p id="library-sync-multi-status" class="hint"></p>
           </div>
         </div>

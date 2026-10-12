@@ -42,7 +42,7 @@ def run_documents(record):
 def _monitor_outcome(monitored):
     """A successful empty poll is different from unavailable collection sources."""
     stats = monitored.get("stats") or {}
-    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "本机库"}
+    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "多源情报"}
     sources, warnings = {}, []
     for name, label in labels.items():
         if name == "nvd" and stats.get("nvd_disabled_duplicate"):
@@ -69,7 +69,7 @@ def _monitor_outcome(monitored):
         if sources.get("nvd") == "success":
             sources["nvd"] = "partial"
     if stats.get("aggregate_partial") or any("部分关键词失败" in (s.get("detail") or "") for s in monitored.get("steps", [])):
-        warnings.append("本机库部分关键词查询失败")
+        warnings.append("多源情报部分关键词查询失败")
         if sources.get("aggregate") == "success":
             sources["aggregate"] = "partial"
     status = "failed" if failed else "partial" if warnings else "success"

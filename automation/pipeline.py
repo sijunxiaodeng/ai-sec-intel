@@ -1,5 +1,5 @@
 # Coarse collect pipeline state for monitor refresh UI.
-# Product: one 监测 action — NOT per-source stage rows (NVD/OSV/本机库).
+# Product: one 监测 action — NOT per-source stage rows (NVD/OSV/多源情报).
 # Honest job state on disk; UI polls.
 
 from copy import deepcopy
@@ -22,7 +22,7 @@ STAGE_DEFS = [
     {
         "id": "library_sync",
         "title": "资料同步",
-        "subtitle": "公开与本机库摘要（可选）",
+        "subtitle": "公开与资料摘要（可选）",
     },
 ]
 

@@ -194,7 +194,7 @@ def create_app(root: Path | None = None, db_path: Path | None = None) -> FastAPI
         except (FileNotFoundError, sqlite3.Error) as exc:
             handle_db_error(exc)
 
-    @app.get("/api/intelligence/team", tags=["本机库接口"])
+    @app.get("/api/intelligence/team", tags=["情报接口"])
     def team_intelligence(
         q: str | None = Query(default=None, max_length=120),
         ai_only: bool = Query(default=True),

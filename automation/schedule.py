@@ -223,7 +223,7 @@ def combine_monitor_outcome(result, *, b_cycle=None, libraries=()):
     if result.get("error") and result["error"] not in warnings:
         warnings.append(result["error"])
     if b_cycle and b_cycle.get("status") in {"failed", "timeout", "partial"}:
-        warnings.append("本机库来源刷新未全部完成，已有资料保留")
+        warnings.append("多源情报来源刷新未全部完成，已有资料保留")
         sources = result.get("source_outcomes") or {}
         if b_cycle.get("status") in {"failed", "timeout"} and sources and not any(
                 sources.get(name) in {"success", "partial"} for name in ("nvd", "osv")):
@@ -365,12 +365,12 @@ def _run_once(keyword=None):
         try:
             team_library = sync_team(max_documents=30)
         except Exception as exc:
-            team_library = {"status": "error", "error": "本机库资料同步未完成（%s）" % type(exc).__name__}
-        libraries = (("公开资料同步", library), ("本机库资料同步", team_library))
+            team_library = {"status": "error", "error": "资料摘要同步未完成（%s）" % type(exc).__name__}
+        libraries = (("公开资料同步", library), ("资料摘要同步", team_library))
         library_states = [(label, library_outcome(value)) for label, value in libraries]
         configured_skip = library_outcome(team_library) == "skipped" and team_library.get("enabled") is False
         issues = [label + "未全部同步" for label, state in library_states
-                  if state != "success" and not (label == "本机库资料同步" and configured_skip)]
+                  if state != "success" and not (label == "资料摘要同步" and configured_skip)]
         data = ensure_state()
         data["library_last_run"] = _now()
         data["library_last_ok"] = int(library.get("ok") or 0) + int(team_library.get("ok") or 0)
@@ -382,14 +382,14 @@ def _run_once(keyword=None):
         data["library_team_last_status"] = library_outcome(team_library)
         data["library_team_last_ok"] = int(team_library.get("ok") or 0)
         data["library_team_last_checked_at"] = _now()
-        data["library_team_last_error"] = "" if configured_skip or library_outcome(team_library) == "success" else "本机库资料未全部同步"
+        data["library_team_last_error"] = "" if configured_skip or library_outcome(team_library) == "success" else "资料摘要未全部同步"
         if not configured_skip:
             data["library_team_last_run"] = _now()
         _write_state(data)
         active_states = [state for label, state in library_states
-                         if not (label == "本机库资料同步" and configured_skip)]
+                         if not (label == "资料摘要同步" and configured_skip)]
         on_phase("library_sync", status="error" if all(state == "failed" for state in active_states) else "ok",
-                 got="公开 %s；本机库摘要 %s" % (library_outcome(library), library_outcome(team_library)),
+                 got="公开 %s；资料摘要 %s" % (library_outcome(library), library_outcome(team_library)),
                  note="；".join(issues) if issues else "已启用的资料同步完成（含合法空轮）")
         outcome = combine_monitor_outcome(result, b_cycle=b_result, libraries=libraries)
         if outcome["status"] == "failed":

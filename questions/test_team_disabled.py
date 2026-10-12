@@ -84,7 +84,7 @@ class TeamDisabledTests(unittest.TestCase):
 
     def test_manual_cycle_keeps_configured_skip_separate_from_failure(self):
         collected = {"status": "success", "error": "", "warnings": [], "records": [],
-                     "steps": [{"role": "监测", "action": "跳过 本机库", "detail": "Disabled by configuration"}],
+                     "steps": [{"role": "监测", "action": "跳过 多源情报", "detail": "Disabled by configuration"}],
                      "source_outcomes": {"nvd": "success", "osv": "success", "aggregate": "skipped"},
                      "round_stats": {"hit": 0, "kept": 0, "inserted": 0, "merged": 0}}
         with patch.object(self.api, "run_collect", return_value=collected), \
@@ -160,11 +160,11 @@ class TeamDisabledTests(unittest.TestCase):
         skipped = sync_team(self.db)
         self.assertEqual(schedule.library_outcome(skipped), "skipped")
         result = {"status": "success", "warnings": [], "source_outcomes": {"nvd": "success", "aggregate": "skipped"}}
-        outcome = schedule.combine_monitor_outcome(result, libraries=(("本机库资料同步", skipped),))
+        outcome = schedule.combine_monitor_outcome(result, libraries=(("资料摘要同步", skipped),))
         self.assertEqual(outcome["status"], "success")
         self.assertEqual(outcome["warnings"], [])
         failed = schedule.combine_monitor_outcome(dict(result, status="failed", error="External source failed"),
-                                                  libraries=(("本机库资料同步", skipped),))
+                                                  libraries=(("资料摘要同步", skipped),))
         self.assertEqual(failed["status"], "failed")
 
 

@@ -1,8 +1,8 @@
-"""监测智能体：NVD + OSV + 本机库 CVE（同属一次监测刷新）。
+"""监测智能体：NVD + OSV + 多源 CVE（同属一次监测刷新）。
 
 默认主关键词为 llm（不再只盯 ollama）。
 逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-本机库对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
+多源情报对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
@@ -79,8 +79,8 @@ def run(keyword="llm"):
     # Cap team multi-pass (local embed is cheap; still bound work).
     team_keys = team_keys[:10]
 
-    # NVD 外网采集归 intelligence 模块（本机库）；壳侧不重复直采。
-    # 仅当本机库关闭，或显式 ROOT_NVD_ENABLED=1 时走 legacy facade。
+    # NVD 外网采集归 intelligence 模块；壳侧不重复直采。
+    # 仅当多源情报关闭，或显式 ROOT_NVD_ENABLED=1 时走 legacy facade。
     setting = os.environ.get("ROOT_NVD_ENABLED")
     team_disabled = team_intel_disabled()
     root_nvd_enabled = (
@@ -103,11 +103,11 @@ def run(keyword="llm"):
 
     if nvd_stats.get("disabled_duplicate"):
         nvd_step = _step(
-            "NVD 由本机库承担",
-            "监测模块已采 NVD 入本机库；壳侧不重复联网查询",
-            did="跳过壳侧 NVD 直采", got="本步骤无额外 NVD 请求", produced="由本机库步骤合并",
-            impact="本机库未刷新时保留已有资料并展示状态",
-            note="关闭本机库可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
+            "NVD 由监测模块承担",
+            "监测模块已采 NVD 入知识库链路；壳侧不重复联网查询",
+            did="跳过壳侧 NVD 直采", got="本步骤无额外 NVD 请求", produced="由多源情报步骤合并",
+            impact="多源情报未刷新时保留已有资料并展示状态",
+            note="关闭多源情报可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
         )
     elif nvd_ok:
         wm = nvd_stats.get("watermark_before") or ""
@@ -119,7 +119,7 @@ def run(keyword="llm"):
                nvd_stats.get("window_end_at") or "本轮固定边界"),
             got="取回 %d 条候选" % nvd_stats.get("fetched", len(nvd_items)),
             produced="保留 %d 条进入整理" % len(nvd_items),
-            impact="将与 OSV / 本机库结果合并后入库",
+            impact="将与 OSV / 多源情报结果合并后入库",
             note=("上次位点 %s" % wm) if wm else "首次或无游标：使用默认近窗",
             ok=True,
         )
@@ -205,17 +205,17 @@ def run(keyword="llm"):
 
     if team_disabled:
         team_step = _step(
-            "跳过 本机库",
-            "TEAM_INTEL_MODE 已禁用本机库，本轮不读本地情报库",
+            "跳过 多源情报",
+            "TEAM_INTEL_MODE 已禁用多源情报，本轮不读嵌入情报数据",
             did="按配置跳过来源", got="未发起查询", produced="0 条",
             impact="本轮仅使用已启用的 NVD/OSV 来源",
             note="禁用来源不计成功或失败",
         )
     elif team_err and not team_items:
         team_step = _step(
-            "调用 本机库 失败",
+            "调用 多源情报 失败",
             "已跳过，其他来源继续。%s" % team_err,
-            did="读取本机情报库中的 CVE",
+            did="读取多源情报中的 CVE",
             got="失败",
             produced="0 条",
             impact="本轮其余来源（NVD/OSV）仍继续",
@@ -229,9 +229,9 @@ def run(keyword="llm"):
         if team_err:
             detail += "；部分关键词失败已跳过"
         team_step = _step(
-            "调用 本机库",
+            "调用 多源情报",
             detail,
-            did="按关键词读入本机情报库 CVE",
+            did="按关键词读入多源情报 CVE",
             got="原始 %d 条" % team_raw,
             produced="去重后 %d 条" % len(team_items),
             impact="与 NVD/OSV 一并整理、入库",
