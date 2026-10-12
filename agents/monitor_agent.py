@@ -79,7 +79,8 @@ def run(keyword="llm"):
     # Cap team multi-pass (local embed is cheap; still bound work).
     team_keys = team_keys[:10]
 
-    # B owns the primary NVD stream; keep the legacy root collector as an explicit fallback.
+    # NVD 外网采集归 intelligence 模块（本机库）；壳侧不重复直采。
+    # 仅当本机库关闭，或显式 ROOT_NVD_ENABLED=1 时走 legacy facade。
     setting = os.environ.get("ROOT_NVD_ENABLED")
     team_disabled = team_intel_disabled()
     root_nvd_enabled = (
@@ -102,11 +103,11 @@ def run(keyword="llm"):
 
     if nvd_stats.get("disabled_duplicate"):
         nvd_step = _step(
-            "复用 B 的 NVD 主采集流",
-            "从 B 库读入 NVD 情报；根目录兼容采集器不重复联网查询",
-            did="读取主采集结果", got="本步骤无额外 NVD 请求", produced="由本机库步骤合并",
-            impact="B 未更新时保留已有资料并展示状态",
-            note="独立使用可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
+            "NVD 由本机库承担",
+            "监测模块已采 NVD 入本机库；壳侧不重复联网查询",
+            did="跳过壳侧 NVD 直采", got="本步骤无额外 NVD 请求", produced="由本机库步骤合并",
+            impact="本机库未刷新时保留已有资料并展示状态",
+            note="关闭本机库可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
         )
     elif nvd_ok:
         wm = nvd_stats.get("watermark_before") or ""
@@ -205,7 +206,7 @@ def run(keyword="llm"):
     if team_disabled:
         team_step = _step(
             "跳过 本机库",
-            "TEAM_INTEL_MODE 已禁用本机库，本轮不查询 B",
+            "TEAM_INTEL_MODE 已禁用本机库，本轮不读本地情报库",
             did="按配置跳过来源", got="未发起查询", produced="0 条",
             impact="本轮仅使用已启用的 NVD/OSV 来源",
             note="禁用来源不计成功或失败",

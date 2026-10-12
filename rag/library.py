@@ -481,7 +481,7 @@ def full_text(document_id, db_path=LIBRARY_DB, fetcher=fetch):
     doc = detail(document_id, db_path)
     if doc and doc["content_scope"] == "team_summary" and doc["document_type"] in ("research_article", "vendor_advisory"):
         if doc["integrity_status"] != "ok":
-            raise ValueError("团队描述存档完整性未通过检查")
+            raise ValueError("本机库描述存档完整性未通过检查")
         candidate = {"url": doc["url"], "document_type": doc["document_type"],
                      "source_name": doc["publisher"], "source_id": "team_source_text",
                      "parent_document_id": document_id, "discovery": "explicit_source_text"}

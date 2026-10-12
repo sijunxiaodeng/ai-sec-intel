@@ -6,10 +6,11 @@ Empirically `intelligence/api_v6.create_app()` loads and serves under the root
 venv — so we ASGI-dispatch B routes in-process and call B repositories from
 IntelligenceCollector. Optional TEAM_INTEL_MODE=sidecar keeps the old :8765 path.
 
-Path rule: workspace ROOT stays ahead of intelligence/ on sys.path so A's
-``collectors.*`` (team_documents, nvd, …) win. B-only packages (api_v6,
-monitoring, storage, …) are exposed after root packages on sys.path.
-B collection runs in a private process and never switches A's package cache.
+Path rule: workspace ROOT stays ahead of intelligence/ on sys.path so shell
+``collectors.*`` facades (team_documents, nvd/osv bridge, …) win. Module-only
+packages (api_v6, monitoring, storage, platform_bridge, …) are exposed after
+root packages on sys.path. Multi-source collection runs in a private process
+and never switches the shell package cache.
 """
 from __future__ import annotations
 

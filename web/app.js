@@ -1057,7 +1057,7 @@ function renderArticleCandidates(panel, cveId) {
         add(block, "summary", "", (row.category === "paper" ? "论文 · " : "分析文章 · ") + row.title);
         add(block, "span", "tag", row.explicit_cve_mention ? "完整编号提及 · 未审核候选" : "机制 / CWE 关联候选 · 未审核");
         add(block, "p", "meta", row.association_notice);
-        var scopes = {abstract: "论文摘要", full_text_html: "HTML 提取正文", article_body: "文章提取正文", team_summary: "团队接口摘要（非原始全文）"};
+        var scopes = {abstract: "论文摘要", full_text_html: "HTML 提取正文", article_body: "文章提取正文", team_summary: "本机库接口摘要（非原始全文）"};
         add(block, "p", "meta", "资料范围：" + (scopes[row.content_scope] || missingText(row.content_scope, "未写明")) + " · 获取于 " + dateText(row.retrieved_at));
         if (row.retained_previous) add(block, "p", "meta", "最近更新失败，沿用上述日期的成功存档。");
         (row.match_basis || []).forEach(function (basis) { add(block, "p", "meta", basis.label + "（" + basis.term + "） · " + basis.citation_id); });
