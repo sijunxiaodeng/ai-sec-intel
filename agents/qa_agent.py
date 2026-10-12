@@ -15,6 +15,9 @@ def _local_notes(record, question):
     topics = question_topics(question)
     notes = []
     guidance = record.get("item", {}).get("raw_data", {}).get("related_guidance") or {}
+    code = record.get("item", {}).get("raw_data", {}).get("poc_code") or {}
+    if "poc" in topics and code.get("items"):
+        notes.append("系统记录：代码收集和静态审查不证明可运行、利用成功或 RCE 复现；本项目未运行该代码。")
     if "poc" in topics and report.get("poc_candidates"):
         if all(row.get("validation") == "not_run" for row in report["poc_candidates"]):
             notes.append("系统记录：本项目未运行复现，不能认定已验证可用。")
@@ -34,7 +37,7 @@ def _local_notes(record, question):
 def _assessment_lines(record, question):
     report = (record["item"].get("raw_data") or {}).get("automatic_assessment")
     if not report or report["status"] not in ("ok", "partial"):
-        return _guidance_lines(record, question)
+        return _poc_code_lines(record, question) + _guidance_lines(record, question)
     topics = question_topics(question)
     lines, ids = [], set()
 
@@ -81,7 +84,31 @@ def _assessment_lines(record, question):
             if chunk["citation_id"] in ids and chunk["citation_id"] not in known:
                 record.setdefault("evidence_chunks", []).append(chunk)
                 known.add(chunk["citation_id"])
-    return lines + _guidance_lines(record, question)
+    return lines + _poc_code_lines(record, question) + _guidance_lines(record, question)
+
+
+def _poc_code_lines(record, question):
+    if "poc" not in question_topics(question):
+        return []
+    code = (record["item"].get("raw_data") or {}).get("poc_code") or {}
+    if code.get("status") not in ("static_reviewed", "collected", "partial"):
+        return []
+    by_id = {chunk["citation_id"]: chunk for chunk in code.get("evidence") or []}
+    known = {chunk["citation_id"] for chunk in record.get("evidence_chunks") or []}
+    lines = []
+    for fact in code.get("facts") or []:
+        ids = fact.get("evidence_ids") or []
+        if not ids or not all(eid in by_id for eid in ids):
+            continue
+        # Exact stored fact excerpts stay distinct from external research statements.
+        lines.append(fact["text"] + " " + " ".join("[%s]" % eid for eid in ids))
+        for eid in ids:
+            if eid not in known:
+                record.setdefault("evidence_chunks", []).append(by_id[eid])
+                known.add(eid)
+    if code.get("latest_attempt", {}).get("status") == "error":
+        lines.append("系统记录：最近代码收集失败，以上沿用此前完整性校验通过的存档。")
+    return lines
 
 
 def _guidance_lines(record, question):
@@ -129,7 +156,7 @@ def _evidence_text(records, question=""):
             blocks.append("[%s] %s | 来源 %s | 定位 %s | %s" % (
                 chunk["citation_id"], chunk["text"], chunk["url"], chunk["locator"], chunk["text_kind"]))
         report = (item.get("raw_data") or {}).get("automatic_assessment")
-        if report or item.get("raw_data", {}).get("related_guidance"):
+        if report or item.get("raw_data", {}).get("related_guidance") or item.get("raw_data", {}).get("poc_code"):
             blocks.append("已校验来源字段及向量解释（照抄其引用标识）：\n" + "\n".join(_assessment_lines(record, question)))
             blocks.append("系统单独追加的状态说明（不是外部证据，不输出到 claims）：\n" + "\n".join(_local_notes(record, question)))
     return "\n".join(blocks)
@@ -280,14 +307,18 @@ def _render_model_json(raw, records):
     return "\n".join(lines)
 
 
-def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, library_db=None):
+def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, library_db=None, poc_db=None):
     options = {"library_db": library_db} if library_db is not None else {}
+    if poc_db is not None:
+        options["poc_db"] = poc_db
     requested = list(dict.fromkeys(value.upper() for value in (cve_ids if cve_ids is not None else CVE.findall(question))))
     if not requested and cve_id:
         requested = [cve_id.upper()]
     if len(requested) > 4:
         return {"answer": "一次最多比较 4 条漏洞，请缩小范围。", "evidence": [], "used_model": False, "steps": []}
-    if any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司", "资产", "哪些ip", "哪些 ip")):
+    asset_words = ("资产", "哪些ip", "哪些 ip", "部署清单", "组件清单")
+    refers_to_assets = any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司") + asset_words)
+    if refers_to_assets and not ("poc" in question_topics(question) and not any(word in question.lower() for word in asset_words)):
         from enrichment.assets import answer_assets
         if len(requested) > 1:
             return {"answer": "资产匹配每次需要唯一的 CVE 编号，请指定其中一条漏洞。", "evidence": [], "used_model": False, "steps": []}
@@ -328,6 +359,10 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, libra
             "used_model": False,
             "steps": steps,
         }
+    if "poc" in question_topics(question) and any((record["item"].get("raw_data") or {}).get("poc_code", {}).get("facts") for record in records):
+        steps.append({"role": "问答", "action": "摘录代码来源与静态审查记录",
+                      "detail": "仅使用当前存档核对后的字段；没有调用模型、下载或运行代码"})
+        return {"answer": _extractive(records, question), "evidence": records, "used_model": False, "steps": steps}
     if not configured():
         steps.append({
             "role": "问答",

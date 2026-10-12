@@ -48,6 +48,7 @@ jobs:
           node --check web/app.js
           node questions/test_article_candidates_ui.js
           node questions/test_asset_observations_ui.js
+          node questions/test_poc_sources_ui.js
 
   container:
     runs-on: ubuntu-latest

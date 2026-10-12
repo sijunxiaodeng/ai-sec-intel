@@ -942,14 +942,19 @@ function openMonitorDetail(item) {
   });
 }
 
+var detailRequestVersion = 0;
 function openDetail(cveId) {
+  var requestVersion = ++detailRequestVersion;
   setView("enrich");
   clearError();
   showToast("正在加载「" + cveId + "」详情…", "busy");
   api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+    if (requestVersion !== detailRequestVersion) return;
+    if (!detail || detail.cve_id !== cveId) throw new Error("详情返回的 CVE 与请求不一致，未采用该响应。");
     renderDetail(detail);
     showToast("已打开 " + cveId, "ok");
   }).catch(function (error) {
+    if (requestVersion !== detailRequestVersion) return;
     showError(error);
     showToast("加载详情失败：" + (error.message || "请求失败"), "error");
   });
@@ -1075,6 +1080,135 @@ function renderArticleCandidates(panel, cveId) {
 }
 
 
+function renderPocCode(panel, cveId, initialReport) {
+  var section = add(panel, "div", "poc-code");
+  add(section, "h3", "", "PoC 代码搜集与静态审查");
+  add(section, "p", "meta", "静态审查不证明可运行、利用成功或 RCE 已复现。本项目未执行这些代码。");
+  var localButton = add(section, "button", "ghost", "查看本地代码审查记录");
+  localButton.type = "button";
+  var collectButton = add(section, "button", "ghost", "收集并静态审查代码");
+  collectButton.type = "button";
+  add(section, "p", "meta", "收集按钮仅下载预先登记、固定提交版本的 GitHub 文本文件；不安装依赖、不运行 PoC。其他漏洞需先登记候选来源。");
+  var content = add(section, "div", "poc-code-content"), requestVersion = 0;
+  function text(value, fallback) {
+    if (value === undefined || value === null || value === "") return fallback || "未提供";
+    return typeof value === "object" ? JSON.stringify(value) : String(value);
+  }
+  function reference(parent, label, url) {
+    if (typeof url === "string" && !/[\u0000-\u0020\u007f\\]/.test(url)
+        && (/^https:\/\/[^/?#]+(?:[/?#]|$)/i.test(url) || /^\/(?!\/)/.test(url))) {
+      var link = add(parent, "a", "meta", label);
+      link.href = url; link.target = "_blank"; link.rel = "noopener";
+    } else add(parent, "p", "meta", label);
+  }
+  function location(row) {
+    return text(row.file || row.path, "文件未提供") + " · 行号：" + text(row.lines || row.locator, "未提供");
+  }
+  function repositoryUrl(value) {
+    return typeof value === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) ? "https://github.com/" + value : value;
+  }
+  function draw(report) {
+    clear(content);
+    if (!report || report.cve_id !== cveId || !Array.isArray(report.items)) {
+      add(content, "p", "meta", "代码审查记录格式或 CVE 不匹配，未采用该响应。");
+      return;
+    }
+    var labels = {static_reviewed: "开发阶段静态审查记录已保存（未运行）", collected: "代码文件已收集（未运行）", partial: "部分文件未完成", error: "收集或审查失败", not_collected: "尚未收集代码", unconfigured: "尚未登记候选来源", not_configured: "尚未登记候选来源", not_found: "暂无本地记录", stale: "当前记录需重新核对"};
+    add(content, "p", "desc", "记录状态：" + (labels[report.status] || text(report.status, "状态未提供，不能判为成功")));
+    if (report.detail) add(content, "p", "meta", text(report.detail));
+    if (report.retained_previous || report.stale) add(content, "p", "meta", "当前显示保留的历史记录；本次状态不能证明最新来源仍一致。");
+    var attempt = report.latest_attempt;
+    if (attempt) {
+      add(content, "p", "meta", "最近收集尝试：" + text(attempt.status) + " · " + text(attempt.queried_at || attempt.at || attempt.attempted_at || attempt.retrieved_at));
+      if (attempt.detail || attempt.error) add(content, "p", "meta", text(attempt.detail || attempt.error));
+      if (attempt.error_type) add(content, "p", "meta", "失败类型：" + text(attempt.error_type));
+    }
+    if (!report.items.length) add(content, "p", "meta", "暂无可展示的代码审查记录；这不表示没有公开 PoC，也不表示漏洞已经验证。");
+    report.items.forEach(function (row) {
+      var block = add(content, "details", "guidance-fact");
+      add(block, "summary", "", text(row.candidate_id, "候选代码"));
+      add(block, "p", "desc", "静态记录状态：" + (labels[row.status] || text(row.status)) + " · 运行验证：" + (row.validation === "not_run" ? "not_run（未运行）" : text(row.validation, "未提供，不能判为已验证")));
+      add(block, "p", "meta", "本项目未执行 PoC；静态记录不能作为可用性或漏洞复现结论。");
+      if (row.detail) add(block, "p", "meta", text(row.detail));
+      if (row.retrieved_at) add(block, "p", "meta", "来源文件获取时间：" + text(row.retrieved_at));
+      if (row.retained_previous) add(block, "p", "meta", "该候选本次收集失败，保留上次通过完整性检查的来源记录。");
+      reference(block, "仓库：" + text(row.repository), row.repository_url || repositoryUrl(row.repository));
+      if (row.parent_repository) reference(block, "原始仓库：" + text(row.parent_repository), repositoryUrl(row.parent_repository));
+      if (row.license || row.copyright) add(block, "p", "meta", "许可证：" + text(row.license) + " · 版权：" + text(row.copyright));
+      add(block, "p", "meta", "固定提交 SHA：" + text(row.commit_sha));
+      (Array.isArray(row.files) ? row.files : []).forEach(function (file) {
+        var fileBlock = add(block, "div", "field");
+        reference(fileBlock, "文件：" + text(file.path), file.url);
+        add(fileBlock, "p", "meta", "字节数：" + text(file.size) + " · SHA-256：" + text(file.sha256));
+        var syntaxLabels = {valid: "语法可解析（未运行）", invalid: "语法解析失败（未运行）"};
+        add(fileBlock, "p", "meta", "Git blob SHA：" + text(file.git_blob_sha) + " · 语法检查：" + (syntaxLabels[file.syntax_status] || text(file.syntax_status, "未检查")));
+      });
+      var dependencies = Array.isArray(row.dependencies) ? row.dependencies : [];
+      add(block, "p", "meta", "依赖（仅来源声明，未安装或验证）：" + (dependencies.length ? dependencies.map(function (dependency) { return text(dependency && dependency.declaration || dependency); }).join("；") : "来源未声明"));
+      dependencies.forEach(function (dependency) {
+        if (!dependency || typeof dependency !== "object") return;
+        add(block, "p", "meta", "依赖声明位置：" + text(row.review && row.review.dependencies_file, "依赖文件未提供") + " · 行号：" + text(dependency.line));
+        (dependency.evidence_ids || []).forEach(function (id) {
+          var evidence = (report.evidence || []).find(function (entry) { return entry.citation_id === id; });
+          reference(block, "依赖引用：" + id, evidence && evidence.url);
+        });
+      });
+      var review = row.review || {};
+      if (review.summary) add(block, "p", "desc", "静态审查摘要：" + text(review.summary));
+      var capabilities = {file_read_attempt: "文件读取尝试"};
+      if (review.capability) add(block, "p", "desc", "代码能力说明（静态判断）：" + (capabilities[review.capability] || text(review.capability)));
+      var reviewers = {development_agent: "开发阶段代码审查"}, methods = {manual_source_read_and_ast: "逐行阅读与 AST 语法解析（未执行）"};
+      add(block, "p", "meta", "审查者：" + (reviewers[review.reviewed_by] || text(review.reviewed_by)) + " · 方法：" + (methods[review.review_method] || text(review.review_method)));
+      (Array.isArray(review.findings) ? review.findings : []).forEach(function (finding) {
+        add(block, "p", "desc", text(finding.text));
+        add(block, "p", "meta", location(finding));
+        (finding.evidence_ids || []).forEach(function (id) {
+          var evidence = (report.evidence || []).find(function (entry) { return entry.citation_id === id; });
+          reference(block, "审查引用：" + id, evidence && evidence.url);
+        });
+      });
+      if (review.target_version_claim) {
+        add(block, "p", "desc", "代码来源声明的适用版本（未经运行确认）：" + text(review.target_version_claim.version));
+        add(block, "p", "meta", location(review.target_version_claim));
+      }
+      (Array.isArray(review.notes) ? review.notes : review.notes ? [review.notes] : []).forEach(function (note) { add(block, "p", "meta", text(note)); });
+      (row.evidence_ids || []).forEach(function (id) {
+        var evidence = (report.evidence || []).find(function (entry) { return entry.citation_id === id; });
+        if (!evidence) { add(block, "p", "meta", "缺少引用片段：" + id); return; }
+        var excerpt = add(block, "details", "");
+        var evidenceKinds = {poc_source_metadata: "来源元数据", poc_source_declaration: "来源声明摘录", development_static_review: "开发阶段静态审查记录"};
+        add(excerpt, "summary", "meta", (evidenceKinds[evidence.text_kind] || "代码来源引用") + "：" + id);
+        add(excerpt, "p", "desc", text(evidence.text));
+        reference(excerpt, id, evidence.url);
+        add(excerpt, "p", "meta", "位置：" + text(evidence.locator) + " · 证据绑定摘要：" + text(evidence.source_response_sha256 || evidence.sha256));
+      });
+    });
+    (report.warnings || []).concat(report.limitations || []).forEach(function (warning) { add(content, "p", "meta", text(warning)); });
+  }
+  function request(collect) {
+    var version = ++requestVersion;
+    localButton.disabled = true; collectButton.disabled = true;
+    clear(content);
+    add(content, "p", "meta", collect ? "正在下载登记的文本文件并静态审查；不执行代码…" : "正在读取本地代码审查记录…");
+    function current() { return version === requestVersion && panel.querySelector(".poc-code") === section; }
+    api("/api/poc-code/" + encodeURIComponent(cveId) + (collect ? "/collect" : ""), collect ? {method: "POST"} : undefined).then(function (data) {
+      if (!current()) return;
+      draw(data && (data.poc_code || data.report) || data);
+    }).catch(function (error) {
+      if (!current()) return;
+      clear(content);
+      add(content, "p", "meta", error.message || "代码收集或读取未完成，请稍后重试。");
+    }).then(function () {
+      if (!current()) return;
+      localButton.disabled = false; collectButton.disabled = false;
+    });
+  }
+  localButton.addEventListener("click", function () { request(false); });
+  collectButton.addEventListener("click", function () { request(true); });
+  if (initialReport) draw(initialReport);
+  else add(content, "p", "meta", "尚未读取代码审查记录；查看本地记录不会连接代码仓库。");
+}
+
 function renderDetail(item) {
   var panel = $("enrich-detail");
   clear(panel);
@@ -1100,6 +1234,7 @@ function renderDetail(item) {
   renderAssessment(panel, item.assessment);
   renderGuidance(panel, item.related_guidance);
   renderArticleCandidates(panel, item.cve_id);
+  renderPocCode(panel, item.cve_id, item.poc_code);
   var guidanceButton = add(panel, "button", "ghost", "补充关联建议");
   guidanceButton.type = "button";
   guidanceButton.addEventListener("click", function () {
