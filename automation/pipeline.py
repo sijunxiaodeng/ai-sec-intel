@@ -89,6 +89,23 @@ def _stage_ids_match(pipe):
     return got == expected
 
 
+def _sync_stage_copy(pipe):
+    """Keep product titles/subtitles in sync with STAGE_DEFS (ban stale 聚合 copy)."""
+    by_id = {d["id"]: d for d in STAGE_DEFS}
+    changed = False
+    for stage in pipe.get("stages") or []:
+        defn = by_id.get(stage.get("id"))
+        if not defn:
+            continue
+        if stage.get("title") != defn["title"]:
+            stage["title"] = defn["title"]
+            changed = True
+        if stage.get("subtitle") != defn["subtitle"]:
+            stage["subtitle"] = defn["subtitle"]
+            changed = True
+    return changed
+
+
 def _load_pipeline():
     data = ensure_state()
     pipe = data.get("pipeline")
@@ -117,6 +134,9 @@ def _load_pipeline():
         if kept_tech:
             pipe["tech_detail"] = kept_tech[:500]
         pipe["status"] = kept_status
+        data["pipeline"] = pipe
+        _write_state(data)
+    elif _sync_stage_copy(pipe):
         data["pipeline"] = pipe
         _write_state(data)
     return data, pipe
