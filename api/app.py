@@ -58,7 +58,7 @@ class MonitorRunBody(BaseModel):
 
 class AskBody(BaseModel):
     question: str = Field(..., max_length=4000)
-    cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
+    cve_id: str = Field("", pattern=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
     session_id: str = Field("", max_length=32)
 
 
@@ -83,7 +83,7 @@ class TeamLibrarySyncBody(BaseModel):
 
 class LibraryAskBody(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
-    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    document_ids: list[str] = Field(default_factory=list, max_length=4)
     document_type: str = ""
     use_model: bool = True
     mode: Literal["excerpts", "reasoning"] = "excerpts"
@@ -91,7 +91,7 @@ class LibraryAskBody(BaseModel):
 
 class RelationCandidatesBody(BaseModel):
     topic: str = "model_supply_chain"
-    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    document_ids: list[str] = Field(default_factory=list, max_length=4)
     use_model: bool = True
 
 
@@ -510,6 +510,7 @@ def overview():
     llm_ready = configured()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
+        "offline_demo": os.environ.get("OFFLINE_DEMO") == "1",
         "items": len(records),
         "source_count": len(names),
         "sources": names,
@@ -881,7 +882,7 @@ def assets():
 @app.post("/api/assets/import")
 def assets_import(body: AssetImport):
     try:
-        return import_assets(body.dict())
+        return import_assets(body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -896,7 +897,7 @@ def assets_demo():
 @app.post("/api/assets/preview")
 def assets_preview(body: AssetPreview):
     report = _asset_assessment(body.cve_id)
-    return impact_report(report, [dict(r.dict(), inventory_source="preview") for r in body.assets], preview=True)
+    return impact_report(report, [dict(r.model_dump(), inventory_source="preview") for r in body.assets], preview=True)
 
 
 @app.get("/api/asset-impact/{cve_id}")
@@ -1224,7 +1225,7 @@ def library_generate_candidates(body: RelationCandidatesBody):
 def library_review_candidate(candidate_id: str, body: RelationReviewBody):
     from enrichment.relation_candidates import review
     try:
-        return review(candidate_id, **body.dict())
+        return review(candidate_id, **body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -1269,7 +1270,7 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: SettingsBody):
-    save_settings(body.dict())
+    save_settings(body.model_dump())
     return public_settings()
 
 

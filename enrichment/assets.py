@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Dict, List, Literal
 
-from pydantic import BaseModel, Field, StrictBool, constr, validator
+from pydantic import BaseModel, Field, StrictBool, constr, field_validator, ConfigDict
 from rag.evidence import _connection
 
 from config.paths import DATA_ROOT
@@ -18,7 +18,7 @@ STATUS_LABELS = {"matched_version": "版本命中，可能受影响", "not_match
 
 
 class Asset(BaseModel):
-    asset_id: constr(strict=True, strip_whitespace=True, regex=r"^[A-Za-z0-9_.-]{1,64}$")
+    asset_id: constr(strict=True, strip_whitespace=True, pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     name: constr(strict=True, strip_whitespace=True, min_length=1, max_length=120)
     vendor: constr(strict=True, strip_whitespace=True, min_length=1, max_length=100)
     product: constr(strict=True, strip_whitespace=True, min_length=1, max_length=100)
@@ -31,17 +31,18 @@ class Asset(BaseModel):
     qualifiers: Dict[str, str] = Field(default_factory=dict)
     is_demo: StrictBool = False
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
-    @validator("vendor", "product")
+    @field_validator("vendor", "product")
+    @classmethod
     def identity(cls, value):
         value = value.lower()
         if not re.fullmatch(r"[a-z0-9_.-]+", value):
             raise ValueError("请填写 CPE 的确切厂商/产品标识，不使用名称猜测")
         return value
 
-    @validator("qualifiers", pre=True)
+    @field_validator("qualifiers", mode="before")
+    @classmethod
     def qualifiers_valid(cls, value):
         if not isinstance(value, dict) or set(value) - QUALIFIERS:
             raise ValueError("qualifiers 仅接受 CPE 限定字段")
@@ -51,12 +52,12 @@ class Asset(BaseModel):
 
 
 class AssetImport(BaseModel):
-    assets: List[Asset] = Field(..., min_items=1, max_items=500)
+    assets: List[Asset] = Field(..., min_length=1, max_length=500)
 
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
-    @validator("assets")
+    @field_validator("assets")
+    @classmethod
     def unique_ids(cls, value):
         if len({r.asset_id for r in value}) != len(value):
             raise ValueError("同一批次 asset_id 不能重复")
@@ -64,7 +65,7 @@ class AssetImport(BaseModel):
 
 
 class AssetPreview(AssetImport):
-    cve_id: constr(strict=True, strip_whitespace=True, regex=r"^(?i:CVE)-\d{4}-\d{4,7}$")
+    cve_id: constr(strict=True, strip_whitespace=True, pattern=r"^(?i:CVE)-\d{4}-\d{4,7}$")
 
 
 def load_assets(db_path=None):
@@ -79,11 +80,11 @@ def load_assets(db_path=None):
 
 def import_assets(payload, db_path=None):
     # 先验证整个批次，再事务写入；同 ID 更新，其余资产保留。
-    batch = AssetImport.parse_obj(payload)
+    batch = AssetImport.model_validate(payload)
     path = Path(db_path or DEFAULT_ASSET_DB)
     path.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).isoformat()
-    rows = [dict(row.dict(), recorded_at=timestamp, inventory_source="user_declared") for row in batch.assets]
+    rows = [dict(row.model_dump(), recorded_at=timestamp, inventory_source="user_declared") for row in batch.assets]
     with _connection(path) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS assets (asset_id TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         existing = {row[0] for row in conn.execute("SELECT asset_id FROM assets")}

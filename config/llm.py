@@ -8,11 +8,17 @@ from config.settings import load_settings
 
 
 def configured():
+    from config.offline import enabled
+    if enabled():
+        return False
     data = load_settings()
     return bool(data.get("api_key") and data.get("base_url") and data.get("model"))
 
 
 def chat(messages, timeout=60, max_tokens=768, response_format=None):
+    from config.offline import enabled
+    if enabled():
+        raise RuntimeError("离线演示不调用在线模型")
     data = load_settings()
     if not data.get("api_key"):
         raise RuntimeError("还没有填写大模型 API Key")

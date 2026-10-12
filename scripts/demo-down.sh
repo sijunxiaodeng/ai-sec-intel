@@ -5,6 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || true)"
+if [[ "$mode" == "offline-compose" ]]; then
+  docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" down
+  rm -f "$DEMO_DIR/mode"
+  exit 0
+fi
 if [[ "$mode" == "compose" ]] || have_docker; then
   if have_docker; then
     log "stopping compose project $COMPOSE_PROJECT"

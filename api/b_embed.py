@@ -1,15 +1,8 @@
-"""Embed B's query API in the A process (real unification, not a forever-sidecar).
+"""Embed B query routes using the shared FastAPI/Pydantic stack.
 
-Conflict fact: root pins fastapi==0.95.2 / pydantic==1.10; intelligence.lock
-pins fastapi 0.143 / pydantic 2.x. We do NOT upgrade the whole A stack here.
-Empirically `intelligence/api_v6.create_app()` loads and serves under the root
-venv — so we ASGI-dispatch B routes in-process and call B repositories from
-IntelligenceCollector. Optional TEAM_INTEL_MODE=sidecar keeps the old :8765 path.
-
-Path rule: workspace ROOT stays ahead of intelligence/ on sys.path so A's
-``collectors.*`` (team_documents, nvd, …) win. B-only packages (api_v6,
-monitoring, storage, …) are still found via intelligence on path position 1.
-b_monitor temporarily prefers intelligence when it must import B's collectors.
+A's collectors package contains import/query adapters. B public collectors run
+in their own subprocess to avoid overlapping top-level package names.
+TEAM_INTEL_MODE=sidecar optionally queries the same B API over HTTP.
 """
 from __future__ import annotations
 

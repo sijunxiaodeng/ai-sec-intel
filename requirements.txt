@@ -1,18 +1,8 @@
-# A orchestration shell + embedded B query/monitor (single demo venv).
-# Pins intentionally keep FastAPI/Pydantic on the A-compatible stack.
-# B's intelligence/requirements.lock.txt (FastAPI 0.143 / Pydantic 2) is NOT
-# installed here — create_app() + run_cycle work under these pins (see
-# system-checks container integration job).
-fastapi==0.95.2
-pydantic==1.10.26
-uvicorn==0.22.0
-starlette==0.27.0
-# B collectors / monitor (non-conflicting with A stack)
-requests==2.32.5
-python-dotenv==1.1.1
+# Shared framework / HTTP versions: A, B and C can use one environment.
+-r intelligence/requirements.lock.txt
 # C library extractors
 trafilatura==2.3.1
 # lxml 6.x moved html.clean out of core; trafilatura/justext need this
 # (otherwise GET /api/items/{cve} guidance attach raises ImportError → 500)
-lxml_html_clean>=0.4.0
+lxml_html_clean==0.4.5
 pypdf==6.10.0

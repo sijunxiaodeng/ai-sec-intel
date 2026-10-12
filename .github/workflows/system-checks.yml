@@ -41,6 +41,7 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-test.txt
+            intelligence/requirements.lock.txt
       - name: Isolate test state from repository fixtures
         run: |
           printf '%s\n' "MAIN_KB_DB_PATH=${RUNNER_TEMP}/main-knowledge.sqlite3" "MAIN_DATA_DIR=${RUNNER_TEMP}/main-data" >> "$GITHUB_ENV"
@@ -52,6 +53,8 @@ jobs:
         run: python scripts/run_offline_tests.py --start-directory questions
       - name: Test fixed-window and independent-label evidence calculations
         run: python scripts/run_offline_tests.py --start-directory scripts/tests
+      - name: Start a fresh offline demo and verify real HTTP import
+        run: python scripts/check_offline_demo.py
 
   intelligence-tests:
     runs-on: ubuntu-latest
@@ -91,6 +94,7 @@ jobs:
           docker compose -f docker-compose.yml config --quiet
           docker compose -f docker-compose.production.yml config --quiet
           docker compose -f docker-compose.actions.yml config --quiet
+          docker compose -f docker-compose.offline.yml config --quiet
       - name: Disable public networking and automatic collection for synthetic integration
         run: |
           cat > "${RUNNER_TEMP}/compose-offline.yml" <<'YAML'
@@ -117,6 +121,8 @@ jobs:
         # An internal Docker network intentionally has no host port routing.
         # Exercise the real listening HTTP app from inside its container.
         run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" exec -T main-app python scripts/check_container_integration.py
+      - name: Verify automatic offline bootstrap inside the built image
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" exec -T main-app python scripts/check_offline_demo.py
       - name: Verify the separate B API deployment bridge
         run: |
           cat > "${RUNNER_TEMP}/compose-sidecar.yml" <<'YAML'

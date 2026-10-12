@@ -1,10 +1,12 @@
 # 大模型配置只写在本机 config/local.json，不进仓库。
 
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCAL = ROOT / "config" / "local.json"
+LOCAL = (Path(os.environ.get("MAIN_DATA_DIR", ROOT / ".demo/offline/main-data")) / "model-settings.json"
+         if os.environ.get("OFFLINE_DEMO") == "1" else ROOT / "config" / "local.json")
 
 DEFAULTS = {
     "base_url": "https://api.deepseek.com",
@@ -36,7 +38,7 @@ def save_settings(incoming):
         if key == "api_key" and value in ("", None, "******"):
             continue
         current[key] = (value or "").strip()
-    LOCAL.parent.mkdir(exist_ok=True)
+    LOCAL.parent.mkdir(parents=True, exist_ok=True)
     LOCAL.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
     return current
 

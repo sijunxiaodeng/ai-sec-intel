@@ -21,7 +21,7 @@ SOURCE_CATEGORIES = frozenset({
     'policy_regulation', 'government_alert',
 })
 SUPPORTED_KINDS = frozenset({
-    'nvd', 'github', 'cisa', 'feed', 'arxiv', 'github_vendor',
+    'nvd', 'github', 'cisa', 'osv', 'feed', 'arxiv', 'github_vendor',
     'nist', 'federal_register',
 })
 _SOURCE_NAME = re.compile(r'[A-Za-z][A-Za-z0-9_-]{0,63}')
@@ -148,6 +148,8 @@ _DEFAULT_SOURCES = (
     SourceSpec('FEDERAL_REGISTER_AI_POLICY', 'policy_regulation', 'federal_register',
                'https://www.federalregister.gov/api/v1/documents.json',
                'policy', options={'max_pages': 20, 'per_page': 100}),
+    SourceSpec('OSV', 'vulnerability_database', 'osv',
+               'https://api.osv.dev/v1/query', 'vulnerability'),
 )
 
 

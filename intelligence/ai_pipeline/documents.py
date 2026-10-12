@@ -119,6 +119,11 @@ def _source_fields(payload: dict) -> dict:
             package = vulnerability.get("package") or {} if isinstance(vulnerability, dict) else {}
             if isinstance(package, dict) and package.get("name"):
                 packages.append(str(package["name"]))
+        # OSV states affected packages explicitly, including advisories without CVEs.
+        for affected in advisory.get("affected") or []:
+            package = affected.get("package") or {} if isinstance(affected, dict) else {}
+            if isinstance(package, dict) and package.get("name"):
+                packages.append(str(package["name"]))
     return {"title": payload.get("title") or "", "description": payload.get("description") or "",
             "package_names": packages, "record_kind": "document",
             "content_type": payload.get("content_type") or ""}

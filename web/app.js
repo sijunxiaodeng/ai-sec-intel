@@ -512,6 +512,7 @@ function loadMonitorStatus() {
 
 function loadOverview() {
   api("/api/overview").then(function (data) {
+    if ($("offline-demo-banner")) $("offline-demo-banner").hidden = !data.offline_demo;
     setPill(data.llm_ready);
     var stats = $("stats");
     clear(stats);

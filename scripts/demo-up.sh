@@ -9,6 +9,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 MODE="${DEMO_MODE:-auto}"
+# Offline data is the default demo. Online collection remains explicit.
+if [[ "${DEMO_NETWORK:-offline}" == "offline" && "$DEMO_ACTIONS_MODE" == "0" ]]; then
+  if [[ "$MODE" != "local" ]] && have_docker; then
+    docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" up --build --detach --wait
+    printf '%s\n' offline-compose > "$DEMO_DIR/mode"
+    log "offline synthetic demo ready; external collection/model calls disabled"
+    exit 0
+  fi
+  ensure_venvs
+  printf '%s\n' offline-local > "$DEMO_DIR/mode"
+  printf '%s\n' "$$" > "$DEMO_DIR/main.pid"
+  exec "$ROOT/.venv/bin/python" "$SCRIPT_DIR/offline_demo.py" --data-directory "$DEMO_DIR/offline" --port "$MAIN_PORT"
+fi
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
 export AUTO_INGEST_ON_COLLECT
 export TEAM_INTEL_MODE="${TEAM_INTEL_MODE:-embed}"

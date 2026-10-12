@@ -1,6 +1,6 @@
 """Reverse-proxy B intelligence API under the main :8023 process.
 
-B stays a separate process (pydantic/FastAPI major versions differ), bound to
+B can run as a separate process (using the same shared dependency versions), bound to
 localhost :8765 by default. Users and smoke only need http://127.0.0.1:8023 —
 paths /api/intelligence/* and GET /api/documents* are forwarded here.
 

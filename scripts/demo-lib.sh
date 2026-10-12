@@ -67,8 +67,14 @@ ensure_venvs() {
   if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
     log "creating root .venv (unified demo runtime)"
     python3 -m venv "$ROOT/.venv"
-    "$ROOT/.venv/bin/python" -m pip install -U pip -q
+  fi
+  # Refresh an existing old environment when the shared requirements change.
+  local fingerprint
+  fingerprint="$(python3 -c 'import hashlib,pathlib; print(hashlib.sha256(b"".join(pathlib.Path(p).read_bytes() for p in ["requirements.txt","intelligence/requirements.lock.txt"])).hexdigest())')"
+  if [[ "$(cat "$ROOT/.venv/.requirements-sha256" 2>/dev/null || true)" != "$fingerprint" ]]; then
     "$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/requirements.txt"
+    "$ROOT/.venv/bin/python" -m pip check
+    printf '%s\n' "$fingerprint" > "$ROOT/.venv/.requirements-sha256"
   fi
   # Legacy sidecar / B lockfile isolation only when explicitly requested.
   if [[ "${TEAM_INTEL_MODE:-embed}" == "sidecar" || "${DEMO_B_SIDECAR:-0}" == "1" ]]; then

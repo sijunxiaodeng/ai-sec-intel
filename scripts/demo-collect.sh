@@ -17,6 +17,11 @@ TEAM_SYNC_MAX="${DEMO_TEAM_SYNC_MAX:-30}"
 LIBRARY_SYNC="${DEMO_LIBRARY_SYNC:-1}"
 
 mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || echo local)"
+if [[ "$mode" == offline-* ]]; then
+  python3 "$SCRIPT_DIR/check_container_integration.py" --base-url "$MAIN_URL" --preloaded
+  log "offline mode: synthetic records synchronized; use DEMO_NETWORK=online for public collection"
+  exit 0
+fi
 monitor_status="skipped"
 monitor_detail=""
 team_sync_status="skipped"

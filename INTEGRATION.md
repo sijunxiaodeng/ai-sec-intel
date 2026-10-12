@@ -9,14 +9,15 @@
 
 ```bash
 git pull origin main
-./scripts/demo-up.sh      # 单进程 embed
-./scripts/demo-smoke.sh   # 整链只打 8023
+python -m pip install -r requirements.txt
+python scripts/offline_demo.py  # 首次自动生成合成数据，不联网采集
+# 或 ./scripts/demo-up.sh（默认离线；首次安装/构建需包网络）
 ```
 
 浏览器只打开 **http://127.0.0.1:8023**：
 
 1. 架构总览 → B =「同进程嵌入」
-2. 情报监测 →「立即刷新一轮」（会先跑 B 多源，再读库）
+2. 离线演示已有 4 条合成漏洞和 4 份资料；查看情报、资料和证据问答
 3. `POST /api/monitor/b-cycle` / `GET /api/intelligence/health`
 
 ## 环境变量
@@ -31,4 +32,8 @@ git pull origin main
 
 ## 依赖
 
-见 `/cursor/stores/self/docs/unify-resolve-conflicts.md`：根 pin 保留 FastAPI 0.95 / Pydantic v1；另装 `requests` + `python-dotenv` 供 B 监测。
+根 requirements.txt 引用 intelligence/requirements.lock.txt，A/B/C 共用 FastAPI 0.143、Pydantic 2.14 和同一 HTTP 库版本。主应用的校验模型已迁移到 Pydantic v2；不再混用两套互斥约束。生产进程仍可分开部署，这是职责和故障隔离，不是为了回避依赖冲突。
+
+真实数据采集统一使用 `python intelligence/run_monitor.py` 或 GitHub Actions。A 只消费 B 的完整变更流。NVD/OSV 的根目录直采已移除，OSV 已移入 B，全文抓取仍由富化阶段完成。
+
+`DEMO_NETWORK=online ./scripts/demo-up.sh` 显式进入原联网演示；正式数据使用 docs/正式数据部署与交付.md 的两个配置之一。

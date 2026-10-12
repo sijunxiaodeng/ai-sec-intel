@@ -11,6 +11,8 @@ import urllib.request
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8023")
+    parser.add_argument("--preloaded", action="store_true",
+                        help="Require the offline bootstrap to have already imported four documents")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
 
@@ -34,11 +36,20 @@ def main():
     identifiers = [item["cve_id"] for item in items]
     assert set(identifiers) == expected and len(identifiers) == len(expected), items
 
+    before_count = request("/api/library").get("overview", {}).get("documents", 0)
+    if args.preloaded:
+        assert before_count == 4, before_count
     synced = request("/api/library/team-sync", {"max_documents": 200})
-    assert synced.get("status") == "ok" and synced.get("ok", 0) > 0, synced
+    assert synced.get("status") == "ok", synced
+    if args.preloaded:
+        assert synced.get("changed") == 0 and synced.get("source", {}).get("cursor_committed") is True, synced
+    else:
+        assert synced.get("ok", 0) > 0, synced
     library = request("/api/library")
     count = library.get("overview", {}).get("documents", 0)
     assert count > 0, library
+    if args.preloaded:
+        assert count == before_count, library
     request("/api/library/team-sync", {"max_documents": 200})
     assert request("/api/library").get("overview", {}).get("documents") == count
     print(json.dumps({"synthetic_integration": "passed", "cve_records": len(expected),

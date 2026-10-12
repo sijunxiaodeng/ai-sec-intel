@@ -111,6 +111,18 @@ def merge_by_cve(items: list[IntelligenceItem]) -> list[UnifiedVulnerability]:
                     merged.title = item.title
             elif item.source == "GITHUB_ADVISORY":
                 _merge_github_advisory(merged, item)
+            elif item.source == "OSV":
+                for ref in item.raw_data.get("references") or []:
+                    if isinstance(ref, dict) and ref.get("url"):
+                        merged.references.append(ref["url"])
+                for affected in item.raw_data.get("affected") or []:
+                    package = affected.get("package") or {}
+                    if package.get("name"):
+                        merged.affected_packages.append({
+                            "name": package["name"], "ecosystem": package.get("ecosystem"),
+                            "source": "OSV", "source_id": item.source_id,
+                            "ranges": affected.get("ranges", []), "versions": affected.get("versions", []),
+                        })
 
         merged.raw_by_source = {
             source: records[0] if len(records) == 1 else records
