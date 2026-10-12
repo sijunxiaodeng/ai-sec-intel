@@ -1,8 +1,9 @@
 """监测智能体：NVD + OSV + 本机库 CVE（同属一次监测刷新）。
 
-默认主关键词为 llm（不再只盯 ollama）。
-逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-本机库对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
+默认主关键词为 llm（AUTO_MONITOR / 定时任务同口径）。
+逗号分隔多词时：NVD 用第一个词（避免外网限流拖死）；
+OSV 虽只传首词，但 llm 等宽泛词会在 OSVCollector 内展开为 AI 组件包集合；
+本机库对每个词各查一次并按 cve_id 去重。
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
@@ -148,21 +149,35 @@ def run(keyword="llm"):
 
     if osv_ok:
         wm = osv_stats.get("watermark_before") or ""
+        labels = osv_stats.get("package_labels") or []
+        planned = int(osv_stats.get("packages_planned") or 0)
+        fetched = int(osv_stats.get("fetched") or 0)
+        kept = int(osv_stats.get("kept") if osv_stats.get("kept") is not None else len(osv_items))
+        if labels:
+            shown = "、".join(labels[:8])
+            if len(labels) > 8:
+                shown += " 等"
+            osv_detail = "AI 组件包 %s（%d 个查询）；命中 %d，保留 %d" % (
+                shown, planned, fetched, kept,
+            )
+        else:
+            osv_detail = "按 AI 组件包查询（%d 个）；命中 %d，保留 %d" % (
+                planned, fetched, kept,
+            )
         osv_step = _step(
             "调用 OSV",
-            "关键词 %s；命中 %d，保留 %d"
-            % (primary, osv_stats.get("fetched", 0), osv_stats.get("kept", len(osv_items))),
-            did="按已登记 AI 组件包批量查询 OSV API",
-            got="外部取回 %d 次包查询，命中 %d 条原始记录"
-            % (osv_stats.get("packages_queried", 0), osv_stats.get("fetched", 0)),
+            osv_detail,
+            did="按已登记 AI 组件包批量查询 OSV API（宽泛词已展开为包名，非自由文本检索）",
+            got="完成 %d 个包查询，命中 %d 条原始记录"
+            % (osv_stats.get("packages_queried", 0), fetched),
             produced="保留 %d 条（未保存或内容修订；其余延期续采）" % len(osv_items),
-            impact="保留条将进入整理与入库；0 保留仍表示已查过",
+            impact="保留条将进入整理与入库；0 保留仍表示已按包查过",
             note=(
-                "Batch %d packages；按包已入库修订续采（观察时间 %s）"
-                % (osv_stats.get("packages_planned", 0), wm)
+                "监测词 %s → 包批次；按包已入库修订续采（观察时间 %s）"
+                % (primary, wm)
                 if wm
-                else "Batch %d packages；首次重放，按包确认入库后续采"
-                % osv_stats.get("packages_planned", 0)
+                else "监测词 %s → 包批次；首次或无游标，按包确认入库后续采"
+                % primary
             ),
             ok=True,
         )
@@ -170,7 +185,7 @@ def run(keyword="llm"):
         osv_step = _step(
             "调用 OSV 失败",
             "已跳过，其他来源继续。%s" % osv_err,
-            did="尝试批量查询 OSV",
+            did="尝试按 AI 组件包批量查询 OSV",
             got="失败",
             produced="0 条",
             impact="本轮无 OSV 增量",

@@ -3,7 +3,7 @@ from enrichment.service import apply_public_feeds, enrich
 
 def run(items, online=False):
     records = [enrich(item) for item in items]
-    detail = "已写入 CVSS 和参考链接。EPSS、KEV、论文留空，等待后续查询或 C 接入。"
+    detail = "已写入 CVSS 和参考链接。EPSS、KEV、论文留空，可在富化步骤单独查询公开源。"
     feed = None
     if online:
         feed = apply_public_feeds(records)

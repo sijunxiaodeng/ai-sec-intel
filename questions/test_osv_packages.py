@@ -37,6 +37,19 @@ class TestOSVPackages(unittest.TestCase):
         self.assertIn("langchain", names)
         self.assertIn("github.com/ollama/ollama", names)
 
+    def test_auto_monitor_csv_expands_not_fake_slash_package(self):
+        # Safety net: full AUTO_MONITOR string must not become github.com/llm,vllm/...
+        csv = "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama"
+        resolved = resolve_packages(csv)
+        self.assertEqual(set(resolved), set(_known_package_entries()))
+        self.assertTrue(all("/" not in eco for eco, _ in resolved))
+        joined = ",".join(name for _, name in resolved)
+        self.assertNotIn("llm,vllm", joined)
+
+    def test_narrow_csv_unions_named_packages(self):
+        resolved = resolve_packages("vllm,langchain")
+        self.assertEqual(set(resolved), set(PACKAGES["vllm"] + PACKAGES["langchain"]))
+
     def test_collect_llm_queries_all_known_packages(self):
         calls = []
 
@@ -45,10 +58,14 @@ class TestOSVPackages(unittest.TestCase):
             return {"vulns": []}
 
         with patch("collectors.osv._post", side_effect=fake_post):
-            items = OSVCollector(keyword="llm").collect()
+            coll = OSVCollector(keyword="llm")
+            items = coll.collect()
         self.assertEqual(items, [])
         self.assertEqual(set(calls), set(_known_package_entries()))
         self.assertNotIn(("GIT", "github.com/llm/llm"), calls)
+        self.assertTrue(coll.last_stats.get("expanded_broad"))
+        self.assertIn("vllm", coll.last_stats.get("package_labels") or [])
+        self.assertGreaterEqual(coll.last_stats.get("packages_planned") or 0, 8)
 
     def test_one_package_failure_does_not_abort(self):
         def flaky(eco, name):

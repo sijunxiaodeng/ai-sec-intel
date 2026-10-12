@@ -56,14 +56,34 @@ def _known_package_entries():
 
 
 def resolve_packages(keyword):
-    """Map a monitor keyword to OSV (ecosystem, name) pairs."""
-    key = (keyword or "").strip().lower()
-    if key in PACKAGES:
-        return list(PACKAGES[key])
-    if key in BROAD_KEYWORDS or not key:
+    """Map a monitor keyword to OSV (ecosystem, name) pairs.
+
+    OSV's query API is package-scoped, not free-text. Broad AUTO_MONITOR
+    tokens such as ``llm`` are expanded to the known AI package set so we
+    never query a fake ``github.com/llm/llm``. Comma/semicolon lists are
+    resolved token-by-token (any broad token → full known set).
+    """
+    text = (keyword or "").strip().lower()
+    if not text:
+        return _known_package_entries()
+    if "," in text or ";" in text:
+        parts = [p.strip() for p in text.replace(";", ",").split(",") if p.strip()]
+        if any(part in BROAD_KEYWORDS for part in parts):
+            return _known_package_entries()
+        seen = set()
+        out = []
+        for part in parts:
+            for entry in resolve_packages(part):
+                if entry not in seen:
+                    seen.add(entry)
+                    out.append(entry)
+        return out or _known_package_entries()
+    if text in PACKAGES:
+        return list(PACKAGES[text])
+    if text in BROAD_KEYWORDS:
         return _known_package_entries()
     # Unknown single token: keep legacy guess (may return empty).
-    return [("GIT", "github.com/%s/%s" % (key, key))]
+    return [("GIT", "github.com/%s/%s" % (text, text))]
 
 
 def _product_label(ecosystem, name):
@@ -212,6 +232,13 @@ class OSVCollector(object):
         from collectors.cursors import get_cursor, get_state
 
         packages = resolve_packages(self.keyword)
+        package_labels = sorted({_product_label(eco, name) for eco, name in packages})
+        keyword_key = (self.keyword or "").strip().lower()
+        expanded_broad = (not keyword_key) or keyword_key in BROAD_KEYWORDS or any(
+            part.strip() in BROAD_KEYWORDS
+            for part in keyword_key.replace(";", ",").split(",")
+            if part.strip()
+        )
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.last_stats = {}
         self._pending_states = {}
@@ -306,6 +333,9 @@ class OSVCollector(object):
             "source": "OSV",
             "fetched": fetched,
             "kept": len(items),
+            "keyword": self.keyword,
+            "expanded_broad": expanded_broad,
+            "package_labels": package_labels,
             "packages_queried": package_ok,
             "packages_failed": package_fail,
             "packages_planned": len(packages),
