@@ -106,6 +106,7 @@ def serve_fixture_app(team_url, port):
     import uvicorn
     from agents import monitor_agent, orchestrator
     from collectors.intelligence import IncrementalIntelligenceCollector
+    from collectors.team_documents import TeamDocumentCollector
     from rag.ingest import ingest
     from rag.library import sync_team, full_text
     from api.app import app
@@ -128,12 +129,22 @@ def serve_fixture_app(team_url, port):
                     "content_type": "text/plain", "url": url}
         raise TimeoutError("synthetic offline reference failure")
 
+    def sync_fixture(*args, **kwargs):
+        # The production adapter permits only fixed localhost ports. This
+        # isolated test explicitly injects our owned ephemeral-port collector.
+        collector = TeamDocumentCollector('http://127.0.0.1:8765',
+            max_documents=kwargs.get('max_documents', 30), use_changefeed=True)
+        collector.base_url = team_url
+        kwargs.pop('base_url', None)
+        kwargs['collector'] = collector
+        return sync_team(*args, **kwargs)
+
     with ExitStack() as stack:
         stack.enter_context(patch.object(monitor_agent, "IncrementalIntelligenceCollector",
             side_effect=lambda **kwargs: IncrementalIntelligenceCollector(base_url=team_url, **kwargs)))
         stack.enter_context(patch.object(orchestrator, "ingest",
             side_effect=lambda record, **kwargs: ingest(record, fetcher=fetch_fixture, **kwargs)))
-        stack.enter_context(patch("rag.library.sync_team", side_effect=lambda **kwargs: sync_team(base_url=team_url, **kwargs)))
+        stack.enter_context(patch("rag.library.sync_team", side_effect=sync_fixture))
         stack.enter_context(patch("rag.library.full_text", side_effect=lambda document_id: full_text(document_id, fetcher=fetch_fixture)))
         stack.enter_context(patch.object(urllib.request, "urlopen", side_effect=localhost_only))
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
