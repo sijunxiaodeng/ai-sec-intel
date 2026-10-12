@@ -187,13 +187,16 @@
             <div>
               <h3 class="tax-title">来源（公开目录 / 采集器）</h3>
               <ul class="source-list">
-                <li><span class="src-tag src-nvd">NVD</span> 国家漏洞库（本机直连）</li>
-                <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（本机直连）</li>
+                <li><span class="src-tag src-nvd">NVD</span> 国家漏洞库</li>
+                <li><span class="src-tag src-osv">OSV</span> 开源漏洞库</li>
                 <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 项目公告</li>
                 <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
-                <li><span class="src-tag src-team">多源情报</span> 多源情报一并读入（非外队、非第二端口）</li>
-                <li><span class="src-tag src-lib">资料存档</span> 公开订阅或采集摘要落入资料存档</li>
+                <li><span class="src-tag src-gh">厂商公告源</span> vLLM / Ollama / LangChain 等项目公告</li>
+                <li><span class="src-tag src-comm">社区 / 博客</span> Hugging Face、Trail of Bits 等</li>
+                <li><span class="src-tag src-paper">论文</span> 如 arXiv</li>
+                <li><span class="src-tag src-lib">标准 / 政策</span> NIST、Federal Register 等</li>
               </ul>
+              <p class="hint">「资料同步 / 资料存档」是入库路径，不是来源芯片。</p>
             </div>
           </div>
           <p class="hint tax-foot">对外只开 <strong>:8023</strong> 一个进程。端口不等于来源；旧的双端口只是过渡部署方式。</p>
@@ -236,15 +239,18 @@
             </div>
           </div>
           <div class="filter-block">
-            <p class="filter-label">来源（从哪个公开目录 / 采集器来）</p>
+            <p class="filter-label">来源（从哪个公开目录 / 采集器来；不是入库路径）</p>
             <div class="chip-row source-chips" id="monitor-source-filter" aria-label="按来源筛选">
               <button type="button" class="chip is-on" data-source-filter="all">全部来源</button>
               <button type="button" class="chip" data-source-filter="nvd">NVD</button>
               <button type="button" class="chip" data-source-filter="osv">OSV</button>
               <button type="button" class="chip" data-source-filter="github">GitHub</button>
               <button type="button" class="chip" data-source-filter="kev">CISA KEV</button>
-              <button type="button" class="chip" data-source-filter="aggregate">多源情报</button>
-              <button type="button" class="chip" data-source-filter="library">资料存档</button>
+              <button type="button" class="chip" data-source-filter="vendor">厂商公告源</button>
+              <button type="button" class="chip" data-source-filter="community">社区</button>
+              <button type="button" class="chip" data-source-filter="blog">博客</button>
+              <button type="button" class="chip" data-source-filter="paper">论文</button>
+              <button type="button" class="chip" data-source-filter="standard">标准/政策</button>
             </div>
           </div>
           <p id="monitor-summary" class="hint"></p>

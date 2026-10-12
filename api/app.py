@@ -425,9 +425,9 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         },
         {
             "id": "library",
-            "title": "资料库沉淀",
+            "title": "资料存档",
             "position": "管线 03 · 可检索原文",
-            "duty": "沉淀可检索原文与片段；监测是流，这里是存档与问答底座。",
+            "duty": "存档可检索原文与片段；监测是流，这里是资料存档与问答底座。来源仍是论文/博客/厂商等，不是「资料库沉淀」。",
             "standard": {
                 "level": "可演示" if docs_n >= 1 else "缺口",
                 "summary": f"文档 {docs_n} · 片段 {chunks_n} · 类别 {lib_cats}",
@@ -679,14 +679,21 @@ def _fetch_team_documents(q="", limit=48):
         desc = row.get("description") or ""
         if not _text_match(q, title, desc, category, row.get("source") or "", row.get("url") or ""):
             continue
+        origin_name = _document_origin_name({
+            "publisher": row.get("source") or "",
+            "source": row.get("source") or "",
+            "discovery_source_id": row.get("source") or "",
+            "document_type": category or row.get("content_type") or "",
+            "source_category": category,
+        })
         out.append({
             "kind": "document",
             "id": row.get("document_id") or row.get("id") or title,
             "document_id": row.get("document_id") or "",
             "title": title,
             "description": desc,
-            "source": row.get("source") or "",
-            "sources": [row.get("source")] if row.get("source") else [],
+            "source": origin_name,
+            "sources": [origin_name] if origin_name else [],
             "category": category,
             "category_label": _CATEGORY_LABELS.get(category, category or "资料"),
             "content_type": row.get("content_type") or "",
@@ -694,7 +701,8 @@ def _fetch_team_documents(q="", limit=48):
             "published_at": row.get("published_at") or row.get("first_seen_at") or "",
             "demo": bool((row.get("raw_data") or {}).get("demo_fixture"))
                 or title.startswith("【演示】") or desc.startswith("演示用"),
-            "origin": "team_documents",
+            "origin": "team_documents",  # ingest path, not product 来源
+            "ingest_path": "multisource_db",
         })
         if len(out) >= limit:
             break
@@ -703,6 +711,85 @@ def _fetch_team_documents(q="", limit=48):
         "total": payload.get("total", len(out)),
         "mode": "embed" if embed_enabled() else "sidecar",
     }
+
+
+_INGEST_PATH_LABELS = frozenset({
+    "资料库", "资料存档", "资料库沉淀", "资料沉淀", "本地资料库沉淀",
+    "library", "team_documents", "多源情报资料", "多源情报", "聚合库",
+})
+
+_DISCOVERY_SOURCE_LABELS = {
+    "arxiv": "arXiv",
+    "arxiv_full_text": "arXiv",
+    "arxiv_ai_security": "arXiv",
+    "trail_of_bits": "Trail of Bits",
+    "trail_of_bits_blog": "Trail of Bits",
+    "hf_security_community": "Hugging Face",
+    "huggingface": "Hugging Face",
+    "vllm_vendor": "vLLM",
+    "ollama_vendor": "Ollama",
+    "langchain_vendor": "LangChain",
+    "nist_csrc_ai_standards": "NIST",
+    "nist": "NIST",
+    "federal_register_ai_policy": "Federal Register",
+    "federal_register": "Federal Register",
+    "nvd": "NVD",
+    "github_advisory": "GitHub Advisory",
+    "github": "GitHub Advisory",
+    "cisa_kev": "CISA KEV",
+    "cisa": "CISA KEV",
+    "team_source_text": "",  # not a product 来源
+    "team_documents": "",
+}
+
+_TYPE_ORIGIN_FALLBACK = {
+    "academic_paper": "学术论文源",
+    "academic": "学术论文源",
+    "security_blog": "安全博客源",
+    "research_article": "安全研究/博客源",
+    "research": "安全研究/博客源",
+    "security_community": "安全社区源",
+    "vendor_advisory": "厂商公告源",
+    "vendor": "厂商公告源",
+    "vendor_guidance": "厂商公告源",
+    "technical_standard": "技术标准源",
+    "standard": "技术标准源",
+    "policy_regulation": "政策法规源",
+    "policy": "政策法规源",
+    "government_alert": "政府告警源",
+    "vulnerability_database": "漏洞数据库",
+}
+
+
+def _map_collector_label(raw):
+    text = (raw or "").strip()
+    if not text or text in _INGEST_PATH_LABELS:
+        return ""
+    key = text.lower().replace("-", "_").replace(" ", "_")
+    if key in _DISCOVERY_SOURCE_LABELS:
+        return _DISCOVERY_SOURCE_LABELS[key]
+    for mid, label in _DISCOVERY_SOURCE_LABELS.items():
+        if label and mid and mid in key:
+            return label
+    # Human publisher names (not SCREAMING_COLLECTOR_IDS)
+    if not text.isupper() or "_" not in text:
+        return text
+    return ""
+
+
+def _document_origin_name(row):
+    """Product「来源」= publisher / collector, never an ingest-path brand."""
+    for candidate in (
+        row.get("publisher"),
+        row.get("source"),
+        row.get("discovery_source_id"),
+        row.get("source_id"),
+    ):
+        mapped = _map_collector_label(candidate)
+        if mapped:
+            return mapped
+    dtype = (row.get("document_type") or row.get("source_category") or row.get("category") or "").strip()
+    return _TYPE_ORIGIN_FALLBACK.get(dtype, "")
 
 
 def _library_documents(q="", limit=40):
@@ -715,21 +802,23 @@ def _library_documents(q="", limit=40):
         dtype = row.get("document_type") or ""
         if not _text_match(q, title, dtype, row.get("publisher") or "", row.get("url") or "", row.get("summary") or ""):
             continue
+        origin_name = _document_origin_name(row)
         out.append({
             "kind": "document",
             "id": row.get("document_id") or title,
             "document_id": row.get("document_id") or "",
             "title": title,
             "description": row.get("summary") or row.get("description") or "",
-            "source": row.get("publisher") or row.get("source_id") or "",
-            "sources": [row.get("publisher") or row.get("source_id") or "资料库"],
+            "source": origin_name,
+            "sources": [origin_name] if origin_name else [],
             "category": dtype,
             "category_label": _CATEGORY_LABELS.get(dtype, dtype or "资料"),
             "content_type": dtype,
             "url": row.get("url") or "",
             "published_at": row.get("published_at") or row.get("retrieved_at") or "",
             "demo": title.startswith("【演示】"),
-            "origin": "library",
+            "origin": "library",  # ingest path (技术细节), not product 来源
+            "ingest_path": "library_sync",
         })
         if len(out) >= limit:
             break
