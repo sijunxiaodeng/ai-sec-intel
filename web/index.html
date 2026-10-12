@@ -278,6 +278,7 @@
         <details class="filter-drawer" id="asset-drawer" open>
           <summary>影响资产</summary>
           <div class="panel asset-import">
+            <h3 class="subhead">自行登记的组件清单</h3>
             <p class="hint">登记本机 AI 组件清单，与当前选中漏洞做版本匹配。不扫描互联网。</p>
             <div class="toolbar">
               <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
@@ -302,6 +303,40 @@
               <div>
                 <h3 class="subhead">已保存资产 <span id="asset-count"></span></h3>
                 <div id="asset-list"></div>
+              </div>
+            </div>
+          </div>
+          <div class="panel asset-import">
+            <h3 class="subhead">资产搜索结果导入</h3>
+            <p class="hint">保留搜索平台观测；版本未知不能判定受影响。导入不访问目标。当前通过文件导入，尚未接入在线搜索。</p>
+            <div class="toolbar">
+              <label for="asset-observation-provider">结果来源</label>
+              <select id="asset-observation-provider"><option value="shodan">Shodan</option><option value="fofa">FOFA</option></select>
+              <button type="button" class="ghost" id="asset-observation-demo">填入演示结果</button>
+              <label for="asset-observation-file">读取 JSON / JSONL（不超过 1 MiB）</label>
+              <input id="asset-observation-file" type="file" accept=".json,.jsonl,application/json,application/x-ndjson,text/plain" />
+            </div>
+            <label for="asset-observation-fields">FOFA 数组列名（按原导出顺序，逗号分隔；对象记录可留空）</label>
+            <input id="asset-observation-fields" type="text" spellcheck="false" placeholder="填写实际请求或导出声明的列名，不推测列顺序" />
+            <label for="asset-observation-json">平台原始结果</label>
+            <textarea id="asset-observation-json" rows="5" spellcheck="false" placeholder="粘贴平台导出的 JSON 或 JSONL 内容，再预览核对。"></textarea>
+            <div class="toolbar">
+              <label><input id="asset-observation-is-demo" type="checkbox" /> 演示结果（虚构观测）</label>
+              <button type="button" class="primary" id="asset-observation-preview">预览结果</button>
+              <button type="button" class="ghost" id="asset-observation-save">保存观测</button>
+              <button type="button" class="ghost" id="asset-observation-evaluate">评估已保存观测</button>
+            </div>
+            <p id="asset-observation-message" class="hint">预览不会自动保存。选用上方 CVE 后可同时查看版本影响筛选结果。</p>
+            <div class="split">
+              <div>
+                <h3 class="subhead">结果预览</h3>
+                <div id="asset-observation-preview-list"><p class="empty">请先读取文件或填入演示结果。</p></div>
+                <h3 class="subhead">观测影响评估</h3>
+                <div id="asset-observation-impact"><p class="empty">选择上方漏洞后预览或评估观测。</p></div>
+              </div>
+              <div>
+                <h3 class="subhead">已保存的平台观测 <span id="asset-observation-count"></span></h3>
+                <div id="asset-observation-list"></div>
               </div>
             </div>
           </div>
@@ -464,6 +499,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261012-localdb1"></script>
+  <script src="/assets/app.js?v=20261012-observations1"></script>
 </body>
 </html>

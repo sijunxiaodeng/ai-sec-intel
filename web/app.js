@@ -1182,7 +1182,7 @@ function inventorySummary(asset) {
 }
 
 function loadAssets(selected) {
-  return Promise.all([api("/api/assets"), api("/api/items")]).then(function (data) {
+  var declared = Promise.all([api("/api/assets"), api("/api/items")]).then(function (data) {
     var inventory = data[0], select = $("asset-cve"), current = selected || select.value;
     clear(select);
     add(select, "option", "", "请选择 CVE").value = "";
@@ -1198,6 +1198,7 @@ function loadAssets(selected) {
       add(block, "p", "meta", "登记时间：" + dateText(asset.recorded_at));
     });
   }).catch(showError);
+  return Promise.all([declared, loadAssetObservations()]);
 }
 
 function assetPayload() {
@@ -1215,24 +1216,54 @@ function selectedAssetCve() {
   return cve;
 }
 
-function renderAssetImpact(report) {
-  var target = $("asset-impact");
+var assetImpactRequestVersions = {declared: 0, observations: 0};
+
+function assetImpactFormKey(kind) {
+  if (kind === "declared") return $("asset-json").value;
+  return JSON.stringify([$("asset-observation-provider").value, $("asset-observation-json").value,
+    $("asset-observation-fields").value, !!$("asset-observation-is-demo").checked]);
+}
+
+function beginAssetImpactRequest(kind, useForm) {
+  return {kind: kind, version: ++assetImpactRequestVersions[kind], cve: $("asset-cve").value,
+    form: useForm ? assetImpactFormKey(kind) : null};
+}
+
+function isCurrentAssetImpactRequest(context) {
+  return context.version === assetImpactRequestVersions[context.kind]
+    && context.cve === $("asset-cve").value
+    && (context.form === null || context.form === assetImpactFormKey(context.kind));
+}
+
+function renderAssetImpact(report, target) {
+  target = target || $("asset-impact");
   clear(target);
-  add(target, "p", "title", report.cve_id + " · " + (report.preview ? "输入内容预览，尚未保存" : "已保存清单评估"));
-  add(target, "p", "desc", "版本命中 " + report.counts.matched_version + " · 待确认 " + report.counts.unknown + " · 未命中当前范围 " + report.counts.not_matched + "；演示资产 " + report.demo_count + " 条");
-  if (!report.asset_count) add(target, "p", "empty", "尚未登记资产，无法评估具体组件。");
+  var observations = report.inventory_source === "provider_export";
+  add(target, "p", "title", report.cve_id + " · " + (report.preview ? "输入内容预览，尚未保存" : observations ? "已保存平台观测评估" : "已保存清单评估"));
+  add(target, "p", "desc", "版本命中 " + report.counts.matched_version + " · 待确认 " + report.counts.unknown + " · 未命中当前范围 " + report.counts.not_matched + "；" + (observations ? "演示观测 " : "演示资产 ") + report.demo_count + " 条");
+  if (!report.asset_count) add(target, "p", "empty", observations ? "暂无平台观测，无法评估具体组件。" : "尚未登记资产，无法评估具体组件。");
   (report.results || []).forEach(function (result) {
     var asset = result.asset, block = add(target, "div", "asset-card " + result.status);
     add(block, "b", "", asset.name + " · " + result.label + (asset.is_demo ? "（演示资产）" : ""));
     add(block, "p", "desc", asset.asset_id + " · " + inventorySummary(asset));
     add(block, "p", "desc", result.reason + "；" + result.priority);
+    if (result.provider_observation) {
+      var observation = result.provider_observation;
+      add(block, "p", "meta", "平台观测：" + observation.provider + " · " + (observation.observed_at || "时间未知") + " · " + (observationTimeLabels[observation.time_status] || observation.time_status));
+      add(block, "p", "meta", "产品判定：" + (observationIdentityLabels[observation.identity_status] || observation.identity_status));
+      add(block, "p", "meta", "导入文本 SHA-256：" + (observation.source_response_sha256 || "未知") + " · 记录位置：" + (observation.locator || "未知"));
+    }
     var activeChecks = (result.checks || []).filter(function (row) { return row.status === result.status; });
     activeChecks.forEach(function (row) { add(block, "p", "meta", "来源范围：" + row.range + " · " + row.pointer); });
     (result.evidence_ids || []).forEach(function (id) {
       var evidence = (report.evidence || []).find(function (row) { return row.citation_id === id; });
       if (!evidence) return;
-      var link = add(block, "a", "meta", "范围证据：" + id);
-      link.href = evidence.url; link.target = "_blank"; link.rel = "noopener";
+      var isObservationEvidence = (result.observation_evidence_ids || []).indexOf(id) >= 0;
+      var label = (isObservationEvidence ? "观测证据：" : "范围证据：") + id;
+      if (typeof evidence.url === "string" && (/^https?:\/\//i.test(evidence.url) || /^\/(?!\/)/.test(evidence.url))) {
+        var link = add(block, "a", "meta", label);
+        link.href = evidence.url; link.target = "_blank"; link.rel = "noopener";
+      } else add(block, "p", "meta", label);
     });
   });
   (report.limitations || []).concat(report.warnings || []).forEach(function (text) { add(target, "p", "meta", text); });
@@ -1240,12 +1271,19 @@ function renderAssetImpact(report) {
 }
 
 function evaluateSavedAssets() {
-  try { return api("/api/asset-impact/" + encodeURIComponent(selectedAssetCve())).then(renderAssetImpact); }
+  try {
+    var cve = selectedAssetCve(), context = beginAssetImpactRequest("declared", false);
+    return api("/api/asset-impact/" + encodeURIComponent(cve)).then(function (report) {
+      if (isCurrentAssetImpactRequest(context) && report.cve_id === cve) renderAssetImpact(report);
+    });
+  }
   catch (error) { showError(error); return Promise.resolve(); }
 }
 
 on("asset-demo", "click", function () {
   api("/api/assets/demo").then(function (data) {
+    assetImpactRequestVersions.declared += 1;
+    assetImpactRequestVersions.observations += 1;
     $("asset-json").value = JSON.stringify(data, null, 2);
     $("asset-message").textContent = "已填入 3 条虚构演示资产，尚未保存。选择 CVE-2024-37032 后可预览。";
     $("asset-cve").value = "CVE-2024-37032";
@@ -1255,7 +1293,7 @@ on("asset-file", "change", function () {
   var file = this.files[0];
   if (!file) return;
   if (file.size > 1024 * 1024) { showError(new Error("JSON 文件不能超过 1 MB。")); return; }
-  file.text().then(function (text) { $("asset-json").value = text.replace(/^\uFEFF/, ""); $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。"; }).catch(showError);
+  file.text().then(function (text) { assetImpactRequestVersions.declared += 1; $("asset-json").value = text.replace(/^\uFEFF/, ""); $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。"; }).catch(showError);
 });
 on("asset-preview", "click", function () {
   clearError();
@@ -1263,8 +1301,11 @@ on("asset-preview", "click", function () {
   try {
     var payload = assetPayload();
     payload.cve_id = selectedAssetCve();
+    var context = beginAssetImpactRequest("declared", true);
     button.disabled = true;
-    api("/api/assets/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(renderAssetImpact).catch(showError).then(function () { button.disabled = false; });
+    api("/api/assets/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (report) {
+      if (isCurrentAssetImpactRequest(context) && report.cve_id === context.cve) renderAssetImpact(report);
+    }).catch(showError).then(function () { button.disabled = false; });
   } catch (error) { showError(error); }
 });
 on("asset-save", "click", function () {
@@ -1272,8 +1313,10 @@ on("asset-save", "click", function () {
   var button = $("asset-save");
   try {
     var payload = assetPayload();
+    assetImpactRequestVersions.declared += 1;
     button.disabled = true;
     api("/api/assets/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (data) {
+      assetImpactRequestVersions.declared += 1;
       $("asset-message").textContent = "已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条；其他已登记资产保留。";
       clear($("asset-impact"));
       add($("asset-impact"), "p", "empty", "清单已更新，请重新评估已保存清单。");
@@ -1282,7 +1325,166 @@ on("asset-save", "click", function () {
   } catch (error) { showError(error); }
 });
 on("asset-evaluate", "click", function () { clearError(); evaluateSavedAssets().catch(showError); });
-on("asset-cve", "change", function () { clear($("asset-impact")); add($("asset-impact"), "p", "empty", "情报已切换，请重新预览或评估。"); });
+on("asset-cve", "change", function () {
+  assetImpactRequestVersions.declared += 1;
+  assetImpactRequestVersions.observations += 1;
+  ["asset-impact", "asset-observation-impact"].forEach(function (id) {
+    clear($(id)); add($(id), "p", "empty", "情报已切换，请重新预览或评估。");
+  });
+});
+on("asset-json", "input", function () {
+  assetImpactRequestVersions.declared += 1;
+  clear($("asset-impact")); add($("asset-impact"), "p", "empty", "输入已修改，请重新预览或评估。");
+});
+
+var observationIdentityLabels = {exact_cpe: "明确 CPE 标识", exact_alias: "明确产品字段的固定映射", conflict: "产品身份或版本冲突，需核查", confirmed: "产品标识已解析", known: "产品标识已解析", explicit: "明确产品标识", unknown: "产品标识未知", ambiguous: "产品标识待确认"};
+var observationTimeLabels = {current: "观测时间有效", recent: "近期观测", valid: "观测时间有效", stale: "历史观测，可能已过时", unknown: "观测时间未知", invalid: "观测时间无效", future: "观测时间在未来，需核对"};
+
+function renderAssetObservationItems(target, items) {
+  clear(target);
+  if (!items || !items.length) add(target, "p", "empty", "暂无平台观测。空结果不代表互联网中没有受影响资产。");
+  (items || []).forEach(function (item) {
+    var block = add(target, "div", "asset-card");
+    var address = item.address || "地址未知";
+    if (address.indexOf(":") >= 0 && address[0] !== "[") address = "[" + address + "]";
+    add(block, "b", "", (item.provider || "来源未知") + " · " + address + (item.port != null ? ":" + item.port : "") + (item.is_demo ? "（虚构演示观测）" : ""));
+    add(block, "p", "desc", "产品：" + (item.product || "未知") + " · 版本：" + (item.version || "未知，不能判定受影响"));
+    add(block, "p", "meta", "平台观测时间：" + (item.observed_at || "未知") + " · " + (observationTimeLabels[item.time_status] || item.time_status || "观测时间未知"));
+    add(block, "p", "meta", "产品判定：" + (observationIdentityLabels[item.identity_status] || item.identity_status || "产品标识未知"));
+    add(block, "p", "meta", "导入文本 SHA-256：" + (item.source_response_sha256 || "未知") + " · 记录位置：" + (item.locator || "未知"));
+    (item.warnings || []).forEach(function (warning) { add(block, "p", "meta", warning); });
+  });
+}
+
+function loadAssetObservations() {
+  return api("/api/asset-observations").then(function (data) {
+    $("asset-observation-count").textContent = data.count + " 条，其中演示观测 " + data.demo_count + " 条";
+    renderAssetObservationItems($("asset-observation-list"), data.items);
+  }).catch(function (error) {
+    $("asset-observation-count").textContent = "读取失败";
+    clear($("asset-observation-list"));
+    add($("asset-observation-list"), "p", "empty", "观测读取失败，未显示上次列表。请稍后重试：" + error.message);
+    showError(error);
+  });
+}
+
+function assetObservationPayload() {
+  var content = $("asset-observation-json").value.replace(/^\uFEFF/, "");
+  if (!content.trim()) throw new Error("请先读取平台导出文件或填入演示结果。");
+  if (new TextEncoder().encode(content).length > 1024 * 1024) throw new Error("平台结果不能超过 1 MiB。");
+  try { JSON.parse(content); }
+  catch (error) {
+    try { content.split(/\r?\n/).filter(function (line) { return line.trim(); }).forEach(function (line) { JSON.parse(line); }); }
+    catch (lineError) { throw new Error("平台结果须为有效的 JSON 或每行一条 JSON 的 JSONL；请检查原导出内容。"); }
+  }
+  var fieldText = $("asset-observation-fields").value.trim();
+  var fields = fieldText ? fieldText.split(",").map(function (field) { return field.trim(); }) : [];
+  if (fields.some(function (field) { return !field; })) throw new Error("列名中有空项，请按实际导出顺序填写，或留空。");
+  return {provider: $("asset-observation-provider").value, content: content, fields: fields, is_demo: !!$("asset-observation-is-demo").checked};
+}
+
+function renderAssetObservationPreview(data) {
+  renderAssetObservationItems($("asset-observation-preview-list"), data.items);
+  var target = $("asset-observation-preview-list");
+  add(target, "p", "meta", "本次 " + data.count + " 条 · " + data.provider + (data.is_demo ? " · 演示结果" : "") + "；尚未保存。");
+  add(target, "p", "meta", "导入文本 SHA-256：" + (data.source_response_sha256 || "未知"));
+  (data.warnings || []).forEach(function (warning) { add(target, "p", "meta", warning); });
+  if (data.impact) renderAssetImpact(data.impact, $("asset-observation-impact"));
+  else {
+    clear($("asset-observation-impact"));
+    add($("asset-observation-impact"), "p", "empty", "此次仅预览观测；选择上方 CVE 后重新预览，可评估版本影响。");
+  }
+  $("asset-observation-message").textContent = "已预览 " + data.count + " 条观测，尚未保存。产品、版本和观测时间请按原始来源核对。";
+}
+
+on("asset-observation-demo", "click", function () {
+  var button = $("asset-observation-demo");
+  button.disabled = true;
+  clearError();
+  api("/api/asset-observations/demo").then(function (data) {
+    assetImpactRequestVersions.observations += 1;
+    $("asset-observation-provider").value = data.provider;
+    $("asset-observation-json").value = data.content;
+    $("asset-observation-fields").value = (data.fields || []).join(",");
+    $("asset-observation-is-demo").checked = !!data.is_demo;
+    $("asset-observation-message").textContent = "已填入虚构平台观测，尚未保存。先预览可检查解析结果。";
+    clear($("asset-observation-preview-list"));
+    clear($("asset-observation-impact"));
+  }).catch(showError).then(function () { button.disabled = false; });
+});
+
+on("asset-observation-file", "change", function () {
+  var file = this.files[0];
+  if (!file) return;
+  if (file.size > 1024 * 1024) { showError(new Error("平台结果文件不能超过 1 MiB。")); return; }
+  file.text().then(function (text) {
+    assetImpactRequestVersions.observations += 1;
+    $("asset-observation-json").value = text.replace(/^\uFEFF/, "");
+    $("asset-observation-message").textContent = "已读取平台结果，尚未保存；请核对来源、列名与演示标记，再预览。";
+    clear($("asset-observation-preview-list"));
+    clear($("asset-observation-impact"));
+  }).catch(showError);
+});
+
+on("asset-observation-preview", "click", function () {
+  var button = $("asset-observation-preview");
+  clearError();
+  try {
+    var payload = assetObservationPayload();
+    if ($("asset-cve").value) payload.cve_id = $("asset-cve").value;
+    var context = beginAssetImpactRequest("observations", true);
+    button.disabled = true;
+    api("/api/asset-observations/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (data) {
+      if (isCurrentAssetImpactRequest(context) && (!data.impact || data.impact.cve_id === context.cve)) renderAssetObservationPreview(data);
+    }).catch(showError).then(function () { button.disabled = false; });
+  } catch (error) { button.disabled = false; showError(error); }
+});
+
+on("asset-observation-save", "click", function () {
+  var button = $("asset-observation-save");
+  clearError();
+  try {
+    var payload = assetObservationPayload();
+    assetImpactRequestVersions.observations += 1;
+    button.disabled = true;
+    api("/api/asset-observations/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (data) {
+      assetImpactRequestVersions.observations += 1;
+      var summary = "观测已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条";
+      if (data.unchanged != null) summary += "，已存在 " + data.unchanged + " 条";
+      $("asset-observation-message").textContent = summary + "。其他观测和自行登记清单保留。";
+      clear($("asset-observation-preview-list"));
+      clear($("asset-observation-impact"));
+      add($("asset-observation-preview-list"), "p", "empty", "输入结果已保存，请核对右侧已保存观测。修改输入后可重新预览。");
+      add($("asset-observation-impact"), "p", "empty", "观测已更新，请重新评估。平台观测不等于漏洞复现结果。");
+      return loadAssetObservations();
+    }).catch(showError).then(function () { button.disabled = false; });
+  } catch (error) { button.disabled = false; showError(error); }
+});
+
+on("asset-observation-evaluate", "click", function () {
+  var button = $("asset-observation-evaluate");
+  clearError();
+  try {
+    var cve = selectedAssetCve();
+    var context = beginAssetImpactRequest("observations", false);
+    button.disabled = true;
+    api("/api/asset-observation-impact/" + encodeURIComponent(cve)).then(function (data) {
+      if (isCurrentAssetImpactRequest(context) && data.cve_id === cve) renderAssetImpact(data, $("asset-observation-impact"));
+    }).catch(showError).then(function () { button.disabled = false; });
+  } catch (error) { button.disabled = false; showError(error); }
+});
+
+function observationFormChanged() {
+  assetImpactRequestVersions.observations += 1;
+  clear($("asset-observation-preview-list"));
+  clear($("asset-observation-impact"));
+  add($("asset-observation-preview-list"), "p", "empty", "输入已修改，请重新预览。");
+  add($("asset-observation-impact"), "p", "empty", "输入已修改，请重新预览或评估。");
+}
+on("asset-observation-provider", "change", observationFormChanged);
+on("asset-observation-json", "input", observationFormChanged);
+on("asset-observation-fields", "input", observationFormChanged);
+on("asset-observation-is-demo", "change", observationFormChanged);
 
 function fillFocus(items) {
   var select = $("focus");
