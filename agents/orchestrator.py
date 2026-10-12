@@ -118,6 +118,12 @@ def _run_collect(keyword="llm", *, on_phase=None):
         impact="本轮监测结果将规范化并写入知识库",
         note=outcome["error"] or "多方面来源已尽力查询（成功空轮也会保留查询状态）",
         phase="监测刷新中",
+        # Surface hit/kept as soon as 监测中 ends (before persist finishes).
+        metrics={
+            "hit": stats.get("hit", 0),
+            "kept": stats.get("kept", 0),
+            "external_fetches": stats.get("external_fetches", 0),
+        },
     )
     # Compact tech line for optional UI disclosure (not a stage checklist).
     tech_bits = []
@@ -172,6 +178,13 @@ def _run_collect(keyword="llm", *, on_phase=None):
         impact="情报流将反映最新合并结果",
         note="0 新增时请看命中/合并——不等于没搜到",
         phase="整理入库",
+        metrics={
+            "hit": stats.get("hit", 0),
+            "kept": stats.get("kept", 0),
+            "inserted": write.get("inserted", 0),
+            "merged": write.get("merged", 0),
+            "external_fetches": stats.get("external_fetches", 0),
+        },
     )
 
     try:

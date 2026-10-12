@@ -202,6 +202,9 @@ class TestPipelineState(unittest.TestCase):
         self.assertEqual(pipe["status"], "running")
         ids = [s["id"] for s in pipe["stages"]]
         self.assertEqual(ids, ["monitoring", "persist", "library_sync"])
+        # Mid-run: metrics stay 0 until collectors finish and update_stage passes metrics.
+        mid = self.pipeline_mod.get_pipeline()
+        self.assertEqual(mid["metrics"].get("hit"), 0)
         self.pipeline_mod.update_stage(
             "monitoring",
             status="ok",
@@ -209,13 +212,18 @@ class TestPipelineState(unittest.TestCase):
             got="命中 10，保留 0",
             produced="进入整理入库 0 条",
             note="多方面来源已尽力查询",
+            metrics={"hit": 10, "kept": 0, "external_fetches": 3},
         )
+        after_mon = self.pipeline_mod.get_pipeline()
+        self.assertEqual(after_mon["metrics"].get("hit"), 10)
+        self.assertEqual(after_mon["metrics"].get("external_fetches"), 3)
         self.pipeline_mod.update_stage(
             "persist",
             status="ok",
             did="规范化并合并写入",
             got="参与 0",
             produced="新增 0 · 合并 0",
+            metrics={"inserted": 0, "merged": 0},
         )
         done = self.pipeline_mod.finish_pipeline(
             ok=True,

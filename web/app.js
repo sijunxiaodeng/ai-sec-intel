@@ -484,11 +484,16 @@ function renderCollectPipeline(pipeline, opts) {
   box.hidden = false;
   var metrics = pipeline.metrics || {};
   var status = pipeline.status || "";
+  // Counters stay 0 until collectors finish writing metrics — do not read as "搜不到".
+  var countsPending = status === "running"
+    && !(metrics.hit || metrics.inserted || metrics.merged || metrics.external_fetches);
   if (summaryEl) {
     if (status === "running") {
       summaryEl.textContent = "监测刷新中"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
-        + "——多方面来源一并跑，看下方命中/新增/合并。";
+        + (countsPending
+          ? "——请求进行中，命中统计待本阶段结束。"
+          : "——多方面来源一并跑；下方为已汇总的本轮统计。");
     } else if (pipeline.summary) {
       summaryEl.textContent = pipeline.summary;
     } else {
@@ -500,12 +505,17 @@ function renderCollectPipeline(pipeline, opts) {
     if (pipeline.elapsed_sec != null && status !== "idle") {
       bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
     }
-    bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
-    bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
-    bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
-    bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
-    if (metrics.external_fetches) {
-      bits.push("外部取回 <strong>" + metrics.external_fetches + "</strong>");
+    if (countsPending) {
+      bits.push("<em>命中统计待本阶段结束</em>");
+      bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
+    } else {
+      bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
+      bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
+      bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
+      bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
+      if (metrics.external_fetches) {
+        bits.push("外部取回 <strong>" + metrics.external_fetches + "</strong>");
+      }
     }
     metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
     metricsEl.hidden = false;
@@ -527,6 +537,11 @@ function renderCollectPipeline(pipeline, opts) {
       sub.className = "pipeline-stage-sub";
       sub.textContent = [stage.got, stage.produced].filter(Boolean).join(" · ");
       top.appendChild(sub);
+    } else if (st === "running" && stage.did) {
+      var subRun = document.createElement("span");
+      subRun.className = "pipeline-stage-sub";
+      subRun.textContent = stage.did;
+      top.appendChild(subRun);
     } else if (stage.subtitle && st === "pending") {
       var sub2 = document.createElement("span");
       sub2.className = "pipeline-stage-sub";

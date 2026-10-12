@@ -316,12 +316,29 @@ def _run_once(keyword=None):
         _write_state(data)
 
         def on_phase(stage_id, **fields):
+            # Prefer pipeline.update_stage so mid-run metrics land in pipeline.metrics.
+            try:
+                from automation.pipeline import update_stage
+
+                update_stage(stage_id, **fields)
+                return
+            except Exception:
+                pass
             state = ensure_state()
+            metrics = fields.get("metrics")
             for stage in (state.get("pipeline") or {}).get("stages", []):
                 if stage.get("id") == stage_id:
-                    stage.update({key: value for key, value in fields.items() if key != "phase"})
+                    stage.update({
+                        key: value for key, value in fields.items()
+                        if key not in {"phase", "metrics"}
+                    })
             if fields.get("phase"):
                 state["run_phase"] = fields["phase"]
+            if metrics and isinstance(state.get("pipeline"), dict):
+                pipe_metrics = state["pipeline"].setdefault("metrics", {})
+                for key, value in metrics.items():
+                    if key in pipe_metrics and value is not None:
+                        pipe_metrics[key] = int(value)
             _write_state(state)
         # Refresh B multi-source DB in-process before A reads team intel (embed).
         try:
