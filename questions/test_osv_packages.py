@@ -85,7 +85,8 @@ class TestOSVPackages(unittest.TestCase):
         self.assertLessEqual(max(by_product.values()), 3)
         # Multiple AI packages should appear, not only ollama.
         self.assertGreaterEqual(len(by_product), 3)
-        self.assertLessEqual(PER_PACKAGE_LIMIT, 10)
+        self.assertGreaterEqual(PER_PACKAGE_LIMIT, 6)
+        self.assertLessEqual(PER_PACKAGE_LIMIT, 20)
 
     def test_round_robin_merge_interleaves(self):
         a = [{"cve_id": "CVE-A1"}, {"cve_id": "CVE-A2"}]

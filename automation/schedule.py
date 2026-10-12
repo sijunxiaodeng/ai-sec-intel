@@ -421,15 +421,17 @@ def _loop():
         log_line("定时监测已启动：启动后立即自动跑一轮，之后每 %d 分钟。范围：宽范围 AI 安全。" % INTERVAL_MINUTES)
         try:
             run_once(DEFAULT_KEYWORDS)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Keep the loop alive, but never silently drop the first-cycle failure.
+            log_line("启动首轮自动监测失败（将按间隔重试）：%s: %s" % (type(exc).__name__, exc))
     else:
         log_line("定时监测已启动，间隔 %d 分钟。AUTO_MONITOR_ON_START 已关闭，启动不立即抓取。" % INTERVAL_MINUTES)
     while True:
         threading.Event().wait(INTERVAL_MINUTES * 60)
         try:
             run_once(DEFAULT_KEYWORDS)
-        except Exception:
+        except Exception as exc:
+            log_line("定时自动监测失败（继续等待下一轮）：%s: %s" % (type(exc).__name__, exc))
             continue
 
 

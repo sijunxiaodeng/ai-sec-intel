@@ -31,7 +31,17 @@ PACKAGES = {
 }
 
 # Per-product batch cap; deferred source identities remain unacknowledged.
-PER_PACKAGE_LIMIT = 6
+# Env OSV_PER_PACKAGE_LIMIT can raise/lower within 1..20 (honest drip, no invented CVEs).
+def _per_package_limit_default():
+    import os
+    try:
+        raw = int(os.environ.get("OSV_PER_PACKAGE_LIMIT", "10") or "10")
+    except ValueError:
+        raw = 10
+    return max(1, min(20, raw))
+
+
+PER_PACKAGE_LIMIT = _per_package_limit_default()
 
 # Broad AI-security keywords used by AUTO_MONITOR / monitor_agent primary.
 # These are not OSV package names — expanding to PACKAGES avoids empty

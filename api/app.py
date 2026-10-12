@@ -852,8 +852,8 @@ def monitor_feed(q: str = "", kind: str = "all"):
     doc_items = []
     team_meta = {"reachable": False, "total": 0}
     if kind in {"all", "document", "demo", "live"}:
-        team_docs, team_meta = _fetch_team_documents(q=q, limit=48)
-        lib_docs = _library_documents(q=q, limit=48)
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=72)
+        lib_docs = _library_documents(q=q, limit=72)
         # Prefer team docs; add library docs not already present by URL/title.
         seen = set()
         merged_docs = []
@@ -864,7 +864,7 @@ def monitor_feed(q: str = "", kind: str = "all"):
             seen.add(key)
             merged_docs.append(row)
         # Category round-robin so blogs/papers/vendor are not starved by one lane.
-        doc_items = _diversify_documents(merged_docs, limit=48)
+        doc_items = _diversify_documents(merged_docs, limit=72)
 
     if kind == "demo":
         cve_items = [row for row in cve_items if row.get("demo")]
@@ -878,8 +878,10 @@ def monitor_feed(q: str = "", kind: str = "all"):
         cve_items = []
 
     # Soft product balance for the monitor stream (KB still holds the full set).
+    # Wider window so feed counts are less often mistaken for「知识库只有几十条」.
+    cve_before_window = len(cve_items)
     if kind in {"all", "cve", "demo", "live"} and cve_items:
-        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=6, limit=60)
+        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=10, limit=120)
 
     def _pub_ts(row):
         raw = (row.get("published_at") or "").strip()
@@ -940,18 +942,40 @@ def monitor_feed(q: str = "", kind: str = "all"):
 
     composition = _feed_composition(feed_items)
 
+    newest_pub = ""
+    newest_collected = ""
+    for row in feed_items:
+        pub = (row.get("published_at") or "").strip()
+        col = (row.get("collected_at") or "").strip()
+        if pub and pub > newest_pub:
+            newest_pub = pub
+        if col and col > newest_collected:
+            newest_collected = col
+
+    freshness["newest_published_at"] = newest_pub
+    freshness["newest_collected_at"] = newest_collected
+    freshness["clock_note"] = (
+        "条目「发布」= 原文公开日（常为昨天/更早）；监测是否在跑看上方「最近更新」。"
+        "两者不是同一时钟。"
+    )
+
     return {
         "kind": kind,
         "counts": {
             "cve": len(cve_items),
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
+            "cve_before_window": cve_before_window if kind in {"all", "cve", "demo", "live"} else len(cve_items),
         },
         "composition": composition,
         "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
         "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
+        "window_note": (
+            "下方条数是情报流展示窗（按组件穿插截断），不是知识库全量；"
+            "全量以总览「情报条目」/ 入库「库内共」为准。"
+        ),
         "mix_note": (
             "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
             "类型/分类与来源分两维看；多源情报=监测一并读入的多源 CVE，不是第二套监测/端口。"
