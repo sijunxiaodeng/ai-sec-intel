@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8023")
     parser.add_argument("--preloaded", action="store_true",
-                        help="Require the offline bootstrap to have already imported four documents")
+                        help="Require the offline bootstrap to have already imported seven documents")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
 
@@ -38,7 +38,7 @@ def main():
 
     before_count = request("/api/library").get("overview", {}).get("documents", 0)
     if args.preloaded:
-        assert before_count == 4, before_count
+        assert before_count == 7, before_count
     synced = request("/api/library/team-sync", {"max_documents": 200})
     assert synced.get("status") == "ok", synced
     if args.preloaded:

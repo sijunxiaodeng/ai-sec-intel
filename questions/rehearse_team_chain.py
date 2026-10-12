@@ -278,7 +278,7 @@ def rehearse(directory, team_python):
             require("unknown_cve_has_no_old_evidence", not unknown["evidence"] and "9.8" not in unknown["answer"])
             before = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             repeated = request("/api/collect", {"keyword": "ollama"})
-            require("repeat_collection_is_idempotent", repeated["count"] == 1)
+            require("repeat_collection_is_idempotent", repeated["count"] == 0 and repeated["kb_total"] == 1)
             inspection = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             require("document_failure_preserved", any(row["status"] == "error" for row in inspection["documents"]))
             require("bm25_without_vector_model", inspection["mode"] == "bm25")

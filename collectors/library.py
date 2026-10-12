@@ -20,6 +20,9 @@ SOURCES = (
     {"id": "transformers_advisories", "name": "Transformers 项目安全公告", "category": "vendor_advisory",
      "url": "https://api.github.com/repos/huggingface/transformers/security-advisories?state=published&sort=published&direction=desc&per_page=30",
      "parser": "github", "prefix": "https://github.com/huggingface/transformers/security/advisories/"},
+    {"id": "langchain_advisories", "name": "LangChain 项目安全公告", "category": "vendor_advisory",
+     "url": "https://api.github.com/repos/langchain-ai/langchain/security-advisories?state=published&sort=published&direction=desc&per_page=30",
+     "parser": "github", "prefix": "https://github.com/langchain-ai/langchain/security/advisories/"},
     {"id": "trailofbits_research", "name": "Trail of Bits 研究博客", "category": "research_article",
      "url": "https://blog.trailofbits.com/feed/", "parser": "rss", "prefix": "https://blog.trailofbits.com/"},
     {"id": "arxiv_security", "name": "arXiv AI 安全论文", "category": "academic_paper",
@@ -30,17 +33,20 @@ SOURCES = (
 )
 SOURCES = SOURCES + REFERENCE_SOURCES
 # 明确标注历史起始资料，不能把它们计为实时发现的新情报。
+# Diversified across research / vendor / paper — not a single Ollama case study.
 SEEDS = (
-    {"url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
-     "source_id": "wiz_seed", "source_name": "Wiz Research", "document_type": "research_article"},
     {"url": "https://docs.vllm.ai/en/latest/usage/security/",
      "source_id": "vllm_guidance_seed", "source_name": "vLLM 官方文档", "document_type": "vendor_guidance"},
     {"url": "https://huggingface.co/docs/hub/security-pickle",
      "source_id": "huggingface_guidance_seed", "source_name": "Hugging Face 官方文档", "document_type": "vendor_guidance"},
+    {"url": "https://python.langchain.com/docs/security/",
+     "source_id": "langchain_guidance_seed", "source_name": "LangChain 官方文档", "document_type": "vendor_guidance"},
     {"url": "https://arxiv.org/abs/2302.12173",
      "source_id": "arxiv_seed", "source_name": "arXiv", "document_type": "academic_paper"},
     {"url": "https://arxiv.org/abs/2307.15043",
      "source_id": "arxiv_seed", "source_name": "arXiv", "document_type": "academic_paper"},
+    {"url": "https://www.wiz.io/blog/probllama-ollama-vulnerability-cve-2024-37032",
+     "source_id": "wiz_seed", "source_name": "Wiz Research", "document_type": "research_article"},
 )
 
 

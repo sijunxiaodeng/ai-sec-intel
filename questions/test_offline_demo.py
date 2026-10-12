@@ -21,7 +21,7 @@ from database.store import load_kb
 seen={r['item']['cve_id']:r['item']['collected_at'] for r in load_kb()}
 second=prepare(sys.argv[1])
 assert seen=={r['item']['cve_id']:r['item']['collected_at'] for r in load_kb()}
-assert first==second and first['vulnerabilities']==4 and first['documents']==4
+assert first==second and first['vulnerabilities']==5 and first['documents']==7
 try: socket.getaddrinfo('example.org',443)
 except OSError: pass
 else: raise AssertionError('External DNS allowed')

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Syne:wght@600;700;800&display=swap");
+/* Use installed fonts and system fallbacks so the UI also opens offline. */
 
 /* Architecture-native UI: vertical pipeline rail.
    Distinct from competitor neon console, #8 workbench, #9 literata brief. */
@@ -259,6 +259,103 @@ button[aria-busy="true"] { pointer-events: none; }
   100% { transform: translateX(360%); }
 }
 
+.collect-pipeline {
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f7f9fc 0%, var(--panel) 48%);
+}
+.pipeline-head { margin-bottom: 8px; }
+.pipeline-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.pipeline-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pipeline-metrics strong { color: var(--ink); font-weight: 700; }
+.pipeline-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pipeline-stage {
+  border-left: 3px solid #c5ced9;
+  padding: 8px 10px 8px 12px;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 0 8px 8px 0;
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+.pipeline-stage.is-running {
+  border-left-color: var(--accent);
+  background: rgba(232, 240, 248, 0.9);
+}
+.pipeline-stage.is-ok { border-left-color: var(--low); }
+.pipeline-stage.is-skip { border-left-color: #b0b8c2; }
+.pipeline-stage.is-error { border-left-color: var(--high); }
+.pipeline-stage-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.pipeline-stage-title { font-weight: 700; font-size: 13px; }
+.pipeline-stage-sub { color: var(--muted); font-size: 12px; }
+.pipeline-stage-status {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.pipeline-stage-status.st-run { color: var(--accent); }
+.pipeline-stage-status.st-ok { color: var(--low); }
+.pipeline-stage-status.st-skip { color: var(--muted); }
+.pipeline-stage-status.st-err { color: var(--high); }
+.pipeline-stage-status.st-pend { color: #9aa3ad; }
+.pipeline-qa {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  display: grid;
+  gap: 2px;
+  color: var(--ink);
+}
+.pipeline-qa li span.label {
+  display: inline-block;
+  min-width: 4.5em;
+  color: var(--muted);
+  font-weight: 600;
+}
+@keyframes pipeline-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.pipeline-stage.is-running,
+.pipeline-stage.is-ok { animation: pipeline-in 0.35s ease; }
+.pipeline-tech {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pipeline-tech summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pipeline-tech[open] summary { margin-bottom: 4px; }
+
 .src-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .src-tag {
   display: inline-block;
@@ -280,6 +377,29 @@ button[aria-busy="true"] { pointer-events: none; }
 .src-tag.src-paper { background: #eef3fa; color: #2f4a6e; border-color: #c5d2e6; }
 .src-tag.src-comm { background: #f7efe8; color: #6a4020; border-color: #e2cdb8; }
 
+.filter-block { margin: 0 0 10px; }
+.filter-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a6570;
+  letter-spacing: 0.02em;
+}
+.tax-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+@media (max-width: 900px) {
+  .tax-grid { grid-template-columns: 1fr; }
+}
+.tax-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #243040;
+}
+.tax-foot { margin-top: 10px; }
 .source-legend {
   margin: 0 0 14px;
   padding: 12px 14px;

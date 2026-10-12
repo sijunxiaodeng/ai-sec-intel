@@ -1,10 +1,10 @@
 # B：AI 安全情报采集与筛选
 
-B 已实现多源采集、CVE 融合与分类、非 CVE 文档存储和独立只读 API。默认目录包含 **12 个来源、8 类内容**，持续监测默认每 15 分钟运行一轮。当前目标是实际覆盖至少 7 类 AI 安全情报，并证明新漏洞从原始发布时间到首次入库的延迟 **严格小于 6 小时**。
+B 已实现多源采集、CVE 融合与分类、非 CVE 文档存储和独立只读 API。默认目录包含 **13 个来源、8 类内容**，持续监测默认每 15 分钟运行一轮。当前目标是实际覆盖至少 7 类 AI 安全情报，并证明新漏洞从原始发布时间到首次入库的延迟 **严格小于 6 小时**。
 
 真实采集已入库八类候选内容，NVD、GitHub 和 CISA 均有记录。入库类别统计不等于经过审核的有效 AI 安全覆盖，社区、政策和标准仍需检查相关性。恢复采集的观测记录中有严格六小时超限样本，不能声称时效已验收通过；[运行验证.md](运行验证.md) 保存历史快照，当前数量与时效以查询接口为准。
 
-团队监测（`dev`）已注册 `IntelligenceCollector`。主程序采集时会请求本机 `http://127.0.0.1:8765/api/intelligence/team`，所以要先在本目录启动只读 API，主页面才会收到 B 的 CVE。非 CVE 文档仍需 A/C 接入主知识库、检索与问答。
+主程序使用 `IncrementalIntelligenceCollector` 完整消费 B 的有效 AI 变更；文档由独立持久游标同步到资料库与问答。默认可内置 B 查询 API，正式部署也支持只读 B 服务；两者共用相同采集结果。
 
 ### 离线演示库（无外网采集时）
 
@@ -163,11 +163,11 @@ API 不会启动监测。默认数据库为 `data/intelligence.db`；监测的 `
 团队 CVE 接口可用 `ai_only=false` 查询全部漏洞；`include_review=true` 显式纳入待复核正例，标记在 `raw_data.classification`。缺少的信息留空，不推断不存在的修复版本或 CVSS 版本。A 在根目录可以调用：
 
 ```python
-from collectors.intelligence import IntelligenceCollector
-items = IntelligenceCollector(keyword="ollama").collect()
+from agents.orchestrator import run_collect
+result = run_collect()  # 完整同步有效 AI 变更并提交持久游标
 ```
 
-该适配器读取 B 本地 HTTP 服务，返回团队已有模型格式。A 仍需将其注册到主监测/编排流程。非 CVE 文档 API 已实现，但主系统的数据模型、富化、索引和问答尚需 A/C 接入；CVE 卡片适配器不能自动完成该工作。保持独立进程，通过 HTTP 交接，避免在一个进程直接导入两套同名顶层 `collectors` 包。
+A 的编排已接入完整变更同步与数据库事务；文档、富化、索引通过独立游标和持久任务继续处理。API 可以内置或独立部署；采集子进程避免同名顶层 `collectors` 包冲突。
 
 ## 容器运行与运行证据
 
@@ -179,7 +179,7 @@ docker compose -f intelligence/compose.yml ps
 docker compose -f intelligence/compose.yml logs -f
 ```
 
-`intelligence/Dockerfile` 只构建 B，容器工作目录为 `/app`。Compose 的 `monitor` 和 `api` 服务分别运行默认 15 分钟多源监测和 8765 API，两者共享 `/app/data` 的 SQLite、状态和日志数据卷；宿主机 API 仅绑定 `127.0.0.1:8765`。该部署不启动团队主应用、不自动注册 A/C 适配器，也不提供尚未集成的非 CVE 问答。停止使用 `docker compose -f intelligence/compose.yml down`；保留数据卷，不使用 `down -v` 清除观测证据。
+`intelligence/Dockerfile` 只构建 B，容器工作目录为 `/app`。Compose 的 `monitor` 和 `api` 服务分别运行默认 15 分钟多源监测和 8765 API，两者共享 `/app/data` 的 SQLite、状态和日志数据卷；宿主机 API 仅绑定 `127.0.0.1:8765`。该 B 专用部署不启动团队主应用；完整系统使用根目录正式 Compose 配置。停止使用 `docker compose -f intelligence/compose.yml down`；保留数据卷，不使用 `down -v` 清除观测证据。
 
 可选 `.env` 的 Compose 写法需要 Docker Compose 2.24 或更新。当前云实例 Docker 构建网络存在 DNS 限制；使用相同锁定依赖的离线 wheel 构建验证容器运行，普通联网构建应在具备容器网络的部署机验证。当前实例实际持续服务使用 B 的独立虚拟环境，PID 和日志在 `data/api.pid`、`data/daemon.pid`、`data/api.log`、`data/daemon.log`；云实例关闭后需重新启动服务。
 
@@ -202,4 +202,6 @@ python -m pip check
 
 更多赛题对照、团队责任及待验证项见 [赛题差距与交接.md](赛题差距与交接.md)。
 
-OSV 已合入 B 的来源目录：按明确 PyPI 包查询全部分页，再一起入库；失败不会提交截断结果，不通过关键词猜 GitHub 包地址。OSV 属于漏洞数据库类，不增加来源类别数量。遇到提供方返回已撤回公告时，此源记录失败并等待审查，不把撤回公告作为新漏洞成功导入。
+OSV 已合入 B 的来源目录：按明确 PyPI/Go 包查询全部分页，再一起入库；失败不会提交截断结果，不通过关键词猜 GitHub 包地址。OSV 属于漏洞数据库类，不增加来源类别数量。遇到提供方返回已撤回公告时，此源记录失败并等待审查，不把撤回公告作为新漏洞成功导入。
+
+OSV 公告同时保留稳定资料身份；没有 CVE 别名的公告也进入文档分类和变更流，不伪造 CVE。后续添加 CVE 时更新原资料关联。此目录数量是配置数量，实际七类覆盖和六小时时效仍需真实数据观察。

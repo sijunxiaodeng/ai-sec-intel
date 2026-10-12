@@ -266,7 +266,9 @@ def _read_records(con, include_out_of_scope=False):
 
 def _write_records(con, records, sync_source=None):
     now = _now()
+    counts = {"fetched": 0, "inserted": 0, "merged": 0, "skipped_dup": 0}
     for record in records:
+        counts["fetched"] += 1
         record = enriched_record(record)
         cve_id = record["item"].get("cve_id") or ""
         if not cve_id:
@@ -283,6 +285,7 @@ def _write_records(con, records, sync_source=None):
         for candidate in (old_comparable, new_comparable):
             ((candidate["item"].get("raw_data") or {}).get("_store") or {}).pop("updated_at", None)
         if old and _json(old_comparable) == _json(new_comparable):
+            counts["skipped_dup"] += 1
             continue
         con.execute("DELETE FROM scope_tombstones WHERE cve_id=?", (cve_id,))
         payload = _json(merged)
@@ -292,6 +295,8 @@ def _write_records(con, records, sync_source=None):
                     (cve_id, payload, merged["item"]["collected_at"], now))
         con.execute("INSERT INTO knowledge_revisions(cve_id,recorded_at,event,payload_json) VALUES(?,?,?,?)",
                     (cve_id, now, "upsert", payload))
+        counts["merged" if old else "inserted"] += 1
+    return counts
 
 
 def _migrate(con):
@@ -345,16 +350,16 @@ def save_kb(records):
     return upsert(records)
 
 
-def upsert(records):
+def upsert(records, *, return_stats=False):
     con = _connect()
     try:
         con.execute("BEGIN IMMEDIATE")
-        _write_records(con, records)
+        counts = _write_records(con, records)
         rows = _read_records(con)
         # Exports serialize under the writer lock; SQLite remains authoritative.
         export_cards(rows)
         con.commit()
-        return rows
+        return dict(counts, records=rows, total=len(rows)) if return_stats else rows
     except BaseException:
         con.rollback()
         raise
@@ -371,6 +376,11 @@ def _atomic_text(path, text):
         os.replace(temp_path, path)
     finally:
         Path(temp_path).unlink(missing_ok=True)
+
+
+def upsert_stats(records):
+    """Report this transaction's actual inserts/changes without a stale read."""
+    return upsert(records, return_stats=True)
 
 
 def export_cards(records):
@@ -564,7 +574,7 @@ def set_sync_cursor(source, cursor):
         con.close()
 
 
-def apply_sync_page(records, *, source, cursor, retracted_ids=()):
+def apply_sync_page(records, *, source, cursor, retracted_ids=(), return_stats=False):
     """Commit a complete feed cycle and its checkpoint atomically.
 
     A reset must contain the complete replacement snapshot (all pages). Only
@@ -594,13 +604,13 @@ def apply_sync_page(records, *, source, cursor, retracted_ids=()):
                       if source in (((row["item"].get("raw_data") or {}).get("_store") or {}).get("sync_sources", []))
                       and row["item"]["cve_id"] not in incoming_ids]
             _retract(con, absent)
-        _write_records(con, records, sync_source=source)
+        counts = _write_records(con, records, sync_source=source)
         _retract(con, retracted_ids)
         _set_sync_cursor(con, source, cursor)
         rows = _read_records(con)
         export_cards(rows)
         con.commit()
-        return rows
+        return dict(counts, records=rows, total=len(rows)) if return_stats else rows
     except BaseException:
         con.rollback()
         raise

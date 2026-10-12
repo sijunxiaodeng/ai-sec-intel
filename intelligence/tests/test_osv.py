@@ -24,6 +24,18 @@ def advisory(identifier="GHSA-fixture", aliases=None):
 
 
 class OSVTests(unittest.TestCase):
+    def test_all_explicit_default_packages_are_queried_without_keyword_guesses(self):
+        session = Mock()
+        session.post.return_value = Mock(json=Mock(return_value={}))
+        collector = OSVCollector(session=session)
+        self.assertEqual(collector.collect(), [])
+        queried = {(c.kwargs['json']['package']['ecosystem'], c.kwargs['json']['package']['name'])
+                   for c in session.post.call_args_list}
+        self.assertEqual(queried, set(collector.packages))
+        self.assertIn(('Go', 'github.com/ollama/ollama'), queried)
+        self.assertIn(('PyPI', 'transformers'), queried)
+        self.assertFalse(any(name == 'llm' for _, name in queried))
+
     def collector(self, pages, **kwargs):
         session = Mock()
         session.post.side_effect = [Mock(json=Mock(return_value=p)) if not isinstance(p, Exception) else p for p in pages]

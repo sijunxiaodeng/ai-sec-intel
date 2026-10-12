@@ -143,12 +143,13 @@ class ProcessingTest(unittest.TestCase):
                                          LOG_PATH=self.root / "collect.log"))
         schedule._write_state({"started_at": "2026-10-09T12:05:16Z"})
         with patch("agents.orchestrator.run_collect", return_value={"records": [self.record] * 20,
-                  "fetched": 1, "status": "partial"}), \
+                  "fetched": 3, "round_stats": {"inserted": 1, "merged": 2}, "status": "partial"}), \
              patch("rag.library.sync_team_drain", return_value={"status": "ok", "ok": 2}), \
              patch("rag.library.sync") as public:
             result = schedule.run_once()
         public.assert_not_called()
         self.assertEqual(result["last_count"], 1)
+        self.assertEqual(result["last_received"], 3)
         self.assertEqual(result["last_status"], "partial")
         self.assertEqual(result["started_at"], "2026-10-09T12:05:16Z")
 

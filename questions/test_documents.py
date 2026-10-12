@@ -190,7 +190,7 @@ class DocumentsTest(unittest.TestCase):
     def test_collect_pipeline_queues_every_new_record_without_network_enrichment(self):
         from agents.orchestrator import run_collect
         records = [copy.deepcopy(self.record) for _ in range(4)]
-        with patch("agents.orchestrator.monitor_run", return_value={"items": [], "steps": []}), patch("agents.orchestrator.enrich_run", return_value={"records": records, "steps": []}), patch("agents.orchestrator.upsert", return_value=records), patch("agents.orchestrator.append_run"), patch("agents.orchestrator.ingest") as ingest_mock, patch("automation.processing.enqueue", return_value=8) as enqueue_mock, patch.dict("os.environ", {"AUTO_INGEST_ON_COLLECT": "1"}):
+        with patch("agents.orchestrator.monitor_run", return_value={"items": [], "steps": []}), patch("agents.orchestrator.enrich_run", return_value={"records": records, "steps": []}), patch("agents.orchestrator.upsert", return_value={"records": records, "fetched": 4, "inserted": 4, "merged": 0, "skipped_dup": 0, "total": 4}), patch("agents.orchestrator.append_run"), patch("agents.orchestrator.ingest") as ingest_mock, patch("automation.processing.enqueue", return_value=8) as enqueue_mock, patch.dict("os.environ", {"AUTO_INGEST_ON_COLLECT": "1"}):
             result = run_collect()
             ingest_mock.assert_not_called()
             enqueue_mock.assert_called_once_with(records)

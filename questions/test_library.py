@@ -154,27 +154,27 @@ class LibraryTest(unittest.TestCase):
         self.assertEqual(ingest_document(candidate, self.db, fetch_json)["status"], "error")
 
     def test_rss_topic_filter_and_host_allowlist(self):
-        source = SOURCES[2]
+        source = next(s for s in SOURCES if s["id"] == "trailofbits_research")
         body = b'<rss><channel><item><title>LLM prompt injection security</title><link>https://blog.trailofbits.com/good/</link></item><item><title>LLM security</title><link>https://evil.example/article</link></item><item><title>Office news</title><link>https://blog.trailofbits.com/news/</link></item></channel></rss>'
         rows = parse_feed(source, {"body": body})
         self.assertEqual([r["url"] for r in rows], ["https://blog.trailofbits.com/good/"])
 
     def test_atom_has_no_cve_requirement_and_rejects_unrelated(self):
         body = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2601.00001v1</id><title>LLM prompt injection</title><summary>security attacks</summary></entry><entry><id>http://arxiv.org/abs/2601.00002</id><title>Astronomy</title><summary>Stars</summary></entry></feed>'
-        rows = parse_feed(SOURCES[3], {"body": body})
+        rows = parse_feed(next(s for s in SOURCES if s["id"] == "arxiv_security"), {"body": body})
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["url"], "https://arxiv.org/abs/2601.00001v1")
 
     def test_dtd_or_invalid_json_not_treated_as_empty_success(self):
         with self.assertRaises(ValueError):
-            parse_feed(SOURCES[2], {"body": b'<!DOCTYPE rss [<!ENTITY x "hi">]><rss/>'})
+            parse_feed(next(s for s in SOURCES if s["id"] == "trailofbits_research"), {"body": b'<!DOCTYPE rss [<!ENTITY x "hi">]><rss/>'})
         with self.assertRaises(ValueError):
             parse_feed(SOURCES[0], {"body": b'{"message":"rate limited"}'})
         with self.assertRaises(ValueError):
-            parse_feed(SOURCES[2], {"body": b'<html><body>Access denied</body></html>'})
+            parse_feed(next(s for s in SOURCES if s["id"] == "trailofbits_research"), {"body": b'<html><body>Access denied</body></html>'})
 
     def test_sync_source_failure_is_visible_and_other_source_continues(self):
-        source = SOURCES[2]
+        source = next(s for s in SOURCES if s["id"] == "trailofbits_research")
         feed = b'<rss><channel><item><title>LLM prompt injection</title><link>https://blog.trailofbits.com/good/</link></item></channel></rss>'
         def fetcher(url):
             if url == SOURCES[0]["url"]:

@@ -139,12 +139,12 @@ class DemoScopeIntegrationTests(unittest.TestCase):
             self.assertEqual(seeded.returncode, 0, seeded.stderr)
             self.assertEqual(json.loads(seeded.stdout)["label"], "demo_synthetic_offline_fixture")
             feed = ChangeRepository(IntelligenceRepository(db, root))
-            for kind in ("cve", "document"):
+            for kind, count in (("cve", 5), ("document", 7)):
                 page = feed.page(kind=kind)
-                self.assertEqual(len(page["changes"]), 4)
+                self.assertEqual(len(page["changes"]), count)
                 self.assertEqual({change["operation"] for change in page["changes"]}, {"upsert"})
             self.assertEqual(DocumentClassificationStore(db).stats(
-                current_classifier_version(root))["classified_ai_positive"], 4)
+                current_classifier_version(root))["classified_ai_positive"], 7)
 
 
 if __name__ == "__main__":

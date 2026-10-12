@@ -39,15 +39,34 @@ def run_documents(record):
     return dict(result, steps=steps)
 
 
-def run_collect(keyword="llm"):
+def run_collect(keyword="llm", *, on_phase=None):
+    def phase(stage_id, **fields):
+        if on_phase:
+            try:
+                on_phase(stage_id, **fields)
+            except Exception:
+                pass  # Presentation cannot invalidate a committed sync.
+
+    phase("monitoring", status="running", did="同步全部有效 AI 情报变更", phase="监测刷新中")
     monitored = monitor_run(keyword)
+    fetched = len(monitored["items"])
+    phase("monitoring", status="ok", did="接收统一采集库的分类结果",
+          got="接收 %d 条" % fetched, produced="待入库 %d 条" % fetched,
+          note="关键词只影响展示筛选；同步完整变更流")
+    phase("persist", status="running", did="规范化并事务写入知识库", phase="整理入库")
     enriched = enrich_run(monitored["items"], online=False)
     changes = monitored.get("team_changes")
     if changes is not None:
-        saved = apply_sync_page(enriched["records"], source=changes["source"],
-                                cursor=changes["cursor"], retracted_ids=changes["retracted_ids"])
+        write = apply_sync_page(enriched["records"], source=changes["source"],
+                                cursor=changes["cursor"], retracted_ids=changes["retracted_ids"],
+                                return_stats=True)
     else:
-        saved = upsert(enriched["records"])
+        write = upsert(enriched["records"], return_stats=True)
+    saved = write["records"]
+    phase("persist", status="ok", did="记录与消费游标已事务提交",
+          produced="新增 %d · 更新 %d · 未变 %d · 库内 %d" %
+          (write["inserted"], write["merged"], write["skipped_dup"], write["total"]),
+          impact="新增与变更进入后续持久处理队列")
     documents, document_steps = _documents_step(enriched["records"])
     steps = monitored["steps"] + enriched["steps"] + [{
         "role": "编排",
@@ -57,6 +76,11 @@ def run_collect(keyword="llm"):
     steps += document_steps
     append_run(steps, "collect")
     return {"records": saved, "steps": steps, "documents": documents,
+            "write": write,
+            "round_stats": {"hit": fetched, "kept": fetched, "inserted": write["inserted"],
+                            "merged": write["merged"], "skipped_dup": write["skipped_dup"],
+                            "total": write["total"], "external_fetches": 0},
+            "tech_detail": "B 统一采集与筛查；A 完整消费变更并事务提交游标",
             "status": monitored.get("status", "success"),
             "fetched": len(monitored["items"]), "source_results": monitored.get("source_results", [])}
 

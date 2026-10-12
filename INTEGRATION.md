@@ -17,8 +17,8 @@ python scripts/offline_demo.py  # 首次自动生成合成数据，不联网采�
 浏览器只打开 **http://127.0.0.1:8023**：
 
 1. 架构总览 → B =「同进程嵌入」
-2. 离线演示已有 4 条合成漏洞和 4 份资料；查看情报、资料和证据问答
-3. `POST /api/monitor/b-cycle` / `GET /api/intelligence/health`
+2. 离线演示已有 5 条合成漏洞和 7 份资料；查看情报、资料和证据问答
+3. `GET /api/intelligence/health` 检查样例库；离线演示不执行外部采集
 
 ## 环境变量
 
@@ -26,7 +26,7 @@ python scripts/offline_demo.py  # 首次自动生成合成数据，不联网采�
 | --- | --- | --- |
 | `TEAM_INTEL_MODE` | `embed` | 同进程；`sidecar` 遗留 HTTP |
 | `INTELLIGENCE_DB_PATH` | `intelligence/data/intelligence.db` | B SQLite |
-| `B_MONITOR_ON_REFRESH` | `1` | monitor/run 与定时先刷 B |
+| `B_MONITOR_ON_REFRESH` | `0`（正式） | 显式启用时手动刷新调用 B 采集子进程；离线/镜像禁止 |
 | `B_MONITOR_SOURCE_TIMEOUT` | `45` | 单源超时（秒） |
 | `B_MONITOR_OVERALL_TIMEOUT` | `180` | 整轮墙钟（秒） |
 

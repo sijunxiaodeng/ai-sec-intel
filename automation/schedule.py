@@ -70,6 +70,8 @@ def ensure_state():
         data.setdefault("run_phase", "")
         data.setdefault("run_started_at", "")
         data.setdefault("mode", "automatic")
+        if not isinstance(data.get("pipeline"), dict):
+            data["pipeline"] = {}
         _write_state(data)
         return data
 
@@ -149,15 +151,19 @@ def next_run_iso(data=None):
 def run_once(keyword=None):
     from agents.orchestrator import run_collect
     from rag.library import sync_team_drain
+    from automation.pipeline import begin_pipeline, update_stage, finish_pipeline
     keyword = (keyword or "").strip() or DEFAULT_KEYWORDS
     if not _RUN_LOCK.acquire(blocking=False):
         return dict(ensure_state(), skipped="overlapping_cycle")
     collect_error = None
+    result, errors = {}, False
     try:
+        begin_pipeline()
         mark_running(phase="同步多源有效情报", keyword=keyword)
         try:
-            result = run_collect(keyword)
-            _patch_state(last_run=_now(), last_count=result.get("fetched", 0),
+            result = run_collect(keyword, on_phase=update_stage)
+            _patch_state(last_run=_now(), last_count=(result.get("round_stats") or {}).get("inserted", 0),
+                         last_received=result.get("fetched", 0),
                          total_records=len(result.get("records") or []), last_keyword=keyword,
                          last_status=result.get("status", "success"),
                          source_results=result.get("source_results", []),
@@ -165,16 +171,26 @@ def run_once(keyword=None):
             log_line("团队情报同步 %s，接收 %d 条" % (result.get("status"), result.get("fetched", 0)))
         except Exception as exc:
             collect_error = exc
+            update_stage("monitoring", status="error", note="同步未完成，旧数据与已提交游标保留")
             _patch_state(last_run=_now(), last_count=0, last_status="failed", last_error=str(exc))
             log_line("自动监测失败：%s" % exc)
         try:
+            update_stage("library_sync", status="running", did="按持久游标同步知识资料")
             team = sync_team_drain(max_documents=200)
             errors = team.get("error") or team.get("status") in {"error", "failed", "partial"}
+            update_stage("library_sync", status="error" if errors else "ok",
+                         produced="本轮成功 %d 条" % team.get("ok", 0))
             _patch_state(team_library_last_run=_now(), team_library_last_ok=team.get("ok", 0),
                          team_library_last_error=str(team.get("error") or team.get("status")) if errors else "")
         except Exception as exc:
+            errors = True
+            update_stage("library_sync", status="error", note="资料同步失败，下轮继续重试")
             _patch_state(team_library_last_run=_now(), team_library_last_error=type(exc).__name__)
             log_line("团队资料同步失败：%s" % type(exc).__name__)
+        if errors and not collect_error:
+            _patch_state(last_status="partial", last_error="部分资料同步失败")
+        finish_pipeline(ok=not (collect_error or errors or result.get("status") == "partial"),
+                        metrics=result.get("round_stats"), tech_detail=result.get("tech_detail"))
         if collect_error:
             raise collect_error
         return ensure_state()

@@ -14,23 +14,28 @@ from collectors.documents import KnowledgeDocument, make_document_id
 
 class OSVCollector:
     QUERY_URL = "https://api.osv.dev/v1/query"
-    DEFAULT_PACKAGES = ("vllm", "transformers", "langchain", "ollama", "torch", "tensorflow")
+    DEFAULT_PACKAGES = ("vllm", "transformers", "langchain", "langgraph", "llama-index",
+                        "huggingface_hub", "openai", "ollama", "torch", "tensorflow",
+                        ("Go", "github.com/ollama/ollama"))
 
     def __init__(self, *, session=None, packages=None, max_pages=100):
         self.session = session or requests.Session()
-        self.packages = tuple(packages or self.DEFAULT_PACKAGES)
-        if not self.packages or any(not isinstance(p, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", p) for p in self.packages):
-            raise ValueError("OSV packages must be explicit PyPI package names")
+        self.packages = tuple(("PyPI", p) if isinstance(p, str) else tuple(p)
+                              for p in (self.DEFAULT_PACKAGES if packages is None else packages))
+        if not self.packages or any(len(p) != 2 or p[0] not in {'PyPI', 'Go'}
+                or not isinstance(p[1], str) or not re.fullmatch(r"[A-Za-z0-9_./-]+", p[1])
+                for p in self.packages):
+            raise ValueError("OSV packages must be explicit PyPI or Go package identities")
         if type(max_pages) is not int or max_pages < 1:
             raise ValueError("max_pages must be positive")
         self.max_pages = max_pages
 
     def collect(self):
         found = {}
-        for name in self.packages:
+        for ecosystem, name in self.packages:
             token, tokens = None, set()
             for _ in range(self.max_pages):
-                body = {"package": {"ecosystem": "PyPI", "name": name}}
+                body = {"package": {"ecosystem": ecosystem, "name": name}}
                 if token:
                     body["page_token"] = token
                 response = self.session.post(self.QUERY_URL, json=body, timeout=30)
