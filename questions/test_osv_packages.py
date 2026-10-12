@@ -36,6 +36,15 @@ class TestOSVPackages(unittest.TestCase):
         self.assertIn("transformers", names)
         self.assertIn("langchain", names)
         self.assertIn("github.com/ollama/ollama", names)
+        self.assertIn("open-webui", names)
+        self.assertIn("github.com/open-webui/open-webui", names)
+
+    def test_open_webui_keyword_resolves_osv_package(self):
+        self.assertEqual(
+            resolve_packages("open-webui"),
+            list(PACKAGES["open-webui"]),
+        )
+        self.assertEqual(PACKAGES["open-webui"][0], ("PyPI", "open-webui"))
 
     def test_collect_llm_queries_all_known_packages(self):
         calls = []

@@ -28,6 +28,8 @@ PACKAGES = {
     "huggingface_hub": [("PyPI", "huggingface_hub")],
     "ollama": [("GIT", "github.com/ollama/ollama")],
     "openai": [("PyPI", "openai")],
+    # OSV canonical id: pkg:pypi/open-webui (GHSA/PYSEC aliases map to CVE).
+    "open-webui": [("PyPI", "open-webui"), ("GIT", "github.com/open-webui/open-webui")],
 }
 
 # Per-product batch cap; deferred source identities remain unacknowledged.
