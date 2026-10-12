@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 安全知识情报</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=20261011-library1" />
+  <link rel="stylesheet" href="/assets/styles.css?v=20261011-taxonomy1" />
 </head>
 <body>
   <div class="shell">
@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">默认持续采集宽范围 AI 安全情报。点「立即刷新」会立刻跑一轮并给出进度反馈。</p>
+            <p class="hint">按周期自动刷新情报（默认约每 6 小时），也可立即刷新。流里应同时看到漏洞与已入库资料（博客/论文/厂商公告/社区等），不是单一组件的 CVE 清单。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -139,38 +139,64 @@
             <span id="monitor-live-state">空闲</span>
           </div>
           <div class="monitor-live-row">
-            <span class="monitor-live-label">最近一轮</span>
+            <span class="monitor-live-label">最近更新</span>
             <span id="monitor-live-last">—</span>
           </div>
           <div class="monitor-live-row">
-            <span class="monitor-live-label">下次定时</span>
+            <span class="monitor-live-label">下次刷新</span>
             <span id="monitor-live-next">—</span>
           </div>
-          <div class="monitor-live-row">
-            <span class="monitor-live-label">进度</span>
-            <span id="monitor-live-phase">定时轮询（非实时推流）；点「立即刷新」可马上跑一轮</span>
+          <div class="monitor-live-row" id="monitor-live-phase-row">
+            <span class="monitor-live-label">说明</span>
+            <span id="monitor-live-phase">约每 6 小时自动一轮；非实时推流</span>
           </div>
           <div class="monitor-progress" id="monitor-progress" hidden>
             <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
           </div>
         </div>
+        <div class="collect-pipeline" id="collect-pipeline" hidden>
+          <header class="pipeline-head">
+            <h3 class="pipeline-title">本轮监测</h3>
+            <p class="hint" id="pipeline-summary">点「立即刷新」后显示整体进度与命中/新增/合并（多方面来源一并跑，不按来源拆步）。</p>
+          </header>
+          <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
+          <ol class="pipeline-stages" id="pipeline-stages"></ol>
+          <details class="pipeline-tech" id="pipeline-tech" hidden>
+            <summary>技术细节（可选）</summary>
+            <p class="hint" id="pipeline-tech-body"></p>
+          </details>
+        </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
-        <aside class="source-legend" aria-label="来源说明">
+        <aside class="source-legend" aria-label="监测维度说明">
           <header class="panel-head">
-            <h2>来源</h2>
-            <p class="hint">每条情报会标注来自哪里；可用下方芯片筛选。</p>
+            <h2>怎么读情报流</h2>
+            <p class="hint">请分开看两维：<strong>类型/分类</strong>（这条是什么）与<strong>来源</strong>（从哪采来）。监测刷新是<strong>一次动作</strong>（多方面来源一并抓取 → 整理入库），不要理解成按来源拆开的多套监测。</p>
           </header>
-          <ul class="source-list">
-            <li><span class="src-tag src-nvd">NVD</span> 美国国家漏洞库</li>
-            <li><span class="src-tag src-osv">OSV</span> 开源漏洞库</li>
-            <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory</li>
-            <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
-            <li><span class="src-tag src-team">多源</span> 多源情报（聚合漏洞与资料）</li>
-            <li><span class="src-tag src-lib">资料库</span> 本地沉淀资料</li>
-            <li><span class="src-tag src-paper">论文</span> 学术论文等</li>
-            <li><span class="src-tag src-comm">社区</span> 安全社区 / 博客</li>
-          </ul>
+          <div class="tax-grid">
+            <div>
+              <h3 class="tax-title">类型 / 分类</h3>
+              <ul class="source-list">
+                <li><span class="src-tag src-nvd">漏洞</span> CVE 条目（NVD / OSV / Advisory 等采入）</li>
+                <li><span class="src-tag src-paper">论文</span> 学术论文等资料</li>
+                <li><span class="src-tag src-comm">社区/博客</span> 安全社区与研究文章</li>
+                <li><span class="src-tag src-gh">厂商公告</span> 项目安全公告 / 厂商指引</li>
+                <li><span class="src-tag src-lib">标准/政策</span> 标准、框架、政策法规</li>
+              </ul>
+            </div>
+            <div>
+              <h3 class="tax-title">来源（公开目录 / 采集器）</h3>
+              <ul class="source-list">
+                <li><span class="src-tag src-nvd">NVD</span> 国家漏洞库（本机直连）</li>
+                <li><span class="src-tag src-osv">OSV</span> 开源漏洞库（本机直连）</li>
+                <li><span class="src-tag src-gh">GitHub</span> GitHub Advisory / 项目公告</li>
+                <li><span class="src-tag src-kev">KEV</span> CISA 已知利用目录</li>
+                <li><span class="src-tag src-team">本机库</span> 监测读本地情报库（非外队、非第二端口）</li>
+                <li><span class="src-tag src-lib">资料库沉淀</span> 公开订阅或采集摘要落入本机资料库</li>
+              </ul>
+            </div>
+          </div>
+          <p class="hint tax-foot">对外只开 <strong>:8023</strong> 一个进程。端口不等于来源；旧的双端口只是过渡部署方式。</p>
         </aside>
 
         <details class="filter-drawer" id="monitor-filter-drawer">
@@ -188,26 +214,41 @@
         <div class="panel">
           <div class="panel-head">
             <h2>情报流</h2>
-            <div class="chip-row" id="monitor-scope">
-              <button type="button" class="chip is-on" data-monitor-scope="all">全部类型</button>
-              <button type="button" class="chip" data-monitor-scope="cve">仅 CVE</button>
-              <button type="button" class="chip" data-monitor-scope="document">仅资料</button>
-              <button type="button" class="chip" data-monitor-scope="live">联网</button>
-              <button type="button" class="chip" data-monitor-scope="demo">演示</button>
+          </div>
+          <div class="filter-block">
+            <p class="filter-label">类型（这条是什么形态）</p>
+            <div class="chip-row" id="monitor-scope" aria-label="按类型筛选">
+              <button type="button" class="chip is-on" data-monitor-scope="all">全部</button>
+              <button type="button" class="chip" data-monitor-scope="cve">漏洞 CVE</button>
+              <button type="button" class="chip" data-monitor-scope="document">资料</button>
+              <button type="button" class="chip" data-monitor-scope="live">联网采集</button>
+              <button type="button" class="chip" data-monitor-scope="demo">演示数据</button>
             </div>
           </div>
-          <div class="chip-row source-chips" id="monitor-source-filter" aria-label="按来源筛选">
-            <button type="button" class="chip is-on" data-source-filter="all">全部来源</button>
-            <button type="button" class="chip" data-source-filter="nvd">NVD</button>
-            <button type="button" class="chip" data-source-filter="osv">OSV</button>
-            <button type="button" class="chip" data-source-filter="github">GitHub</button>
-            <button type="button" class="chip" data-source-filter="kev">KEV</button>
-            <button type="button" class="chip" data-source-filter="team">多源</button>
-            <button type="button" class="chip" data-source-filter="library">资料库</button>
-            <button type="button" class="chip" data-source-filter="paper">论文</button>
-            <button type="button" class="chip" data-source-filter="community">社区</button>
+          <div class="filter-block">
+            <p class="filter-label">分类（资料内容类别；与来源无关）</p>
+            <div class="chip-row" id="monitor-category-filter" aria-label="按内容分类筛选">
+              <button type="button" class="chip is-on" data-category-filter="all">全部分类</button>
+              <button type="button" class="chip" data-category-filter="vendor">厂商公告</button>
+              <button type="button" class="chip" data-category-filter="paper">论文</button>
+              <button type="button" class="chip" data-category-filter="community">社区/博客</button>
+              <button type="button" class="chip" data-category-filter="standard">标准/政策</button>
+            </div>
+          </div>
+          <div class="filter-block">
+            <p class="filter-label">来源（从哪个公开目录 / 采集器来）</p>
+            <div class="chip-row source-chips" id="monitor-source-filter" aria-label="按来源筛选">
+              <button type="button" class="chip is-on" data-source-filter="all">全部来源</button>
+              <button type="button" class="chip" data-source-filter="nvd">NVD</button>
+              <button type="button" class="chip" data-source-filter="osv">OSV</button>
+              <button type="button" class="chip" data-source-filter="github">GitHub</button>
+              <button type="button" class="chip" data-source-filter="kev">CISA KEV</button>
+              <button type="button" class="chip" data-source-filter="aggregate">本机库</button>
+              <button type="button" class="chip" data-source-filter="library">资料库沉淀</button>
+            </div>
           </div>
           <p id="monitor-summary" class="hint"></p>
+          <p id="monitor-mix" class="hint"></p>
           <div class="split enrich-layout">
             <div id="monitor-list"></div>
             <article class="panel" id="monitor-detail">
@@ -281,7 +322,7 @@
             <li><span class="src-tag src-lib">公开订阅</span> vLLM / Transformers 安全公告、Trail of Bits 博客、arXiv AI 安全论文</li>
             <li><span class="src-tag src-lib">固定官方</span> 网信办办法、NIST AI 600-1、国标目录等固定原文监测</li>
             <li><span class="src-tag src-nvd">历史种子</span> 演示用起始资料（Wiz / 官方文档 / 论文），非实时新发现</li>
-            <li><span class="src-tag src-team">多源摘要</span> 多源情报库题名/描述窗口；默认不是全文镜像</li>
+            <li><span class="src-tag src-team">本机库摘要</span> 本机情报库题名/描述窗口；默认不是全文镜像</li>
           </ul>
         </aside>
 
@@ -293,9 +334,9 @@
             <p id="library-sync-public-status" class="hint"></p>
           </div>
           <div class="sync-card">
-            <h3>多源摘要同步</h3>
-            <p class="hint">从多源情报库导入最近窗口的题名/描述；需要全文时再单独获取。</p>
-            <button type="button" class="ghost" id="library-team-sync">同步多源摘要</button>
+            <h3>本机库摘要同步</h3>
+            <p class="hint">从本机情报库导入最近窗口的题名/描述；需要全文时再单独获取。</p>
+            <button type="button" class="ghost" id="library-team-sync">同步本机库摘要</button>
             <p id="library-sync-multi-status" class="hint"></p>
           </div>
         </div>
@@ -423,6 +464,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261011-library1"></script>
+  <script src="/assets/app.js?v=20261012-localdb1"></script>
 </body>
 </html>

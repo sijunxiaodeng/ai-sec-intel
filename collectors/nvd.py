@@ -119,22 +119,61 @@ def to_card(item, keyword, collected_at):
     return card
 
 
-class NVDCollector(object):
-    """B 的采集接口：collect() 返回 IntelligenceItem 列表。"""
+def _days_since(iso_stamp):
+    """How many whole days from watermark to now (UTC); None if unparsable."""
+    if not iso_stamp:
+        return None
+    text = str(iso_stamp).replace("Z", "+00:00")
+    try:
+        start = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            start = datetime.strptime(str(iso_stamp)[:19], "%Y-%m-%dT%H:%M:%S")
+            start = start.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - start.astimezone(timezone.utc)
+    return max(1, int(delta.total_seconds() // 86400) + 1)
 
-    def __init__(self, keyword="ollama", limit=20):
+
+class NVDCollector(object):
+    """collect() 返回 IntelligenceItem 列表。
+
+    With a stored watermark, prefer a lastMod window starting near that stamp
+    (plus a small overlap via ceil days) so re-runs resume instead of looking empty.
+    """
+
+    def __init__(self, keyword="llm", limit=20, use_cursor=True):
         self.keyword = keyword
         self.limit = limit
+        self.use_cursor = bool(use_cursor)
+        self.last_stats = {}
 
     def collect(self):
+        from collectors.cursors import get_cursor
         from models import intelligence_item
 
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        watermark = get_cursor("nvd") if self.use_cursor else ""
         # Prefer recently modified matches; widen if the short window is empty.
+        # When a watermark exists, start from ~that age (capped) then widen.
+        window_plan = [30, 90, None]
+        if watermark:
+            since = _days_since(watermark)
+            if since is not None:
+                # Overlap: look back at least 2 days before watermark age.
+                first = min(max(since + 2, 2), 120)
+                window_plan = [first, 90, None] if first < 90 else [first, None]
         payload = {"vulnerabilities": []}
-        for days in (30, 90, None):
+        used_days = None
+        fetches = 0
+        for days in window_plan:
             try:
                 payload = fetch_nvd(self.keyword, self.limit, last_mod_days=days)
+                fetches += 1
+                used_days = days
             except Exception:
                 if days is None:
                     raise
@@ -148,4 +187,30 @@ class NVDCollector(object):
                 items.append(intelligence_item(card))
         # Newest published first within this batch (CVE year ≠ freshness).
         items.sort(key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""), reverse=True)
+        self.last_stats = {
+            "source": "NVD",
+            "fetched": len(items),
+            "kept": len(items),
+            "last_mod_days": used_days,
+            "watermark_before": watermark,
+            "watermark_candidate": collected_at,
+            "incremental": bool(watermark),
+            "external_fetches": fetches,
+        }
         return items
+
+    def commit_cursor(self):
+        from collectors.cursors import set_cursor
+
+        candidate = (self.last_stats or {}).get("watermark_candidate")
+        if not candidate:
+            return
+        set_cursor(
+            "nvd",
+            candidate,
+            meta={
+                "fetched": (self.last_stats or {}).get("fetched"),
+                "keyword": self.keyword,
+                "last_mod_days": (self.last_stats or {}).get("last_mod_days"),
+            },
+        )

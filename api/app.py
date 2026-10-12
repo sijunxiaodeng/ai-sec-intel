@@ -575,7 +575,13 @@ _CATEGORY_LABELS = {
 }
 
 
-def _fetch_team_documents(q="", limit=40):
+from api.feed_mix import diversify_cves_by_product as _diversify_cves_by_product
+from api.feed_mix import diversify_documents as _diversify_documents
+from api.feed_mix import feed_composition as _feed_composition
+from api.feed_mix import interleave_feed as _interleave_feed
+
+
+def _fetch_team_documents(q="", limit=48):
     """List multi-source documents for the monitor feed.
 
     Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
@@ -592,7 +598,7 @@ def _fetch_team_documents(q="", limit=40):
 
     from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
 
-    page_limit = min(max(limit * 3, 40), 100)
+    page_limit = min(max(limit * 3, 60), 120)
     try:
         if embed_enabled():
             # list_documents_page reads api_v6 repos; avoids collectors.* clash.
@@ -683,7 +689,7 @@ def _library_documents(q="", limit=40):
 
 @app.get("/api/monitor/feed")
 def monitor_feed(q: str = "", kind: str = "all"):
-    """Monitor feed: CVE cards + non-CVE documents (B team docs + C library)."""
+    """Monitor feed: CVE cards + non-CVE documents (多源文档 + 资料库)."""
     kind = (kind or "all").strip().lower()
     if kind not in {"all", "cve", "document", "demo", "live"}:
         raise HTTPException(status_code=422, detail="kind 仅支持 all/cve/document/demo/live")
@@ -708,16 +714,19 @@ def monitor_feed(q: str = "", kind: str = "all"):
     doc_items = []
     team_meta = {"reachable": False, "total": 0}
     if kind in {"all", "document", "demo", "live"}:
-        team_docs, team_meta = _fetch_team_documents(q=q, limit=40)
-        lib_docs = _library_documents(q=q, limit=40)
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=48)
+        lib_docs = _library_documents(q=q, limit=48)
         # Prefer team docs; add library docs not already present by URL/title.
         seen = set()
+        merged_docs = []
         for row in team_docs + lib_docs:
             key = (row.get("url") or "") + "|" + (row.get("title") or "")
             if key in seen:
                 continue
             seen.add(key)
-            doc_items.append(row)
+            merged_docs.append(row)
+        # Category round-robin so blogs/papers/vendor are not starved by one lane.
+        doc_items = _diversify_documents(merged_docs, limit=48)
 
     if kind == "demo":
         cve_items = [row for row in cve_items if row.get("demo")]
@@ -729,6 +738,10 @@ def monitor_feed(q: str = "", kind: str = "all"):
         doc_items = []
     elif kind == "document":
         cve_items = []
+
+    # Soft product balance for the monitor stream (KB still holds the full set).
+    if kind in {"all", "cve", "demo", "live"} and cve_items:
+        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=6, limit=60)
 
     def _pub_ts(row):
         raw = (row.get("published_at") or "").strip()
@@ -760,10 +773,18 @@ def monitor_feed(q: str = "", kind: str = "all"):
     from datetime import datetime, timezone
     now_ts = datetime.now(timezone.utc).timestamp()
 
-    # Recency-first across CVE + docs. CVE-2025 id ≠ old intel; sort by published_at.
-    # Demo/synthetic sinks after live items with the same timestamp.
-    feed_items = cve_items + doc_items
-    feed_items.sort(key=lambda row: (-_pub_ts(row), 1 if row.get("demo") else 0, row.get("cve_id") or row.get("title") or ""))
+    # Soft-mix CVE + 资料 when showing "全部"；纯 CVE / 纯资料仍各自按发布时间。
+    if kind in {"all", "demo", "live"} and doc_items:
+        feed_items = _interleave_feed(cve_items, doc_items)
+    else:
+        feed_items = cve_items + doc_items
+        feed_items.sort(
+            key=lambda row: (
+                -_pub_ts(row),
+                1 if row.get("demo") else 0,
+                row.get("cve_id") or row.get("title") or "",
+            )
+        )
 
     freshness = {"days_7": 0, "days_30": 0, "older": 0, "unknown": 0, "demo": 0}
     for row in feed_items:
@@ -772,7 +793,14 @@ def monitor_feed(q: str = "", kind: str = "all"):
         bucket = _freshness_bucket(_pub_ts(row), now_ts)
         freshness[bucket] = freshness.get(bucket, 0) + 1
     freshness["as_of"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    freshness["note"] = "按 published_at 新→旧；CVE 编号年份≠发布时间；近7/30天=监测新鲜度口径"
+    freshness["note"] = (
+        "条目新鲜度按 published_at（近7/30天）；CVE 编号年份≠发布时间；"
+        "采集节奏见定时间隔与最近一轮，非实时推流"
+    )
+    freshness["item_basis"] = "published_at"
+    freshness["cadence"] = "periodic"
+
+    composition = _feed_composition(feed_items)
 
     return {
         "kind": kind,
@@ -781,10 +809,17 @@ def monitor_feed(q: str = "", kind: str = "all"):
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
         },
+        "composition": composition,
         "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
-        "sort": "published_at_desc",
+        "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
+        "mix_note": (
+            "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
+            "类型/分类与来源分两维看；本机库=监测读本地情报，不是第二套监测/端口。"
+            if doc_items else
+            "当前几乎只有漏洞条目——请先监测刷新或同步资料库，资料类才会进入监测流。"
+        ),
     }
 
 
@@ -898,7 +933,8 @@ def asset_impact(cve_id: str):
 
 # Built-in AI-security scope for one-click auto monitor (comma-separated).
 AUTO_MONITOR_KEYWORDS = (
-    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection"
+    "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama,"
+    "adversarial,jailbreak,prompt injection"
 )
 
 
@@ -963,6 +999,9 @@ def monitor_status(light: int = 0):
             "base_url": public_b_base(),
             "probe": "skipped_while_running",
         }
+    from automation.pipeline import get_pipeline
+
+    pipeline = get_pipeline()
     return {
         "mode": "automatic",
         "interval_hours": st.get("interval_hours"),
@@ -976,7 +1015,15 @@ def monitor_status(light: int = 0):
         "last_error": st.get("last_error") or "",
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
-        "notice": "定时轮询（默认约 6 小时）+ 手动「立即刷新」；不是竞品式实时推流。",
+        "pipeline": pipeline,
+        "freshness_policy": {
+            "cadence": "periodic",
+            "interval_hours": st.get("interval_hours"),
+            "item_buckets": "published_at → 近7天 / 近30天 / 更早",
+            "latency_sla": "需监测开始后新发布且可计 collected−published；间隔本身≠延迟达标",
+            "realtime": False,
+        },
+        "notice": "定时轮询（默认约 6 小时）+ 手动「立即刷新」；分阶段进度来自真实任务状态轮询，不是竞品式实时推流。",
     }
 
 
@@ -994,17 +1041,37 @@ def monitor_run(body: MonitorRunBody):
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
     from api.b_embed import embed_enabled
     from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
-    from automation.schedule import mark_phase, mark_run, mark_running
+    from automation.pipeline import (
+        begin_pipeline,
+        bump_metrics,
+        finish_pipeline,
+        set_tech_detail,
+        update_stage,
+    )
+    from automation.schedule import mark_run, mark_running
 
     try:
-        mark_running(phase="starting", keyword=keyword)
+        begin_pipeline()
+        mark_running(phase="监测刷新中", keyword=keyword)
     except Exception:
-        pass
+        try:
+            mark_running(phase="监测刷新中", keyword=keyword)
+        except Exception:
+            pass
 
+    def on_phase(stage_id, **fields):
+        update_stage(stage_id, **fields)
+
+    # One product stage「监测中」covers all collectors (incl. optional local refresh).
     b_cycle = None
+    update_stage(
+        "monitoring",
+        status="running",
+        did="多方面来源一并抓取中…",
+        phase="监测刷新中",
+    )
     if embed_enabled() and b_monitor_on_refresh():
         try:
-            mark_phase("多源采集刷新")
             b_cycle = run_b_monitor_cycle()
         except Exception as exc:
             b_cycle = {"status": "failed", "error": "%s: %s" % (type(exc).__name__, exc)[:160]}
@@ -1012,52 +1079,135 @@ def monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        mode = (team or {}).get("mode") or "embed"
-        if mode == "embed":
-            warnings.append("多源情报库暂不可用（同进程嵌入），已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
-        else:
-            warnings.append("多源情报 sidecar 暂不可达，已跳过多源 CVE；仍采集 NVD/OSV 并刷新本地资料流。")
+        warnings.append("本机情报库暂不可用，本轮仍继续其它来源与资料刷新。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
-            "多源采集本轮%s（%s）；仍读取现有库并采集 NVD/OSV。"
+            "部分来源刷新%s（%s）；监测仍继续。"
             % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
         )
     result = None
     library = None
+    round_stats = {}
     try:
-        mark_phase("NVD/OSV/多源 CVE 入库")
-        result = run_collect(keyword)
+        result = run_collect(keyword, on_phase=on_phase)
+        round_stats = result.get("round_stats") or {}
+        tech = result.get("tech_detail") or ""
+        if b_cycle and b_cycle.get("status") in {"success", "partial"}:
+            tech = (
+                "本轮曾刷新本机情报库（%s，%s/%s）；%s"
+                % (
+                    b_cycle.get("status"),
+                    b_cycle.get("success_sources"),
+                    b_cycle.get("configured_sources"),
+                    tech,
+                )
+            ).strip("；")
+        if tech:
+            try:
+                set_tech_detail(tech)
+            except Exception:
+                pass
+        bump_metrics(
+            hit=round_stats.get("hit"),
+            kept=round_stats.get("kept"),
+            inserted=round_stats.get("inserted"),
+            merged=round_stats.get("merged"),
+            external_fetches=round_stats.get("external_fetches"),
+        )
         if body.sync_library:
+            library = {"team": None, "public": None}
+            update_stage(
+                "library_sync",
+                status="running",
+                did="同步公开资料与本机库摘要",
+                phase="资料同步",
+            )
+            # Public library sync brings research / vendor / paper into the monitor
+            # feed via _library_documents — without inventing Talos/FreeBuf.
+            try:
+                from rag.library import sync as library_sync
+
+                library["public"] = library_sync(per_source=2, include_seeds=True)
+            except ValueError as exc:
+                library["public"] = {"status": "busy", "error": str(exc)}
+            except Exception as exc:
+                library["public"] = {"status": "error", "error": type(exc).__name__}
+                warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
             if not team.get("reachable"):
-                library = {"status": "skipped", "error": "team unreachable"}
-                warnings.append("已跳过多源资料同步。")
+                library["team"] = {"status": "skipped", "error": "team unreachable"}
+                warnings.append("已跳过本机库资料同步。")
             else:
                 try:
-                    mark_phase("资料库同步")
                     from rag.library import sync_team
-                    library = sync_team(max_documents=body.max_documents)
+                    library["team"] = sync_team(max_documents=body.max_documents)
                 except ValueError as exc:
-                    library = {"status": "busy", "error": str(exc)}
+                    library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
-                    library = {"status": "error", "error": type(exc).__name__}
-                    warnings.append("多源资料同步失败，CVE/公开源结果仍已刷新。")
-        mark_run(count=len(result["records"]), keyword=keyword)
+                    library["team"] = {"status": "error", "error": type(exc).__name__}
+                    warnings.append("本机库资料同步失败，CVE/公开源结果仍已刷新。")
+            # Backward-compatible top-level fields for older UI.
+            library["status"] = (
+                (library.get("team") or {}).get("status")
+                or (library.get("public") or {}).get("status")
+                or "ok"
+            )
+            pub_st = (library.get("public") or {}).get("status") or "ok"
+            team_st = (library.get("team") or {}).get("status") or "ok"
+            lib_bad = pub_st in {"error", "busy"} and team_st in {"error", "busy", "skipped"}
+            update_stage(
+                "library_sync",
+                status="error" if lib_bad else "ok",
+                did="同步资料到资料库",
+                got="公开 %s；本机库摘要 %s" % (pub_st, team_st),
+                produced="资料可供监测流展示",
+                impact="无 CVE 资料进入情报流",
+                note="失败不回滚已入库 CVE",
+                phase="资料同步",
+            )
+        else:
+            update_stage(
+                "library_sync",
+                status="skip",
+                did="本轮未请求资料同步",
+                got="sync_library=false",
+                produced="—",
+                impact="本轮以 CVE 监测结果为主",
+                phase="资料同步",
+            )
+        inserted = int(round_stats.get("inserted") or 0)
+        mark_run(count=inserted, keyword=keyword)
+        finish_pipeline(
+            ok=True,
+            metrics={
+                "hit": round_stats.get("hit"),
+                "kept": round_stats.get("kept"),
+                "inserted": round_stats.get("inserted"),
+                "merged": round_stats.get("merged"),
+                "external_fetches": round_stats.get("external_fetches"),
+            },
+            tech_detail=(result.get("tech_detail") or tech or "")[:500],
+        )
     except HTTPException:
+        try:
+            finish_pipeline(ok=False, summary="监测未完成")
+        except Exception:
+            pass
         raise
     except Exception as exc:
         try:
             mark_run(count=0, keyword=keyword, error=str(exc)[:200])
+            finish_pipeline(ok=False, summary="监测失败：%s" % str(exc)[:160])
         except Exception:
             pass
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     steps = result.get("steps") or []
     team_failed = any(
-        ("多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
+        ("本机库" in (s.get("action") or "") or "聚合库" in (s.get("action") or "") or "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
         and "失败" in (s.get("action") or "")
         for s in steps
     )
-    if team_failed and "多源情报" not in " ".join(warnings) and "团队情报" not in " ".join(warnings):
-        warnings.append("多源情报源本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    if team_failed and "本机库" not in " ".join(warnings) and "聚合库" not in " ".join(warnings):
+        warnings.append("本机库本轮失败或跳过；NVD/OSV 与本地库仍继续。")
 
     def _step_status(name):
         for step in steps:
@@ -1073,7 +1223,11 @@ def monitor_run(body: MonitorRunBody):
 
     nvd = _step_status("NVD")
     osv = _step_status("OSV")
-    b_step = _step_status("多源情报")
+    b_step = _step_status("本机库")
+    if b_step["status"] == "未跑":
+        b_step = _step_status("聚合库")
+    if b_step["status"] == "未跑":
+        b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
         b_step = _step_status("团队情报")
     if not team.get("reachable"):
@@ -1095,14 +1249,14 @@ def monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
         c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步多源/公开资料到资料库"}
+        c_sync = {"status": "成功", "detail": "已尽力同步公开/本机库资料到资料库"}
 
     if b_cycle is None:
-        b_mon = {"status": "未请求", "detail": "B_MONITOR_ON_REFRESH=0 或非 embed"}
+        b_mon = {"status": "未请求", "detail": "本轮未另刷本机库"}
     elif b_cycle.get("status") in {"success", "partial"}:
         b_mon = {
             "status": "成功" if b_cycle.get("status") == "success" else "部分",
-            "detail": "同进程多源 %s/%s 成功"
+            "detail": "本机库刷新 %s/%s 路成功"
             % (b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
         }
     elif b_cycle.get("status") == "skipped":
@@ -1110,9 +1264,11 @@ def monitor_run(body: MonitorRunBody):
     elif b_cycle.get("status") == "timeout":
         b_mon = {"status": "超时", "detail": b_cycle.get("error") or "overall timeout"}
     elif b_cycle.get("status") == "disabled":
-        b_mon = {"status": "禁用", "detail": "B_MONITOR_ENABLED=0"}
+        b_mon = {"status": "禁用", "detail": "本机库刷新已关闭"}
     else:
         b_mon = {"status": "失败", "detail": b_cycle.get("error") or b_cycle.get("status")}
+
+    from automation.pipeline import get_pipeline
 
     source_diag = {
         "nvd": nvd,
@@ -1120,12 +1276,19 @@ def monitor_run(body: MonitorRunBody):
         "b_monitor": b_mon,
         "b_team": b_src,
         "c_library_sync": c_sync,
-        "written": len(result["records"]),
+        "written": int(round_stats.get("inserted") or 0),
+        "merged": int(round_stats.get("merged") or 0),
+        "hit": int(round_stats.get("hit") or 0),
+        "kept": int(round_stats.get("kept") or 0),
+        "kb_total": len(result["records"]),
     }
     return {
         "mode": "auto",
         "keyword": keyword,
-        "count": len(result["records"]),
+        "count": int(round_stats.get("inserted") or 0),
+        "kb_total": len(result["records"]),
+        "round_stats": round_stats,
+        "pipeline": get_pipeline(),
         "steps": steps,
         "library_sync": library,
         "team": team,
@@ -1133,7 +1296,7 @@ def monitor_run(body: MonitorRunBody):
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮含同进程多源刷新（可 partial）+ NVD/OSV + 多源库读取；列表见 /api/monitor/feed。",
+        "notice": "本轮监测刷新：命中/新增/合并见 round_stats；count=本轮新增 CVE，不是整库条数。",
     }
 
 

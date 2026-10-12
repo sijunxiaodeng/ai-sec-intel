@@ -55,6 +55,8 @@ def ensure_state():
     data.setdefault("run_phase", "")
     data.setdefault("run_started_at", "")
     data.setdefault("mode", "automatic")
+    if not isinstance(data.get("pipeline"), dict):
+        data["pipeline"] = {}
     _write_state(data)
     return data
 
@@ -190,14 +192,18 @@ def run_once(keyword=None):
             log_line("B 同进程多源跳过/失败：%s" % exc)
 
         result = run_collect(keyword)
+        round_stats = result.get("round_stats") or {}
         data = ensure_state()
         data["last_run"] = _now()
         data["last_error"] = ""
-        data["last_count"] = len(result.get("records") or [])
+        data["last_count"] = int(round_stats.get("inserted") or 0)
         data["last_keyword"] = keyword
         data["running"] = False
         _write_state(data)
-        log_line("自动监测完成，关键词 %s，库内 %d 条" % (keyword, data["last_count"]))
+        log_line(
+            "自动监测完成，关键词 %s，本轮新增 %d，库内 %d"
+            % (keyword, data["last_count"], len(result.get("records") or []))
+        )
     except Exception as exc:
         collect_error = exc
         data = ensure_state()
