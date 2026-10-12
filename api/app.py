@@ -1599,7 +1599,7 @@ def _monitor_run(body: MonitorRunBody):
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮监测刷新：命中/新增/合并见 round_stats；count=本轮新增 CVE，不是整库条数。",
+        "notice": "本轮监测刷新：round_stats.hit=查询返回（水位前原始行），kept=水位后保留，inserted/merged=新增/合并；count=本轮新增 CVE，不是整库条数。",
     }
 
 

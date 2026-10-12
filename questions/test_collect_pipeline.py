@@ -206,7 +206,7 @@ class TestPipelineState(unittest.TestCase):
             "monitoring",
             status="ok",
             did="多方面来源抓取已完成",
-            got="命中 10，保留 0",
+            got="查询返回 10，水位后保留 0",
             produced="进入整理入库 0 条",
             note="多方面来源已尽力查询",
         )
@@ -222,7 +222,8 @@ class TestPipelineState(unittest.TestCase):
             metrics={"hit": 10, "kept": 0, "inserted": 0, "merged": 0, "external_fetches": 3},
         )
         self.assertEqual(done["status"], "done")
-        self.assertIn("命中 10", done["summary"])
+        self.assertIn("查询返回 10", done["summary"])
+        self.assertIn("水位后保留 0", done["summary"])
         self.assertEqual(done["metrics"]["inserted"], 0)
         self.assertNotIn("fetch_osv", [s["id"] for s in done["stages"]])
         raw = json.loads(self.schedule_mod.STATE_PATH.read_text(encoding="utf-8"))

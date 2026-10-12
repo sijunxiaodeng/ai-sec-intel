@@ -151,13 +151,13 @@ def run(keyword="llm"):
         wm = osv_stats.get("watermark_before") or ""
         osv_step = _step(
             "调用 OSV",
-            "关键词 %s；命中 %d，保留 %d"
+            "关键词 %s；查询返回 %d，水位后保留 %d"
             % (primary, osv_stats.get("fetched", 0), osv_stats.get("kept", len(osv_items))),
             did="按已登记 AI 组件包批量查询 OSV API",
-            got="外部取回 %d 次包查询，命中 %d 条原始记录"
+            got="外部请求 %d 次包查询，查询返回 %d 条原始记录（含水位前历史）"
             % (osv_stats.get("packages_queried", 0), osv_stats.get("fetched", 0)),
-            produced="保留 %d 条（未保存或内容修订；其余延期续采）" % len(osv_items),
-            impact="保留条将进入整理与入库；0 保留仍表示已查过",
+            produced="水位后保留 %d 条（未保存或内容修订；其余延期续采）" % len(osv_items),
+            impact="水位后保留条将进入整理与入库；0 保留仍表示已查过",
             note=(
                 "Batch %d packages；按包已入库修订续采（观察时间 %s）"
                 % (osv_stats.get("packages_planned", 0), wm)
@@ -239,6 +239,8 @@ def run(keyword="llm"):
             ok=True,
         )
 
+    # Product copy: hit →「查询返回」(raw API rows, pre-cursor); kept →「水位后保留」.
+    # OSV fetched sums ALL vulns returned per package (incl. already-saved revisions).
     hit = (
         int(nvd_stats.get("fetched") or 0)
         + int(osv_stats.get("fetched") or 0)

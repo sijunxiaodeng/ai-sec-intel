@@ -238,10 +238,12 @@ def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     else:
         m = pipe.get("metrics") or {}
         pipe["summary"] = (
-            "本轮监测：命中 %(hit)s，新增 %(inserted)s，合并 %(merged)s；"
-            "外部取回 %(external_fetches)s，失败 %(failures)s。"
+            "本轮监测：查询返回 %(hit)s，水位后保留 %(kept)s，"
+            "新增 %(inserted)s，合并 %(merged)s；"
+            "外部请求 %(external_fetches)s，失败 %(failures)s。"
             % {
                 "hit": m.get("hit", 0),
+                "kept": m.get("kept", 0),
                 "inserted": m.get("inserted", 0),
                 "merged": m.get("merged", 0),
                 "external_fetches": m.get("external_fetches", 0),

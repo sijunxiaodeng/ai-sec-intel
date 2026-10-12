@@ -520,11 +520,11 @@ function renderCollectPipeline(pipeline, opts) {
     if (status === "running") {
       summaryEl.textContent = "监测刷新中"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
-        + "——多方面来源一并跑，看下方命中/新增/合并。";
+        + "——多方面来源一并跑，看下方查询返回 / 水位后保留 / 新增·合并。";
     } else if (pipeline.summary) {
       summaryEl.textContent = pipeline.summary;
     } else {
-      summaryEl.textContent = "本轮监测结果如下。0 新增时请看「命中 / 合并」——不等于没搜到。";
+      summaryEl.textContent = "本轮监测结果如下。0 新增时请看「查询返回 / 水位后保留 / 合并」——不等于没搜到。";
     }
   }
   if (metricsEl) {
@@ -532,12 +532,13 @@ function renderCollectPipeline(pipeline, opts) {
     if (pipeline.elapsed_sec != null && status !== "idle") {
       bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
     }
-    bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
+    bits.push("查询返回 <strong>" + (metrics.hit || 0) + "</strong>");
+    bits.push("水位后保留 <strong>" + (metrics.kept || 0) + "</strong>");
     bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
     bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
     bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
     if (metrics.external_fetches) {
-      bits.push("外部取回 <strong>" + metrics.external_fetches + "</strong>");
+      bits.push("外部请求 <strong>" + metrics.external_fetches + "</strong>");
     }
     metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
     metricsEl.hidden = false;
@@ -657,7 +658,8 @@ function loadMonitorStatus() {
       bits.push("最近更新 " + formatStamp(data.last_run));
       bits.push("上次新增 " + (data.last_count || 0) + " 条");
       var pm = (data.pipeline && data.pipeline.metrics) || {};
-      if (pm.hit != null) bits.push("命中 " + (pm.hit || 0));
+      if (pm.hit != null) bits.push("查询返回 " + (pm.hit || 0));
+      if (pm.kept != null) bits.push("水位后保留 " + (pm.kept || 0));
       if (pm.merged != null) bits.push("合并 " + (pm.merged || 0));
     } else bits.push("尚未刷新；可点「立即刷新一轮」");
     if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
@@ -1753,10 +1755,12 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   var rs = (runData && runData.round_stats) || {};
   if ((diag.written === 0 || (runData && runData.count === 0)) && (rs.inserted === 0 || rs.inserted == null)) {
     bits.push("本轮 CVE 新增 0"
-      + (rs.hit != null ? "（命中 " + rs.hit + "，合并 " + (rs.merged || 0) + "）" : ""));
+      + (rs.hit != null
+        ? "（查询返回 " + rs.hit + "，水位后保留 " + (rs.kept || 0) + "，合并 " + (rs.merged || 0) + "）"
+        : ""));
   }
   if (rs.hit > 0 && (rs.inserted || 0) === 0) {
-    bits.push("已查到来源数据但无新编号——多半是增量游标之后无更新，或 CVE 已在库中");
+    bits.push("查询返回含水位前历史行；水位后保留/新增少是增量正常——不等于没搜到");
   }
   if (team.enabled !== false && team.reachable === false) {
     bits.push("多源情报不可用时仍应有 NVD/OSV 与本地资料");
@@ -1856,7 +1860,8 @@ function runMonitorRefresh(options) {
     var rs = data.round_stats || {};
     var outcomeLabel = {success: "采集成功", partial: "采集部分成功", failed: "采集失败"}[data.status] || "本轮完成";
     if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
-    var roundLine = "本轮命中 " + (rs.hit != null ? rs.hit : "—")
+    var roundLine = "查询返回 " + (rs.hit != null ? rs.hit : "—")
+      + " · 水位后保留 " + (rs.kept != null ? rs.kept : "—")
       + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
       + " · 合并 " + (rs.merged != null ? rs.merged : "—");
     setMonitorStatus(outcomeLabel + "：" + roundLine
@@ -1870,7 +1875,7 @@ function runMonitorRefresh(options) {
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
       if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
-        done += " 已查到来源数据但无新 CVE 编号（增量位点之后无更新，或已在库中合并）。";
+        done += " 查询返回含水位前历史；水位后保留少或新增 0 是增量正常（已入库修订未变，或已合并）。";
       }
       if (data.status === "failed") done += " 采集未成功，当前显示保留的已有记录。";
       setMonitorStatus(done);
