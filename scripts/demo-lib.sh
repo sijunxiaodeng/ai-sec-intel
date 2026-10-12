@@ -50,7 +50,7 @@ wait_http() {
 }
 
 ensure_venvs() {
-  # One-venv story for demo: root .venv runs A + embedded B (query + monitor + seed).
+  # One runtime for A and B queries; collection runs in an isolated child process.
   if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
     log "creating root .venv (unified demo runtime)"
     python3 -m venv "$ROOT/.venv"

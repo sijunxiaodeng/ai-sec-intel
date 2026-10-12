@@ -2,7 +2,7 @@
 # Pins intentionally keep FastAPI/Pydantic on the A-compatible stack.
 # B's intelligence/requirements.lock.txt (FastAPI 0.143 / Pydantic 2) is NOT
 # installed here — create_app() + run_cycle work under these pins (see
-# docs in /cursor/stores/self/docs/unify-resolve-conflicts.md).
+# INTEGRATION.md).
 fastapi==0.95.2
 pydantic==1.10.26
 uvicorn==0.22.0

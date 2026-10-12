@@ -1,7 +1,10 @@
 """Offline OSV keyword → package resolution and diversity caps (no network)."""
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
+from collectors import cursors
 from collectors.osv import (
     PACKAGES,
     PER_PACKAGE_LIMIT,
@@ -13,6 +16,13 @@ from collectors.osv import (
 
 
 class TestOSVPackages(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cursor = patch.object(cursors, "CURSOR_PATH", Path(self.tmp.name) / "cursors.json")
+        self.cursor.start()
+        self.addCleanup(self.cursor.stop)
+
     def test_known_keyword_stays_narrow(self):
         self.assertEqual(resolve_packages("ollama"), list(PACKAGES["ollama"]))
 

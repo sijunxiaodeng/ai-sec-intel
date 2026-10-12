@@ -13,6 +13,11 @@ def team_intel_mode():
     return os.environ.get("TEAM_INTEL_MODE", "embed").strip().lower()
 
 
+def team_intel_disabled():
+    """An explicitly disabled team source must not fall through to HTTP."""
+    return team_intel_mode() in {"off", "disabled", "0", "false", "no"}
+
+
 def team_base_url(override=""):
     """HTTP base when TEAM_INTEL_MODE=sidecar. Unused for embed collectors."""
     return (
@@ -33,6 +38,8 @@ class IntelligenceCollector:
         self.max_pages = max_pages
 
     def collect(self):
+        if team_intel_disabled():
+            return []
         mode = team_intel_mode()
         if mode in {"embed", "inprocess", "1", "true", "yes", ""}:
             return self._collect_embed()

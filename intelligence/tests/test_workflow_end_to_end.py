@@ -57,7 +57,7 @@ class WorkflowSmokeTest(unittest.TestCase):
             env['INTELLIGENCE_DB_PATH'] = str(db)
             with tempfile.TemporaryFile(mode='w+') as log:
                 proc = subprocess.Popen(
-                    [sys.executable, str(root / 'run_intelligence_api_v6.py'), '--port', str(port)],
+                    [sys.executable, str(root / 'run_intelligence_api_v6.py'), '--host', '127.0.0.1', '--port', str(port)],
                     cwd=root.parent, env=env, stdout=log, stderr=log, text=True,
                 )
                 try:
@@ -88,8 +88,14 @@ class WorkflowSmokeTest(unittest.TestCase):
                         'assert "受影响" in _extractive(records); '
                         'print(json.dumps(rows))'
                     )
+                    # The spawned A adapter must query this fixture HTTP server;
+                    # default embed would read a different database and bypass it.
+                    team_env = {**env, 'TEAM_INTEL_MODE':'sidecar',
+                                'TEAM_INTEL_UPSTREAM':base, 'TEAM_INTEL_BASE_URL':base,
+                                'AUTO_MONITOR_ON_START':'0', 'B_MONITOR_ENABLED':'0',
+                                'PYTHONDONTWRITEBYTECODE':'1'}
                     team = subprocess.run([sys.executable, '-c', code], cwd=root.parent,
-                                          text=True, capture_output=True, timeout=10)
+                                          env=team_env, text=True, capture_output=True, timeout=10)
                     self.assertEqual(team.returncode, 0, team.stderr)
                     rows = json.loads(team.stdout)
                     self.assertEqual(len(rows), 1)

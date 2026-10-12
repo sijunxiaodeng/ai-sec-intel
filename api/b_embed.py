@@ -8,8 +8,8 @@ IntelligenceCollector. Optional TEAM_INTEL_MODE=sidecar keeps the old :8765 path
 
 Path rule: workspace ROOT stays ahead of intelligence/ on sys.path so A's
 ``collectors.*`` (team_documents, nvd, …) win. B-only packages (api_v6,
-monitoring, storage, …) are still found via intelligence on path position 1.
-b_monitor temporarily prefers intelligence when it must import B's collectors.
+monitoring, storage, …) are exposed after root packages on sys.path.
+B collection runs in a private process and never switches A's package cache.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ DEFAULT_DB = INTEL_ROOT / "data" / "intelligence.db"
 
 _b_app = None
 _PATH_LOCK = threading.RLock()
+_APP_LOCK = threading.Lock()
 
 
 def team_intel_mode() -> str:
@@ -39,37 +40,19 @@ def sidecar_enabled() -> bool:
     return team_intel_mode() in {"sidecar", "proxy", "http"}
 
 
-def _purge_intelligence_collectors() -> None:
-    """Drop collectors.* if they were loaded from intelligence/ (name clash)."""
-    coll = sys.modules.get("collectors")
-    if coll is None:
-        return
-    origin = (getattr(coll, "__file__", "") or "").replace("\\", "/")
-    if "/intelligence/" not in origin and not origin.endswith("/intelligence/collectors/__init__.py"):
-        # Also treat namespace packages whose path is under intelligence/
-        paths = [str(p).replace("\\", "/") for p in (getattr(coll, "__path__", None) or [])]
-        if not any("/intelligence/" in p for p in paths):
-            return
-    for key in list(sys.modules):
-        if key == "collectors" or key.startswith("collectors."):
-            sys.modules.pop(key, None)
-
-
 def prefer_root_packages() -> None:
-    """Keep ROOT before intelligence/ so A collectors.* import correctly."""
+    """Expose B-only query packages without evicting A's imported modules.
+
+    Compatibility entry point for existing adapters. B collectors are isolated
+    in a worker, so requests never need a whole-cycle import lock.
+    """
     with _PATH_LOCK:
         root = str(ROOT.resolve())
         intel = str(INTEL_ROOT.resolve())
-        for path in (intel, root):
-            while path in sys.path:
-                sys.path.remove(path)
-        sys.path.insert(0, root)
-        sys.path.insert(1, intel)
-        _purge_intelligence_collectors()
-        os.environ.setdefault(
-            "INTELLIGENCE_DB_PATH",
-            str(Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB).resolve()),
-        )
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        if intel not in sys.path:
+            sys.path.append(intel)
 
 
 def ensure_intelligence_path() -> Path:
@@ -87,12 +70,14 @@ def db_path() -> Path:
 
 
 def get_b_app():
-    """Lazy-create B FastAPI app inside this process."""
+    """Create B's query app once; no collector task holds this short lock."""
     global _b_app
     if _b_app is None:
-        ensure_intelligence_path()
-        from api_v6.app import create_app
-        _b_app = create_app(root=INTEL_ROOT, db_path=db_path())
+        with _APP_LOCK:
+            if _b_app is None:
+                ensure_intelligence_path()
+                from api_v6.app import create_app
+                _b_app = create_app(root=INTEL_ROOT, db_path=db_path())
     return _b_app
 
 
@@ -136,7 +121,7 @@ def inprocess_health() -> dict:
             "database_available": False,
             "error": (
                 "缺少 intelligence.db（%s）。请先执行："
-                "cd intelligence && PYTHONPATH=. python seed_demo_db.py --force"
+                "cd intelligence && PYTHONPATH=. python seed_demo_db.py"
                 "；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；"
                 "再 ./scripts/demo-up.sh"
             ) % path,
@@ -198,19 +183,8 @@ def list_team_page(keyword: str = "", *, limit: int = 100, offset: int = 0, ai_o
 
 
 def list_documents_page(q: str = "", *, limit: int = 40, offset: int = 0) -> dict:
-    """List B documents without reordering sys.path / purging collectors.
-
-    Safe to call while ``b_monitor`` holds the intelligence import scope — we
-    only ensure ``intelligence/`` is importable (append), never prefer it over
-    root ``collectors.*``.
-    """
-    intel = str(INTEL_ROOT.resolve())
-    if intel not in sys.path:
-        sys.path.append(intel)
+    """Read B documents while the separate collector process is running."""
+    ensure_intelligence_path()
     from api_v6.document_repository import DocumentRepository
-
-    path = Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB)
-    if not path.is_absolute():
-        path = INTEL_ROOT / path
-    docs = DocumentRepository(path.resolve(), INTEL_ROOT)
+    docs = DocumentRepository(db_path(), INTEL_ROOT)
     return docs.list_items(q=q or None, limit=limit, offset=offset, include_raw=False)

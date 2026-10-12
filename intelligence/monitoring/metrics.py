@@ -50,12 +50,25 @@ def _summary(values: list[float]) -> dict:
     }
 
 
-def latency_report(con: sqlite3.Connection, monitored_since: str | None) -> dict:
+def latency_report(con: sqlite3.Connection, monitored_since: str | None, *, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must include a timezone")
+    now = now.astimezone(timezone.utc)
     start = parse_timestamp(monitored_since)
+    if start is not None and start > now:
+        start = None
     historical, live = [], []
-    excluded = {"missing_or_imprecise_time": 0, "negative_delay": 0}
+    excluded = {"missing_or_imprecise_time": 0, "negative_delay": 0,
+                "future_timestamp": 0, "invalid_payload": 0}
     for row in con.execute("SELECT payload_json, first_seen_at FROM unified_vulnerabilities"):
-        data = json.loads(row["payload_json"])
+        try:
+            data = json.loads(row["payload_json"])
+            if not isinstance(data, dict):
+                raise ValueError("payload is not an object")
+        except (TypeError, ValueError):
+            excluded["invalid_payload"] += 1
+            continue
         source = data.get("publication_source")
         # Legacy KEV-only rows incorrectly called dateAdded a publication date.
         published = None if source == "CISA_KEV" or data.get("sources") == ["CISA_KEV"] else parse_timestamp(
@@ -64,6 +77,9 @@ def latency_report(con: sqlite3.Connection, monitored_since: str | None) -> dict
         seen = parse_timestamp(row["first_seen_at"])
         if published is None or seen is None:
             excluded["missing_or_imprecise_time"] += 1
+            continue
+        if published > now or seen > now:
+            excluded["future_timestamp"] += 1
             continue
         delay = (seen - published).total_seconds() / 3600
         if delay < 0:

@@ -186,6 +186,7 @@ def _extract(candidate, response):
     identity = team_mod.team_id(record["document_id"]) if team else _id(url)
     doc.update({"schema_version": 1, "document_id": identity, "source_id": digest(identity if team else url)[:16],
                 "url": url, "fetch_url": response["url"], "document_type": kind, "content_type": response.get("content_type", "text/html"),
+                "source_encoding": response.get("encoding") or "utf-8",
                 "source_category": CATEGORY[kind], "publisher": candidate["source_name"],
                 "discovery_source_id": candidate["source_id"], "discovery": candidate.get("discovery", "historical_seed"),
                 "discovered_at": candidate.get("discovered_at") or now(), "retrieved_at": response.get("retrieved_at") or now(),
@@ -281,55 +282,82 @@ def documents(db_path=LIBRARY_DB, document_type=""):
 
 
 def _valid_evidence(db_path):
-    """原始快照和片段摘要不匹配时，不把该片段作为检索/展示证据。"""
+    """Re-extract every source from archived bytes; mutable index hashes are not proof.
+
+    Bind document identity/metadata and each chunk's ID/text/locator to the
+    parser's current output. A forged index sentence with a recomputed checksum
+    must not become an exact quote just because the raw response is unchanged.
+    """
     if not Path(db_path).exists():
         return []
+    def object_payload(payload):
+        try:
+            row = json.loads(payload)
+            return row if isinstance(row, dict) else None
+        except (ValueError, TypeError):
+            return None
+
     with _connection(db_path) as conn:
         _schema(conn)
-        invalidated = {r["document_id"] for (payload,) in conn.execute("SELECT payload FROM library_attempts")
-                       if (r := json.loads(payload)).get("invalidated_previous")}
-        good = {doc_id: sha for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")
-                if doc_id not in invalidated and hashlib.sha256(body).hexdigest() == sha}
-        rows = [json.loads(r[0]) for r in conn.execute("SELECT payload FROM evidence")]
-        docs = {json.loads(payload)["document_id"]: json.loads(payload) for (payload,) in conn.execute("SELECT payload FROM library_documents")}
-        snapshots = {doc_id: body for doc_id, _, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")}
+        if not conn.in_transaction:
+            conn.execute("BEGIN")  # Read index/doc/raw bytes from one SQLite snapshot.
+        invalidated = {r.get("document_id") for (payload,) in conn.execute("SELECT payload FROM library_attempts")
+                       if (r := object_payload(payload)) and r.get("invalidated_previous")}
+        snapshots = {doc_id: (sha, body) for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")
+                     if doc_id not in invalidated and isinstance(body, bytes) and hashlib.sha256(body).hexdigest() == sha}
+        rows = [row for cve, eid, payload in conn.execute("SELECT cve_id,evidence_id,payload FROM evidence")
+                if (row := object_payload(payload)) and cve == row.get("cve_id") == "" and eid == row.get("evidence_id")]
+        docs = {doc_id: row for doc_id, payload in conn.execute("SELECT document_id,payload FROM library_documents")
+                if (row := object_payload(payload)) and row.get("document_id") == doc_id}
     expected = {}
-    TEAM_MEDIA = _team_docs().TEAM_MEDIA
-    keys = ("document_id", "url", "document_type", "content_type", "content_scope", "publisher", "source_snapshot_kind",
+    keys = ("document_id", "source_id", "url", "title", "document_type", "content_type", "content_scope", "publisher", "source_snapshot_kind",
             "team_document_id", "team_source", "team_source_category", "team_content_updated_at", "text_sha256",
-            "source_response_sha256", "snapshot_url", "published_at", "source_last_modified", "team_first_seen_at")
+            "source_response_sha256", "snapshot_url", "published_at", "published_at_basis", "source_last_modified", "team_first_seen_at",
+            "version", "authors", "full_text_url", "declared_cve_ids", "ghsa_id", "associations", "topic_tags", "source_category",
+            "reference_kind", "page_count", "article_count", "catalog_fields", "issued_at", "effective_at", "scope_excerpt",
+            "document_status", "extraction_notice", "relation_type", "association_reason", "parent_document_id")
     for doc_id, doc in docs.items():
-        if (doc.get("content_type") != TEAM_MEDIA and doc_id == _id(doc["url"])) or doc_id not in good:
+        snapshot = snapshots.get(doc_id)
+        if not snapshot or snapshot[0] != doc.get("source_response_sha256"):
             continue
         try:
             parsed, chunks = _reparse(doc["url"], doc["document_type"], doc["publisher"], doc["discovery_source_id"],
-                snapshots[doc_id], doc["fetch_url"], doc["retrieved_at"], TEAM_MEDIA)
-            if any(doc.get(key) != parsed.get(key) for key in keys):
-                good.pop(doc_id, None)
-            else:
-                expected[doc_id] = {chunk["evidence_id"]: dict(parsed, **chunk) for chunk in chunks}
-        except (ValueError, KeyError, TypeError):
-            good.pop(doc_id, None)
+                snapshot[1], doc["fetch_url"], doc["retrieved_at"], doc["content_type"],
+                subscription_published_at=doc.get("published_at") if doc.get("published_at_basis") == "subscription_metadata" else None,
+                parent_document_id=doc.get("parent_document_id"), encoding=doc.get("source_encoding", "utf-8"))
+            if (parsed["document_id"] != doc_id or doc.get("chunk_count") != len(chunks)
+                    or any(doc.get(key) != parsed.get(key) for key in keys)):
+                continue
+            expected[doc_id] = {chunk["evidence_id"]: dict(parsed, **chunk) for chunk in chunks}
+        except Exception:
+            # Malformed/unsupported raw documents fail closed, including optional
+            # parser dependency failures. No network or replacement text is used.
+            continue
     result = []
     for row in rows:
-        if good.get(row["document_id"]) != row["source_response_sha256"] or digest(row["text"]) != row["text_sha256"]:
+        original = expected.get(row.get("document_id"), {}).get(row["evidence_id"])
+        if not original:
             continue
-        if row["document_id"] in expected:
-            original = expected[row["document_id"]].get(row["evidence_id"], {})
-            if any(row.get(key) != original.get(key) for key in (*keys, "text", "locator", "citation_id")):
-                continue
+        if (any(row.get(key) != original.get(key) for key in (*keys, "text", "locator", "citation_id", "topics", "search_terms", "text_kind"))
+                or row.get("source_encoding", "utf-8") != original["source_encoding"]):
+            continue
         result.append(row)
     return result
 
 
 @lru_cache(maxsize=24)
-def _reparse(url, kind, publisher, discovery_source_id, body, fetch_url_value, retrieved_at, content_type):
+def _reparse(url, kind, publisher, discovery_source_id, body, fetch_url_value, retrieved_at, content_type,
+             *, subscription_published_at=None, parent_document_id=None, encoding="utf-8"):
     TEAM_MEDIA = _team_docs().TEAM_MEDIA
     candidate = {"url": url, "document_type": kind, "source_name": publisher, "source_id": discovery_source_id}
+    if subscription_published_at is not None:
+        candidate["published_at"] = subscription_published_at
+    if parent_document_id is not None:
+        candidate["parent_document_id"] = parent_document_id
     if content_type == TEAM_MEDIA:
         candidate["team_document_id"] = json.loads(body)["document_id"]
     response = {"body": body, "content_type": "application/json" if kind == "vendor_advisory" and content_type != TEAM_MEDIA else content_type,
-                "url": fetch_url_value, "retrieved_at": retrieved_at}
+                "url": fetch_url_value, "retrieved_at": retrieved_at, "encoding": encoding}
     return _extract(candidate, response)
 
 
@@ -356,7 +384,9 @@ def verified_sources(db_path=LIBRARY_DB):
         if sha != row["source_response_sha256"] or hashlib.sha256(body).hexdigest() != sha:
             continue
         try:
-            doc, chunks = _reparse(row["url"], row["document_type"], row["publisher"], row["discovery_source_id"], body, row["fetch_url"], row["retrieved_at"], row.get("content_type", "text/html"))
+            doc, chunks = _reparse(row["url"], row["document_type"], row["publisher"], row["discovery_source_id"], body, row["fetch_url"], row["retrieved_at"], row.get("content_type", "text/html"),
+                subscription_published_at=row.get("published_at") if row.get("published_at_basis") == "subscription_metadata" else None,
+                parent_document_id=row.get("parent_document_id"), encoding=row.get("source_encoding", "utf-8"))
             import copy
             results.append({"document": copy.deepcopy(doc), "chunks": copy.deepcopy(chunks), "body": body,
                             "latest_attempt_status": attempts.get(row["document_id"], {}).get("status"),
@@ -373,7 +403,7 @@ def detail(document_id, db_path=LIBRARY_DB):
         return None
     rows = _valid_evidence(db_path)
     chunks = sorted([r for r in rows if r["document_id"] == document_id], key=lambda r: r["evidence_id"])
-    complete = len(chunks) == doc["chunk_count"]
+    complete = type(doc.get("chunk_count")) is int and doc["chunk_count"] > 0 and len(chunks) == doc["chunk_count"]
     full_text = [r for r in documents(db_path) if r.get("parent_document_id") == document_id]
     return dict(doc, evidence=chunks, full_text_documents=full_text, integrity_status="ok" if complete else "incomplete_or_invalid",
                 notice="引用对应已存档的提取内容；字符定位不是网页行号。" if complete else "部分证据完整性校验未通过，异常片段不展示。")
@@ -537,14 +567,28 @@ def sync(db_path=LIBRARY_DB, *, per_source=3, include_seeds=True, fetcher=fetch,
         _SYNC_LOCK.release()
 
 
+def _skipped_team_sync():
+    # Do not write a success/failure observation or modify old snapshots for a
+    # source deliberately disabled by configuration.
+    return {"status": "skipped", "enabled": False, "attempted": 0, "ok": 0,
+            "changed": 0, "documents": [],
+            "source": {"source_id": "team_documents", "name": "多源情报资料",
+                       "category": "team", "status": "skipped", "enabled": False},
+            "notice": "按配置跳过本机库资料同步，已有资料保留。"}
+
+
 def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url=None, collector=None):
     """Sync multi-source document summaries into the library.
 
     ``base_url`` defaults to None so embed mode uses in-process reads.
     Pass an explicit HTTP base for sidecar / offline fixtures.
     """
+    from collectors.intelligence import team_intel_disabled
+    if collector is None and base_url is None and team_intel_disabled():
+        if type(max_documents) is not int or not 1 <= max_documents <= 200:
+            raise ValueError("每轮多源资料数量必须为 1 到 200")
+        return _skipped_team_sync()
     _prefer_root_collectors()
-    _purge_module_clash_attempts(db_path)
     if collector is None:
         try:
             collector = _team_docs().TeamDocumentCollector(base_url, max_documents=max_documents)
@@ -560,6 +604,9 @@ def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url=None, collector=
             _record_source(source, status, None, path)
             return {"status": "error", "attempted": 0, "ok": 0, "changed": 0,
                     "documents": [], "source": status, "overview": overview(path)}
+    if getattr(collector, "disabled", False) is True:
+        return _skipped_team_sync()
+    _purge_module_clash_attempts(db_path)
     if not _SYNC_LOCK.acquire(blocking=False):
         raise ValueError("资料同步正在运行，请等待本轮完成")
     try:
@@ -644,7 +691,7 @@ def main():
     args = parser.parse_args()
     result = sync_team(args.db, max_documents=args.max_documents) if args.team_sync else sync(args.db, per_source=args.per_source, include_seeds=not args.no_seeds) if args.sync else search(args.query, db_path=args.db) if args.query else overview(args.db)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    if args.team_sync and result["status"] != "ok":
+    if args.team_sync and result["status"] not in {"ok", "skipped"}:
         raise SystemExit(1)
 
 

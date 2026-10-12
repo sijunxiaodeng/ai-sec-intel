@@ -50,6 +50,7 @@ class CitationGuardTest(unittest.TestCase):
         other = copy.deepcopy(self.cvss)
         other["citation_id"] = self.cve + "/OTHER"
         other["structured_value"] = {"source": "other@example.org", "cvssData": {"version": "4.0", "baseScore": 8.7}}
+        other["text"] = json.dumps(other["structured_value"])
         self.record["evidence_chunks"].append(other)
         self.assertTrue(claim_issues("CVSS 4.0 基础分为 8.7。", [self.cvss]))
         self.assertTrue(claim_issues("CVSS 3.1 基础分为 8.8，评分提供者 other@example.org。", [self.cvss]))

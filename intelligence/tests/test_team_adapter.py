@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,16 +11,27 @@ from api_v6.team_adapter import to_team_item
 
 
 TEAM_ROOT = Path(__file__).resolve().parents[2]
+# Load the root normalizer privately instead of leaving root packages on B's
+# import path or retaining a generic ``models`` module in B's cache.
+model_spec = importlib.util.spec_from_file_location('team_source_models', TEAM_ROOT / 'models.py')
+model_module = importlib.util.module_from_spec(model_spec)
+model_spec.loader.exec_module(model_module)
 spec = importlib.util.spec_from_file_location('team_source_collector', TEAM_ROOT / 'collectors' / 'intelligence.py')
 collector_module = importlib.util.module_from_spec(spec)
-sys.path.insert(0, str(TEAM_ROOT))
-try:
+with patch.dict(sys.modules, {'models': model_module}):
     spec.loader.exec_module(collector_module)
-finally:
-    sys.path.remove(str(TEAM_ROOT))
+
 
 
 class TeamCollectorTests(unittest.TestCase):
+    def setUp(self):
+        # These fixtures exercise the HTTP adapter, not the default embed path.
+        env = patch.dict(os.environ, {'TEAM_INTEL_MODE':'sidecar',
+                                      'TEAM_INTEL_UPSTREAM':'http://127.0.0.1:8765',
+                                      'TEAM_INTEL_BASE_URL':'http://127.0.0.1:8765'})
+        env.start()
+        self.addCleanup(env.stop)
+
     def test_paginated_rows_are_normalized_and_query_encoded(self):
         rows = [{'cve_id': f'CVE-2026-{10000 + i}', 'raw_data': {}} for i in range(101)]
         responses = [io.StringIO(json.dumps({'items': rows[:100], 'total': 101})),

@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">按周期自动刷新情报（默认约每 6 小时），也可立即刷新。流里应同时看到漏洞与已入库资料（博客/论文/厂商公告/社区等），不是单一组件的 CVE 清单。</p>
+            <p class="hint">每轮完成后默认等待约 15 分钟自动刷新，也可立即刷新。流里展示漏洞与已入库资料（博客/论文/厂商公告/社区等）；监测时效需按真实发布和采集时间核验。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -148,7 +148,7 @@
           </div>
           <div class="monitor-live-row" id="monitor-live-phase-row">
             <span class="monitor-live-label">说明</span>
-            <span id="monitor-live-phase">约每 6 小时自动一轮；非实时推流</span>
+            <span id="monitor-live-phase">每轮完成后默认等待约 15 分钟；非实时推流</span>
           </div>
           <div class="monitor-progress" id="monitor-progress" hidden>
             <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
@@ -371,7 +371,7 @@
           <form id="library-ask-form" class="panel library-ask">
             <p class="hint">基于已沉淀资料做摘录或关系分析。</p>
             <label for="library-mode">回答方式</label>
-            <select id="library-mode"><option value="excerpt">原文摘录</option><option value="relations">关系分析</option></select>
+            <select id="library-mode"><option value="excerpt">原文摘录</option><option value="reasoning">跨资料推理</option><option value="relations">关系分析</option></select>
             <label for="library-question">问题</label>
             <textarea id="library-question" rows="2" placeholder="例如：训练数据有哪些规定？"></textarea>
             <div class="toolbar">

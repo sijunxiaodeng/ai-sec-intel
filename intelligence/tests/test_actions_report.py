@@ -5,7 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -46,14 +46,14 @@ class ActionsReportTests(unittest.TestCase):
         ClassificationStore(self.database)
         self.specs = [spec for spec in get_sources() if spec.name in {"NVD", "GITHUB_ADVISORY", "ARXIV_AI_SECURITY"}]
         (self.directory / "monitoring_baseline.json").write_text(json.dumps({"started_at": BASELINE}))
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("CREATE TABLE source_observation_baselines(source TEXT PRIMARY KEY, source_category TEXT, started_at TEXT)")
             for spec in self.specs:
                 connection.execute("INSERT INTO source_observation_baselines VALUES (?,?,?)", (spec.name, spec.category, BASELINE))
         self.add_cve("CVE-2026-10001", "2026-10-09T00:00:00Z", "2026-10-09T06:00:00Z")
         self.add_cve("CVE-2026-10002", "2026-10-09T15:00:00Z", "2026-10-09T15:10:00Z")
         self.add_cve("CVE-2026-10003", "2026-10-09T13:00:00Z", "2026-10-09T20:00:00Z")
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("""INSERT INTO source_items SELECT 'GITHUB_ADVISORY',source_id,cve_id,
                                   payload_json,content_sha256,first_seen_at,last_seen_at,content_updated_at
                                   FROM source_items WHERE cve_id='CVE-2026-10001'""")
@@ -72,7 +72,7 @@ class ActionsReportTests(unittest.TestCase):
     def add_cve(self, cve_id, published, seen):
         payload = json.dumps({"published_at": published, "publication_source": "NVD",
                               "sources": ["NVD"], "description": SECRET})
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("INSERT INTO unified_vulnerabilities VALUES (?,?,?,?,?)", (cve_id, payload, cve_id, seen, seen))
             connection.execute("INSERT INTO source_items VALUES ('NVD',?,?,?,?,?,?,?)",
                                (cve_id, cve_id, payload, cve_id, seen, seen, seen))
@@ -118,7 +118,7 @@ class ActionsReportTests(unittest.TestCase):
         for index, (state, source, hash_value, version) in enumerate(cases):
             cve_id = f"CVE-2026-{20000 + index}"
             self.add_cve(cve_id, "2020-01-01T00:00:00Z", "2026-10-09T15:00:00Z")
-            with sqlite3.connect(self.database) as connection:
+            with closing(sqlite3.connect(self.database)) as connection, connection:
                 connection.execute("""INSERT INTO ai_classifications
                     (cve_id,content_sha256,classifier_version,state,ai_related,decision_source,reason,updated_at)
                     VALUES (?,?,?,?,?,?,?,?)""", (cve_id, cve_id if hash_value == "same" else hash_value,
@@ -157,11 +157,11 @@ class ActionsReportTests(unittest.TestCase):
 
     def test_read_only_reporting_does_not_touch_first_seen_or_original_baseline(self):
         before_baseline = (self.directory / "monitoring_baseline.json").read_bytes()
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             before_rows = connection.execute("SELECT * FROM unified_vulnerabilities ORDER BY cve_id").fetchall()
             before_schema = connection.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall()
         self.report()
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             self.assertEqual(before_rows, connection.execute("SELECT * FROM unified_vulnerabilities ORDER BY cve_id").fetchall())
             self.assertEqual(before_schema, connection.execute("SELECT name,sql FROM sqlite_master ORDER BY name").fetchall())
         self.assertEqual(before_baseline, (self.directory / "monitoring_baseline.json").read_bytes())
@@ -170,7 +170,7 @@ class ActionsReportTests(unittest.TestCase):
         self.add_cve("CVE-2026-30001", "2026-10-10", "2026-10-10T14:00:00Z")
         self.add_cve("CVE-2026-30002", "2026-10-10T14:00:00Z", "2026-10-10T13:00:00Z")
         self.add_cve("CVE-2026-30003", "2026-10-11T00:00:00Z", "2026-10-11T01:00:00Z")
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection, connection:
             connection.execute("INSERT INTO unified_vulnerabilities VALUES ('CVE-2026-30004','[]','bad',?,?)", (NOW.isoformat(), NOW.isoformat()))
         facts = self.report()["latency"]["full_observation_period"]
         self.assertEqual(facts["summary"]["samples"], 3)
@@ -217,14 +217,28 @@ class ActionsReportTests(unittest.TestCase):
         output = io.StringIO()
         with patch.dict(os.environ, {}, clear=True), redirect_stdout(output):
             self.assertEqual(main(["record", "--directory", str(self.directory), "--run-id", "42"]), 0)
-        current = json.loads((self.directory / "actions_report.json").read_text())
+        current = json.loads((self.directory / "actions_report.json").read_text(encoding="utf-8"))
         self.assertEqual(current["run_id"], "42")
         self.assertIn("::notice title=B cloud facts::", output.getvalue())
         destination = self.root / "summary.md"
         env = {"GITHUB_STEP_SUMMARY": str(destination), "COLLECTION_OUTCOME": "success", "SNAPSHOT_OUTCOME": "success"}
         with patch.dict(os.environ, env, clear=True):
             self.assertEqual(main(["summary", "--directory", str(self.directory), "--run-id", "43"]), 0)
-        self.assertIn("本轮时效、分类和模型执行均为未知", destination.read_text())
+        self.assertIn("本轮时效、分类和模型执行均为未知", destination.read_text(encoding="utf-8"))
+
+    def test_production_report_closes_read_connection_before_returning(self):
+        connections, connect = [], sqlite3.connect
+        def tracked(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)  # Keep references: GC must not hide a leak.
+            self.addCleanup(connection.close)
+            return connection
+        with patch("deployment.actions_report.sqlite3.connect", side_effect=tracked):
+            self.assertEqual(self.report()["latency"]["status"], "ok")
+        self.assertTrue(connections)
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
 
     def test_missing_database_is_not_created_and_report_remains_useful(self):
         self.database.unlink()

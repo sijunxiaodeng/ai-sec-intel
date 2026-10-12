@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -190,7 +191,8 @@ class DocumentsTest(unittest.TestCase):
     def test_collect_pipeline_processes_new_records_with_budget(self):
         from agents.orchestrator import run_collect
         records = [copy.deepcopy(self.record) for _ in range(4)]
-        with patch("agents.orchestrator.monitor_run", return_value={"items": [], "steps": []}), patch("agents.orchestrator.enrich_run", return_value={"records": records, "steps": []}), patch("agents.orchestrator.upsert", return_value=records), patch("agents.orchestrator.append_run"), patch("agents.orchestrator.ingest", return_value={"ok": 2}) as ingest_mock:
+        write = {"records": records, "inserted": 4, "merged": 0, "total": 4, "fetched": 4}
+        with patch.dict(os.environ, {"AUTO_INGEST_ON_COLLECT": "1"}), patch("agents.orchestrator.monitor_run", return_value={"items": [], "steps": []}), patch("agents.orchestrator.enrich_run", return_value={"records": records, "steps": []}), patch("agents.orchestrator.upsert_stats", return_value=write), patch("agents.orchestrator.append_run"), patch("agents.orchestrator.ingest", return_value={"ok": 2}) as ingest_mock:
             result = run_collect()
             self.assertEqual(ingest_mock.call_count, 3)
             self.assertEqual(len(result["records"]), 4)

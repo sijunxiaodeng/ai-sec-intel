@@ -7,7 +7,7 @@ from config.llm import chat, configured
 from agents.excerpts import SelectionError, entry, fallback, options, select
 from agents.question_scope import policy_scope_only
 from rag.evidence import CVE
-from rag.library import LIBRARY_DB, detail, search
+from rag.library import DOCUMENT_TYPES, LIBRARY_DB, detail, search
 
 KINDS = {"voluntary_risk_framework": "自愿风险管理框架", "recommended_national_standard": "推荐性国家标准（仅目录）",
          "published_policy_text": "政策发布正文"}
@@ -15,15 +15,32 @@ SCOPES = {"team_summary": "多源接口的题名/描述字段，非原始全文"
           "policy_articles": "政策条文", "catalog_only": "仅目录", "article_body": "文章正文", "advisory_fields": "公告字段"}
 
 
-def run(question, *, document_ids=None, document_type="", use_model=True, db_path=LIBRARY_DB):
+def run(question, *, document_ids=None, document_type="", use_model=True, db_path=LIBRARY_DB, mode="excerpts"):
     if not question.strip() or len(question) > 4000:
         raise ValueError("问题须为 1 到 4000 字符")
     ids = list(dict.fromkeys(document_ids or []))
     if len(ids) > 4 or any(not re.fullmatch(r"DOC-[a-f0-9]{16}", value) for value in ids):
         raise ValueError("最多指定 4 个有效资料编号")
+    if mode not in {"excerpts", "reasoning"}:
+        raise ValueError("资料问答模式须为 excerpts 或 reasoning")
+    if document_type and document_type not in DOCUMENT_TYPES:
+        raise ValueError("未知资料类型")
     if CVE.search(question):
         return {"answer": "具体 CVE 的受影响范围与修复问题请使用「情报问答」；资料中的编号提及不能自动证明漏洞事实。",
                 "evidence": [], "used_model": False, "model_attempted": False, "verdict": {"passed": True, "scope": "routing"}}
+    if mode == "reasoning":
+        from agents.general_reasoning import run as reason
+        fallback_fn = lambda: run(question, document_ids=ids, document_type=document_type,
+                                  use_model=False, db_path=db_path, mode="excerpts")
+        if use_model:
+            return reason(question, document_ids=ids, document_type=document_type,
+                          db_path=db_path, fallback_fn=fallback_fn)
+        result = fallback_fn()
+        result.update(reasoning_mode="reasoning", reasoning_status="fallback", reasoning_trace=[],
+                      reasoning_claims=[], model_calls=0, fallback_reason="model_disabled")
+        result["note"] = "模型已禁用，当前为规则检索的原文摘录，未执行通用推理。"
+        result["answer"] += "\n" + result["note"]
+        return result
     docs, rows, modes = {}, [], set()
     for doc_id in ids:
         doc = detail(doc_id, db_path)

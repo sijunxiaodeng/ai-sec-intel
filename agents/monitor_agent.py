@@ -6,7 +6,9 @@
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
-from collectors.intelligence import IntelligenceCollector, team_base_url
+import os
+
+from collectors.intelligence import IntelligenceCollector, team_base_url, team_intel_disabled
 from collectors.nvd import NVDCollector
 from collectors.osv import OSVCollector
 
@@ -77,10 +79,19 @@ def run(keyword="llm"):
     # Cap team multi-pass (local embed is cheap; still bound work).
     team_keys = team_keys[:10]
 
-    nvd = NVDCollector(keyword=primary)
+    # B owns the primary NVD stream; keep the legacy root collector as an explicit fallback.
+    setting = os.environ.get("ROOT_NVD_ENABLED")
+    team_disabled = team_intel_disabled()
+    root_nvd_enabled = (
+        setting.strip().lower() not in {"0", "false", "no", "off"} if setting is not None else
+        team_disabled
+    )
+    nvd = NVDCollector(keyword=primary) if root_nvd_enabled else None
     try:
-        nvd_items = nvd.collect()
-        nvd_stats = dict(nvd.last_stats or {})
+        nvd_items = nvd.collect() if nvd is not None else []
+        nvd_stats = dict(nvd.last_stats or {}) if nvd is not None else {
+            "fetched": 0, "kept": 0, "external_fetches": 0, "disabled_duplicate": True,
+        }
         nvd_ok = True
         nvd_err = ""
     except Exception as exc:
@@ -89,16 +100,22 @@ def run(keyword="llm"):
         nvd_ok = False
         nvd_err = str(exc)
 
-    if nvd_ok:
+    if nvd_stats.get("disabled_duplicate"):
+        nvd_step = _step(
+            "复用 B 的 NVD 主采集流",
+            "从 B 库读入 NVD 情报；根目录兼容采集器不重复联网查询",
+            did="读取主采集结果", got="本步骤无额外 NVD 请求", produced="由本机库步骤合并",
+            impact="B 未更新时保留已有资料并展示状态",
+            note="独立使用可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
+        )
+    elif nvd_ok:
         wm = nvd_stats.get("watermark_before") or ""
         nvd_step = _step(
             "调用 NVD",
             "关键词 %s；得到 %d 条" % (primary, len(nvd_items)),
-            did="按关键词查询 NVD，变更窗 %s 天%s"
-            % (
-                nvd_stats.get("last_mod_days") if nvd_stats.get("last_mod_days") is not None else "不限",
-                "（自上次成功位点续查）" if nvd_stats.get("incremental") else "",
-            ),
+            did="按关键词完整分页查询 NVD：%s 至 %s"
+            % (nvd_stats.get("window_start_at") or "历史起点",
+               nvd_stats.get("window_end_at") or "本轮固定边界"),
             got="取回 %d 条候选" % nvd_stats.get("fetched", len(nvd_items)),
             produced="保留 %d 条进入整理" % len(nvd_items),
             impact="将与 OSV / 本机库结果合并后入库",
@@ -138,13 +155,13 @@ def run(keyword="llm"):
             did="按已登记 AI 组件包批量查询 OSV API",
             got="外部取回 %d 次包查询，命中 %d 条原始记录"
             % (osv_stats.get("packages_queried", 0), osv_stats.get("fetched", 0)),
-            produced="保留 %d 条（游标之后的更新；单包有上限）" % len(osv_items),
+            produced="保留 %d 条（未保存或内容修订；其余延期续采）" % len(osv_items),
             impact="保留条将进入整理与入库；0 保留仍表示已查过",
             note=(
-                "Batch %d packages；自上次位点 %s 续查"
+                "Batch %d packages；按包已入库修订续采（观察时间 %s）"
                 % (osv_stats.get("packages_planned", 0), wm)
                 if wm
-                else "Batch %d packages；无游标，本轮全量截断保留"
+                else "Batch %d packages；首次重放，按包确认入库后续采"
                 % osv_stats.get("packages_planned", 0)
             ),
             ok=True,
@@ -167,7 +184,7 @@ def run(keyword="llm"):
     team_fetches = 0
     # Short timeout + fail-fast: B down must not freeze the whole monitor click.
     team_timeout = 5
-    for kw in team_keys:
+    for kw in ([] if team_disabled else team_keys):
         try:
             items = IntelligenceCollector(
                 keyword=kw, base_url=team_base_url(), timeout=team_timeout, max_pages=5
@@ -185,7 +202,15 @@ def run(keyword="llm"):
                 break
     team_items = _merge_by_cve(team_batches)
 
-    if team_err and not team_items:
+    if team_disabled:
+        team_step = _step(
+            "跳过 本机库",
+            "TEAM_INTEL_MODE 已禁用本机库，本轮不查询 B",
+            did="按配置跳过来源", got="未发起查询", produced="0 条",
+            impact="本轮仅使用已启用的 NVD/OSV 来源",
+            note="禁用来源不计成功或失败",
+        )
+    elif team_err and not team_items:
         team_step = _step(
             "调用 本机库 失败",
             "已跳过，其他来源继续。%s" % team_err,
@@ -239,7 +264,9 @@ def run(keyword="llm"):
             "aggregate_kept": len(team_items),
             "external_fetches": external,
             "nvd_ok": nvd_ok,
+            "nvd_disabled_duplicate": bool(nvd_stats.get("disabled_duplicate")),
             "osv_ok": osv_ok,
-            "aggregate_ok": not (team_err and not team_items),
+            "aggregate_disabled": team_disabled,
+            "aggregate_ok": not team_disabled and not (team_err and not team_items),
         },
     }

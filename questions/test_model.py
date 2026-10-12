@@ -12,11 +12,17 @@ class ModelTest(unittest.TestCase):
     def setUp(self):
         self.cve = "CVE-2024-37032"
         self.eid = self.cve + "/FIXTURE"
+        self.metric = {"source": "vendor@example.org", "type": "Secondary", "cvssData": {
+            "version": "3.1", "baseScore": 8.8, "baseSeverity": "HIGH",
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"}}
         self.record = {"item": {"cve_id": self.cve, "description": "Synthetic source", "raw_data": {}},
                        "cvss": {"score": 8.8}, "evidence_chunks": [{"citation_id": self.eid,
-                       "text": "Synthetic CVSS 8.8 fixture.", "url": "https://example.org/fixture",
-                       "locator": "metrics/0", "text_kind": "automatic_structured_extract"}]}
+                       "text": json.dumps(self.metric), "structured_value": self.metric, "url": "https://example.org/fixture",
+                       "locator": "metrics/cvssMetricV31/0", "text_kind": "automatic_structured_extract"}]}
         self.settings = {"base_url": "http://127.0.0.1:11434/v1", "model": "fixture", "api_key": "ollama"}
+        settings_patch = patch("config.settings.load_settings", return_value=self.settings)
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
 
     def assessed_record(self):
         record = json.loads(json.dumps(self.record))
@@ -108,10 +114,20 @@ class ModelTest(unittest.TestCase):
             "易受攻击系统保密性影响无", "易受攻击系统完整性影响无", "易受攻击系统可用性影响高",
             "后续系统保密性影响无", "后续系统完整性影响无", "后续系统可用性影响无")]
         texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "参考链接被来源标为 Exploit。"]
-        claims = [{"text": text, "citations": [self.eid]} for text in texts]
-        self.assertEqual(len(_render_model_json(json.dumps({"claims": claims}), [self.record]).splitlines()), 17)
+        record = json.loads(json.dumps(self.record))
+        metric4 = {"source": "vendor@example.org", "type": "Secondary", "cvssData": {
+            "version": "4.0", "baseScore": 8.7, "baseSeverity": "HIGH",
+            "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"}}
+        record["evidence_chunks"][0].update(locator="metrics/cvssMetricV40/0", structured_value=metric4, text=json.dumps(metric4))
+        version_id, reference_id = self.cve + "/VERSION", self.cve + "/REFERENCE"
+        record["evidence_chunks"] += [
+            {"citation_id": version_id, "locator": "body", "text": "Synthetic version branches.", "url": "https://example.org/fixture"},
+            {"citation_id": reference_id, "locator": "references/0", "text": '{"tags":["Exploit"]}', "url": "https://example.org/fixture"}]
+        claims = [{"text": text, "citations": [version_id if i < 8 else reference_id if i == 16 else self.eid]}
+                  for i, text in enumerate(texts)]
+        self.assertEqual(len(_render_model_json(json.dumps({"claims": claims}), [record]).splitlines()), 17)
         with self.assertRaises(ValueError):
-            _render_model_json(json.dumps({"claims": claims + claims}), [self.record])
+            _render_model_json(json.dumps({"claims": claims + claims}), [record])
 
     def test_structured_answer_preserves_explicit_citation(self):
         raw = json.dumps({"claims": [{"text": "CVSS 为 8.8。", "citations": [self.eid]}]})

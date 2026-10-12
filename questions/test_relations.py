@@ -9,6 +9,7 @@ from enrichment.relations import REGISTRY, build_graph
 from rag.evidence import _connection
 from rag.library import detail, ingest_document
 from questions.test_reference_text import html_paper, response
+from questions.pdf_fixture import text_pdf
 
 
 class RelationsTest(unittest.TestCase):
@@ -38,11 +39,12 @@ class RelationsTest(unittest.TestCase):
         self.paper_id = first["document_id"]
         nist = {"url": self.registry["sources"]["nist"]["url"], "document_type": "standard",
                 "source_name": "Synthetic NIST fixture", "source_id": "fixture"}
-        pdf = {"title": "Synthetic framework", "parts": [("PDF page 15", "Synthetic prompt injection source text; not a real research finding. " * 4)],
-               "content_scope": "full_text_pdf", "version": "NIST AI 600-1 (2024)", "reference_kind": "voluntary_risk_framework"}
-        with patch("rag.library.pdf_document", return_value=pdf):
-            second = ingest_document(nist, self.db, lambda u: response(u, b"%PDF-synthetic", "application/pdf"))
+        pdf_body = text_pdf(["Artificial Intelligence Risk Management Framework - synthetic fixture only\n" +
+                             "Synthetic prompt injection source text; not a real research finding. " * 4])
+        second = ingest_document(nist, self.db, lambda u: response(u, pdf_body, "application/pdf"))
+        self.assertEqual(second["status"], "ok", second)
         self.nist_id = second["document_id"]
+        self.assertEqual(detail(self.nist_id, self.db)["integrity_status"], "ok")
         rows = {"paper": next(r for r in detail(self.paper_id, self.db)["evidence"] if r["locator"].startswith("HTML section S1:")),
                 "nist": detail(self.nist_id, self.db)["evidence"][0]}
         # 夹具只核对绑定/故障行为，不冒充真实资料语义测试。

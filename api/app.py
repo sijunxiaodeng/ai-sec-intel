@@ -1,4 +1,5 @@
 import os
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -79,6 +80,7 @@ class LibraryAskBody(BaseModel):
     document_ids: list[str] = Field(default_factory=list, max_items=4)
     document_type: str = ""
     use_model: bool = True
+    mode: Literal["excerpts", "reasoning"] = "excerpts"
 
 
 class RelationCandidatesBody(BaseModel):
@@ -125,8 +127,14 @@ def _team_intel_snapshot():
     import urllib.error
     import urllib.request
 
+    from collectors.intelligence import team_intel_disabled
+    if team_intel_disabled():
+        return {"status": "skipped", "mode": "off", "enabled": False, "reachable": False,
+                "base_url": "", "public_base": "", "via_proxy": False,
+                "database_available": None, "knowledge_documents_available": None,
+                "team_total": None, "document_total": None, "coverage": None}
+
     from api.b_embed import embed_enabled, inprocess_health, list_team_page, public_b_base
-    from collectors.intelligence import team_base_url
 
     if embed_enabled():
         health = inprocess_health()
@@ -176,10 +184,15 @@ def _team_intel_snapshot():
                 "observed_ai_categories": cov.get("observed_ai_categories"),
                 "required_categories_observed": cov.get("required_categories_observed"),
                 "sla_evidence": cov.get("sla_evidence"),
+                "live_precise_samples": cov.get("live_precise_samples"),
+                "violations_ge_6h": cov.get("violations_ge_6h"),
+                "unknown_live_timing": cov.get("unknown_live_timing"),
             }
         except Exception as exc:
             out["error"] = "%s: %s" % (type(exc).__name__, exc)[:160]
         return out
+
+    from collectors.intelligence import team_base_url
 
     base = team_base_url()
     out = {
@@ -235,6 +248,9 @@ def _team_intel_snapshot():
             "observed_ai_categories": cov.get("observed_ai_categories"),
             "required_categories_observed": cov.get("required_categories_observed"),
             "sla_evidence": cov.get("sla_evidence"),
+            "live_precise_samples": cov.get("live_precise_samples"),
+            "violations_ge_6h": cov.get("violations_ge_6h"),
+            "unknown_live_timing": cov.get("unknown_live_timing"),
         }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError):
         pass
@@ -272,10 +288,9 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     from enrichment.assets import load_assets
 
     cov = (team or {}).get("coverage") or {}
-    observed_cats = int(cov.get("observed_ai_category_count") or 0)
-    lib_cats = len((library or {}).get("source_categories") or [])
-    # Prefer B observed categories for source-breadth narrative; fall back to library categories.
-    source_breadth = max(observed_cats, lib_cats, len(names or []))
+    from api.visibility_metrics import category_observation, latency_observation
+    source_breadth, category_basis = category_observation(cov, library or {})
+    lib_cats = category_observation({}, library or {})[0]
     if source_breadth >= 7:
         source_level, source_note = "良好～优秀（演示）", "类别观测≥7；优秀「实时」有调度但 SLA 样本不足，非自动判竞赛分"
     elif source_breadth >= 5:
@@ -286,11 +301,17 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         source_level, source_note = "缺口", "来源类别不足合格线（≥3）"
     else:
         source_level, source_note = "缺口", "尚无可用类别观测"
+    source_note += "；统计依据：" + category_basis
 
+    latency_count, latency_basis = latency_observation(cov, latency_count)
     if latency_count and latency_count > 0:
         latency_level, latency_note = "部分可计", f"可计时效样本 {latency_count}；间隔≠发布→采集延迟；新鲜度看 feed.freshness（近7/30天）"
     else:
         latency_level, latency_note = "未达证", "latency_count=0 / sla_evidence 不足；勿用定时间隔或 CVE 年份冒充发布→采集延迟；列表已按 published_at 排序仅改善观感"
+    latency_note += "；统计依据：" + latency_basis
+    if cov.get("sla_evidence") == "breached":
+        latency_level = "存在超时样本"
+        latency_note += "；B 严格监测口径存在 ≥6 小时样本，不能认定全部达标"
 
     enrich_cov = _enrichment_field_coverage(records)
     dim_n = enrich_cov["dimension_count"]
@@ -305,7 +326,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     asset_n = len(assets) if isinstance(assets, list) else 0
 
     b_reachable = bool((team or {}).get("reachable"))
-    b_status = "接通" if b_reachable else "不可达"
+    b_status = "已禁用" if (team or {}).get("enabled") is False else "接通" if b_reachable else "不可达"
     try:
         from api.b_embed import embed_enabled, public_b_base, sidecar_enabled
         from api.b_proxy import team_intel_upstream
@@ -398,7 +419,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
                 "owner": "A 壳 · C 资料检索",
                 "peers": [
                     {"party": "A", "role": "资料库页 / 同步触发", "status": "接通"},
-                    {"party": "B", "role": "多源文档同步", "status": b_status if b_reachable else "不可达", "detail": "可选 team-sync"},
+                    {"party": "B", "role": "多源文档同步", "status": b_status, "detail": "可选 team-sync"},
                     {"party": "C", "role": "library / chunks / RAG 底座", "status": c_local},
                 ],
             },
@@ -498,7 +519,9 @@ def overview():
     team = _team_intel_snapshot()
     lib = {"documents": library["documents"], "chunks": library["chunks"],
            "source_categories": library["source_categories"]}
-    latency = countable_latency(records)
+    from api.visibility_metrics import latency_observation
+    root_latency = countable_latency(records)
+    latency, latency_basis = latency_observation((team or {}).get("coverage") or {}, root_latency)
     llm_ready = configured()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
@@ -506,6 +529,8 @@ def overview():
         "source_count": len(names),
         "sources": names,
         "latency_count": latency,
+        "latency_count_basis": latency_basis,
+        "root_latency_count": root_latency,
         "llm_ready": llm_ready,
         "monitor": monitor,
         "library": lib,
@@ -587,14 +612,19 @@ def _fetch_team_documents(q="", limit=48):
     Embed mode must read the in-process DB — never HTTP :8765 (that false-fails
     after demo-up seed when no sidecar is running).
 
-    Do not import ``collectors.intelligence`` before the embed branch: during an
-    in-process B monitor cycle, intelligence/ is briefly first on ``sys.path``
-    and that import raises ModuleNotFoundError (wrong ``collectors`` package).
+    The embed branch reads B repositories directly. Only the sidecar branch
+    imports the root HTTP adapter. B collectors run in a private process and
+    never replace A's ``collectors`` package.
     """
     import json
     import urllib.error
     import urllib.parse
     import urllib.request
+
+    from collectors.intelligence import team_intel_disabled
+    if team_intel_disabled():
+        return [], {"status": "skipped", "mode": "off", "enabled": False,
+                    "reachable": False, "total": None}
 
     from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
 
@@ -855,6 +885,24 @@ def item_detail(cve_id: str):
     return payload
 
 
+@app.get("/api/article-candidates/{cve_id}")
+def article_candidates(cve_id: str, top_k: int = 4):
+    from enrichment.article_candidates import CVE, report
+    if not CVE.fullmatch(cve_id):
+        raise HTTPException(status_code=422, detail="需要有效 CVE 编号")
+    if not 1 <= top_k <= 8:
+        raise HTTPException(status_code=422, detail="每类候选上限必须为 1 到 8")
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="请先收录这条漏洞")
+    try:
+        return report(record, top_k=top_k)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="本地论文与文章候选检索未完成，请稍后重试。") from exc
+
+
 @app.get("/api/guidance/{cve_id}")
 def related_guidance(cve_id: str):
     try:
@@ -944,11 +992,17 @@ def _team_reachable_probe():
     import urllib.error
     import urllib.request
 
+    from collectors.intelligence import team_intel_disabled
+    if team_intel_disabled():
+        return {"status": "skipped", "mode": "off", "enabled": False, "reachable": False,
+                "base_url": "", "public_base": "", "via_proxy": False}
+
     from api.b_embed import embed_enabled, inprocess_health, public_b_base, sidecar_enabled
-    from collectors.intelligence import team_base_url
 
     if embed_enabled():
         return inprocess_health()
+
+    from collectors.intelligence import team_base_url
 
     base = team_base_url()
     public = public_b_base()
@@ -986,7 +1040,12 @@ def monitor_status(light: int = 0):
     st = monitor_state()
     running = bool(st.get("running"))
     team = None
-    if not light and not running:
+    from collectors.intelligence import team_intel_disabled
+    if team_intel_disabled():
+        # Configuration is known even while probes are omitted; never label a
+        # deliberately disabled source as a reachable sidecar.
+        team = _team_reachable_probe()
+    elif not light and not running:
         team = _team_reachable_probe()
     elif not light and running:
         # Cheap stub so the UI keeps a team object without opening the intel DB.
@@ -1005,7 +1064,9 @@ def monitor_status(light: int = 0):
     return {
         "mode": "automatic",
         "interval_hours": st.get("interval_hours"),
+        "interval_minutes": st.get("interval_minutes"),
         "auto_on_start": st.get("auto_on_start"),
+        "auto_enabled": st.get("auto_enabled"),
         "running": running,
         "run_phase": st.get("run_phase") or "",
         "run_started_at": st.get("run_started_at") or "",
@@ -1013,6 +1074,8 @@ def monitor_status(light: int = 0):
         "next_run": next_run_iso(st),
         "last_count": st.get("last_count") or 0,
         "last_error": st.get("last_error") or "",
+        "last_status": st.get("last_status") or "",
+        "last_warnings": st.get("last_warnings") or [],
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
         "pipeline": pipeline,
@@ -1023,13 +1086,13 @@ def monitor_status(light: int = 0):
             "latency_sla": "需监测开始后新发布且可计 collected−published；间隔本身≠延迟达标",
             "realtime": False,
         },
-        "notice": "定时轮询（默认约 6 小时）+ 手动「立即刷新」；分阶段进度来自真实任务状态轮询，不是竞品式实时推流。",
+        "notice": "定时轮询（默认每轮结束后等待 15 分钟，可配置）+ 手动「立即刷新」；进度来自真实任务状态，轮询间隔不等于发布到采集延迟。",
     }
 
 
 @app.post("/api/monitor/b-cycle")
 def monitor_b_cycle():
-    """Run one B multi-source monitor cycle in-process (partial/timeout OK)."""
+    """Run one isolated B collector cycle (partial/timeout OK)."""
     from api.b_monitor import run_b_monitor_cycle
 
     return run_b_monitor_cycle()
@@ -1037,6 +1100,16 @@ def monitor_b_cycle():
 
 @app.post("/api/monitor/run")
 def monitor_run(body: MonitorRunBody):
+    from database.store import StoreBusy, collection_lock
+
+    try:
+        with collection_lock(timeout=0):
+            return _monitor_run(body)
+    except StoreBusy:
+        raise HTTPException(status_code=409, detail="已有采集或监测正在进行，请稍后重试") from None
+
+
+def _monitor_run(body: MonitorRunBody):
     """Manual refresh of the automatic monitor cycle (broad AI-security by default)."""
     keyword = (body.keyword or "").strip() or AUTO_MONITOR_KEYWORDS
     from api.b_embed import embed_enabled
@@ -1048,7 +1121,7 @@ def monitor_run(body: MonitorRunBody):
         set_tech_detail,
         update_stage,
     )
-    from automation.schedule import mark_run, mark_running
+    from automation.schedule import combine_monitor_outcome, library_outcome, mark_run, mark_running
 
     try:
         begin_pipeline()
@@ -1078,7 +1151,7 @@ def monitor_run(body: MonitorRunBody):
 
     team = _team_reachable_probe()
     warnings = []
-    if not team.get("reachable"):
+    if team.get("enabled") is not False and not team.get("reachable"):
         warnings.append("本机情报库暂不可用，本轮仍继续其它来源与资料刷新。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
@@ -1089,7 +1162,21 @@ def monitor_run(body: MonitorRunBody):
     library = None
     round_stats = {}
     try:
-        result = run_collect(keyword, on_phase=on_phase)
+        try:
+            result = run_collect(keyword, on_phase=on_phase)
+        except Exception as exc:
+            # Collection failure must not prevent independent document refresh,
+            # or turn a recoverable source outage into a blank dashboard.
+            error = "漏洞采集流程未完成（%s），已有资料保留。" % type(exc).__name__
+            try:
+                saved = knowledge_records()
+            except Exception:
+                saved = []
+            result = {"status": "failed", "error": error, "warnings": [error],
+                      "records": saved, "steps": [{"role": "监测", "action": "采集流程失败", "detail": error}],
+                      "round_stats": {"inserted": 0, "merged": 0, "kept": 0}}
+            update_stage("monitoring", status="error", did="采集流程未完成", note=error)
+            update_stage("persist", status="skip", did="保留已有资料", note="不追加新的入库操作")
         round_stats = result.get("round_stats") or {}
         tech = result.get("tech_detail") or ""
         if b_cycle and b_cycle.get("status") in {"success", "partial"}:
@@ -1133,7 +1220,9 @@ def monitor_run(body: MonitorRunBody):
             except Exception as exc:
                 library["public"] = {"status": "error", "error": type(exc).__name__}
                 warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
-            if not team.get("reachable"):
+            if team.get("enabled") is False:
+                library["team"] = {"status": "skipped", "enabled": False}
+            elif not team.get("reachable"):
                 library["team"] = {"status": "skipped", "error": "team unreachable"}
                 warnings.append("已跳过本机库资料同步。")
             else:
@@ -1146,14 +1235,11 @@ def monitor_run(body: MonitorRunBody):
                     library["team"] = {"status": "error", "error": type(exc).__name__}
                     warnings.append("本机库资料同步失败，CVE/公开源结果仍已刷新。")
             # Backward-compatible top-level fields for older UI.
-            library["status"] = (
-                (library.get("team") or {}).get("status")
-                or (library.get("public") or {}).get("status")
-                or "ok"
-            )
-            pub_st = (library.get("public") or {}).get("status") or "ok"
-            team_st = (library.get("team") or {}).get("status") or "ok"
-            lib_bad = pub_st in {"error", "busy"} and team_st in {"error", "busy", "skipped"}
+            pub_st = library_outcome(library.get("public"))
+            team_st = library_outcome(library.get("team"))
+            lib_bad = pub_st == "failed" and team_st in {"failed", "skipped"}
+            active_lib_states = {pub_st} if library["team"].get("enabled") is False else {pub_st, team_st}
+            library["status"] = "failed" if lib_bad else "partial" if active_lib_states != {"success"} else "success"
             update_stage(
                 "library_sync",
                 status="error" if lib_bad else "ok",
@@ -1174,10 +1260,14 @@ def monitor_run(body: MonitorRunBody):
                 impact="本轮以 CVE 监测结果为主",
                 phase="资料同步",
             )
+        libraries = (("公开资料同步", library.get("public")), ("本机库资料同步", library.get("team"))) if library else ()
+        outcome = combine_monitor_outcome(result, b_cycle=b_cycle, libraries=libraries)
+        if outcome["status"] == "failed":
+            update_stage("monitoring", status="error", note=outcome["error"])
+        warnings = list(dict.fromkeys(warnings + outcome["warnings"]))
         inserted = int(round_stats.get("inserted") or 0)
-        mark_run(count=inserted, keyword=keyword)
         finish_pipeline(
-            ok=True,
+            ok=outcome["status"] != "failed",
             metrics={
                 "hit": round_stats.get("hit"),
                 "kept": round_stats.get("kept"),
@@ -1187,6 +1277,9 @@ def monitor_run(body: MonitorRunBody):
             },
             tech_detail=(result.get("tech_detail") or tech or "")[:500],
         )
+        # Persist the semantic outcome after the generic pipeline finalizer.
+        # In particular, partial/failed cannot be overwritten by a done state.
+        mark_run(count=inserted, keyword=keyword, **outcome)
     except HTTPException:
         try:
             finish_pipeline(ok=False, summary="监测未完成")
@@ -1222,6 +1315,8 @@ def monitor_run(body: MonitorRunBody):
         return {"status": "未跑", "detail": ""}
 
     nvd = _step_status("NVD")
+    if (result.get("source_outcomes") or {}).get("nvd") == "skipped":
+        nvd["status"] = "跳过"
     osv = _step_status("OSV")
     b_step = _step_status("本机库")
     if b_step["status"] == "未跑":
@@ -1230,7 +1325,9 @@ def monitor_run(body: MonitorRunBody):
         b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
         b_step = _step_status("团队情报")
-    if not team.get("reachable"):
+    if team.get("enabled") is False:
+        b_src = {"status": "跳过", "detail": "本机库已按配置禁用"}
+    elif not team.get("reachable"):
         b_src = {
             "status": "不可达",
             "detail": team.get("error") or team.get("base_url") or "embed/db",
@@ -1246,8 +1343,10 @@ def monitor_run(body: MonitorRunBody):
         c_sync = {"status": "未请求", "detail": "sync_library=false"}
     elif isinstance(library, dict) and library.get("status") == "skipped":
         c_sync = {"status": "跳过", "detail": library.get("error") or "team unreachable"}
-    elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
+    elif isinstance(library, dict) and library.get("status") in {"error", "busy", "failed"}:
         c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
+    elif isinstance(library, dict) and library.get("status") == "partial":
+        c_sync = {"status": "部分", "detail": "已保留成功同步资料，未完成来源可重试"}
     else:
         c_sync = {"status": "成功", "detail": "已尽力同步公开/本机库资料到资料库"}
 
@@ -1283,6 +1382,9 @@ def monitor_run(body: MonitorRunBody):
         "kb_total": len(result["records"]),
     }
     return {
+        "status": outcome["status"],
+        "error": outcome["error"],
+        "source_outcomes": result.get("source_outcomes") or {},
         "mode": "auto",
         "keyword": keyword,
         "count": int(round_stats.get("inserted") or 0),
@@ -1302,12 +1404,23 @@ def monitor_run(body: MonitorRunBody):
 
 @app.post("/api/collect")
 def collect(body: CollectBody):
+    from database.store import StoreBusy, collection_lock
+
     try:
-        result = run_collect(body.keyword.strip() or AUTO_MONITOR_KEYWORDS)
+        with collection_lock(timeout=0):
+            result = run_collect(body.keyword.strip() or AUTO_MONITOR_KEYWORDS)
+    except StoreBusy:
+        raise HTTPException(status_code=409, detail="已有采集或监测正在进行，请稍后重试") from None
     except Exception as exc:
         raise HTTPException(status_code=502, detail="监测没有完成：%s" % exc)
     return {
         "count": len(result["records"]),
+        "status": result.get("status", "success"),
+        "error": result.get("error", ""),
+        "warnings": result.get("warnings", []),
+        "source_outcomes": result.get("source_outcomes", {}),
+        "round_stats": result.get("round_stats", {}),
+        "notice": "count 兼容旧接口表示库内记录数；本轮新增请读取 round_stats.inserted。",
         "steps": result["steps"],
         "items": [_summary(record) for record in result["records"][:10]],
     }
@@ -1319,7 +1432,7 @@ def enrich():
         result = run_enrich()
     except Exception as exc:
         raise HTTPException(status_code=502, detail="富化没有完成：%s" % exc)
-    return {"steps": result["steps"], "items": len(result["records"]), "documents": result["documents"]}
+    return {"steps": result["steps"], "items": len(result["records"]), "documents": result["documents"], "feed": result.get("feed", {})}
 
 
 @app.post("/api/documents")
@@ -1389,7 +1502,11 @@ def library_full_text(document_id: str):
 def library_ask(body: LibraryAskBody):
     from agents.library_qa import run
     try:
-        return run(body.question, document_ids=body.document_ids, document_type=body.document_type, use_model=body.use_model)
+        options = {"document_ids": body.document_ids, "document_type": body.document_type,
+                   "use_model": body.use_model}
+        if body.mode == "reasoning":
+            options["mode"] = body.mode
+        return run(body.question, **options)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

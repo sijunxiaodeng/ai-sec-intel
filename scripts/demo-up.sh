@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-click unified demo: ONE process, public entry ONLY http://127.0.0.1:8023
+# One-click unified demo: ONE public entry http://127.0.0.1:8023
 # Default TEAM_INTEL_MODE=embed — B query API runs in-process (no :8765 required).
 # Legacy: TEAM_INTEL_MODE=sidecar DEMO_B_SIDECAR=1 starts a separate B on :8765.
 # Prefer Docker Compose; fall back to local single-process if daemon unavailable.
@@ -37,7 +37,7 @@ start_compose() {
   echo "$health" | grep -q '"database_available": *true' \
     || die "B health (via 8023) reports database_available != true: $health"
   printf '%s\n' compose >"$DEMO_DIR/mode"
-  log "URLs (single process / single entry):"
+  log "URLs (single public entry; collection uses an isolated worker):"
   log "  Open only:     $MAIN_URL"
   log "  B health:      $MAIN_URL/api/intelligence/health"
   log "  B team:        $MAIN_URL/api/intelligence/team?q=${DEMO_KEYWORD}"
@@ -96,7 +96,7 @@ start_local_sidecar() {
 }
 
 start_local_embed() {
-  log "Docker unavailable — starting SINGLE local process (embed B, no :8765)"
+  log "Docker unavailable — starting local embed queries with isolated collection (no :8765)"
   seed_local_db
   # Stop leftover sidecar if any
   if [[ -f "$DEMO_DIR/b.pid" ]] && kill -0 "$(cat "$DEMO_DIR/b.pid")" 2>/dev/null; then
@@ -145,7 +145,7 @@ start_local() {
   if [[ "${TEAM_INTEL_MODE:-embed}" == "sidecar" ]]; then
     log "  (legacy B upstream localhost:$B_PORT — do not open in browser)"
   else
-    log "  (no separate B process; :8765 not used)"
+    log "  (B queries embedded; collection worker separate; :8765 not used)"
   fi
   log "Next: multi-source collect + library team-sync"
   "$SCRIPT_DIR/demo-collect.sh" || log "demo-collect reported issues (partial OK)"

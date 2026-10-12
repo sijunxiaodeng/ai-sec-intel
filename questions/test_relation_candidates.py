@@ -11,6 +11,7 @@ from enrichment.relations import SUPPLY_REGISTRY, build_graph
 from rag.evidence import _connection
 from rag.library import detail, ingest_document
 from questions.test_reference_text import response
+from questions.pdf_fixture import text_pdf
 
 
 class CandidatesTest(unittest.TestCase):
@@ -23,10 +24,12 @@ class CandidatesTest(unittest.TestCase):
         first = ingest_document(self.hf, self.db, lambda u: response(u, self.html))
         self.hf_id = first["document_id"]
         nist = {"url": registry["sources"]["nist"]["url"], "document_type": "standard", "source_name": "Synthetic NIST", "source_id": "fixture"}
-        pdf = {"title": "Synthetic framework", "parts": [("PDF page 16", "GAI value chains include third-party components such as pre-trained models in this synthetic fixture. Evaluate supplier risk and monitor third-party model provenance. " * 8)], "content_scope": "full_text_pdf", "version": "NIST AI 600-1 (2024)", "reference_kind": "voluntary_risk_framework"}
-        with patch("rag.library.pdf_document", return_value=pdf):
-            second = ingest_document(nist, self.db, lambda u: response(u, b"%PDF-synthetic", "application/pdf"))
+        pdf_body = text_pdf(["Artificial Intelligence Risk Management Framework - synthetic fixture only\n" +
+                            "GAI value chains include third-party components such as pre-trained models in this synthetic fixture. Evaluate supplier risk and monitor third-party model provenance. " * 8])
+        second = ingest_document(nist, self.db, lambda u: response(u, pdf_body, "application/pdf"))
+        self.assertEqual(second["status"], "ok", second)
         self.nist_id = second["document_id"]
+        self.assertEqual(detail(self.nist_id, self.db)["integrity_status"], "ok")
         rows = {"hf": detail(self.hf_id, self.db)["evidence"][0], "nist": detail(self.nist_id, self.db)["evidence"][0]}
         for fact in registry["facts"]:
             row = rows[fact["source"]]
