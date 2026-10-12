@@ -1200,9 +1200,10 @@ def asset_observation_impact(cve_id: str):
 
 
 # Built-in AI-security scope for one-click auto monitor (comma-separated).
+# NVD uses concrete product terms (not only the leading llm); OSV expands packages.
 AUTO_MONITOR_KEYWORDS = (
     "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama,"
-    "adversarial,jailbreak,prompt injection"
+    "open-webui,open webui,adversarial,jailbreak,prompt injection"
 )
 
 

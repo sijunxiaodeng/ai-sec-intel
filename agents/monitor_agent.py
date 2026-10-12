@@ -1,16 +1,17 @@
 """监测智能体：NVD + OSV + 多源 CVE（同属一次监测刷新）。
 
-默认主关键词为 llm（不再只盯 ollama）。
-逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-多源情报对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
+默认宽词为 llm；OSV 将宽词展开为已登记 AI 包集合。
+NVD 不再永久只查首词 llm：对宽词/逗号串使用 AI 组件产品词
+（open webui、vllm、ollama…）多词查询并按 CVE 去重，轮次有上限以防限流。
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
 import os
+from datetime import datetime, timezone
 
 from collectors.intelligence import IntelligenceCollector, team_base_url, team_intel_disabled
 from collectors.nvd import NVDCollector
-from collectors.osv import OSVCollector
+from collectors.osv import OSVCollector, BROAD_KEYWORDS
 
 DEFAULT_PRIMARY = "llm"
 DEFAULT_TEAM_KEYWORDS = (
@@ -22,9 +23,30 @@ DEFAULT_TEAM_KEYWORDS = (
     "huggingface",
     "openai",
     "ollama",
+    "open-webui",
     "adversarial",
     "jailbreak",
 )
+
+# NVD free-text product terms (not OSV package ids). Prefer phrases NVD indexes.
+NVD_PRODUCT_KEYWORDS = (
+    "open webui",
+    "vllm",
+    "ollama",
+    "transformers",
+    "langchain",
+    "openai",
+    "huggingface",
+    "llama-index",
+)
+
+
+def _nvd_keyword_limit():
+    try:
+        raw = int(os.environ.get("NVD_KEYWORD_LIMIT", "5") or "5")
+    except ValueError:
+        raw = 5
+    return max(1, min(8, raw))
 
 
 def _parse_keywords(keyword):
@@ -38,6 +60,58 @@ def _parse_keywords(keyword):
     # Multi-word input expands team search; single word still searches that word on team.
     team_keys = parts if len(parts) > 1 else parts
     return [primary], team_keys
+
+
+def _is_broad(token):
+    return (token or "").strip().lower() in BROAD_KEYWORDS
+
+
+def _nvd_keywords(parts):
+    """Pick NVD free-text terms for this round (capped, rotated).
+
+    Broad-only / empty → AI product stack.
+    Comma list → concrete tokens first (drop abstract llm/ai/…), else stack.
+    Single concrete token → that token only.
+    """
+    limit = _nvd_keyword_limit()
+    cleaned = [p.strip() for p in (parts or []) if p and p.strip()]
+    if not cleaned or (len(cleaned) == 1 and _is_broad(cleaned[0])):
+        candidates = list(NVD_PRODUCT_KEYWORDS)
+    elif len(cleaned) == 1:
+        candidates = cleaned
+    else:
+        concrete = [p for p in cleaned if not _is_broad(p)]
+        candidates = concrete if concrete else list(NVD_PRODUCT_KEYWORDS)
+    # De-dupe case-insensitively, preserve order.
+    seen, ordered = set(), []
+    for item in candidates:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(item)
+    if len(ordered) <= limit:
+        return ordered
+    # Pin highest-priority products (open webui first), rotate the remainder.
+    pinned_n = min(2, limit)
+    pinned = ordered[:pinned_n]
+    rest = ordered[pinned_n:]
+    now = datetime.now(timezone.utc)
+    start = (now.timetuple().tm_yday + now.hour) % len(rest) if rest else 0
+    rotated = (rest[start:] + rest[:start]) if rest else []
+    return pinned + rotated[: max(0, limit - len(pinned))]
+
+
+class _CursorGroup(object):
+    """Commit several collectors after a successful upsert (NVD multi-keyword)."""
+
+    def __init__(self, collectors):
+        self._collectors = [c for c in (collectors or []) if c is not None]
+
+    def commit_cursor(self):
+        for coll in self._collectors:
+            if hasattr(coll, "commit_cursor"):
+                coll.commit_cursor()
 
 
 def _step(action, detail, *, did="", got="", produced="", impact="", note="", ok=True):
@@ -73,11 +147,47 @@ def _merge_by_cve(batches):
     return order
 
 
+def _sum_stats(rows):
+    out = {
+        "fetched": 0,
+        "kept": 0,
+        "external_fetches": 0,
+        "keywords": [],
+        "keyword_ok": 0,
+        "keyword_fail": 0,
+    }
+    watermarks = []
+    for row in rows:
+        stats = row.get("stats") or {}
+        out["fetched"] += int(stats.get("fetched") or 0)
+        out["kept"] += int(stats.get("kept") or 0)
+        out["external_fetches"] += int(stats.get("external_fetches") or 0)
+        if stats.get("watermark_before"):
+            watermarks.append(stats["watermark_before"])
+        if row.get("ok"):
+            out["keyword_ok"] += 1
+        else:
+            out["keyword_fail"] += 1
+        out["keywords"].append(row.get("keyword") or "")
+    if watermarks:
+        out["watermark_before"] = max(watermarks)
+    if rows:
+        # Surfaces first window bounds for the pipeline note (best-effort).
+        first = (rows[0].get("stats") or {})
+        out["window_start_at"] = first.get("window_start_at") or ""
+        out["window_end_at"] = first.get("window_end_at") or ""
+    return out
+
+
 def run(keyword="llm"):
     primary_list, team_keys = _parse_keywords(keyword)
     primary = primary_list[0]
     # Cap team multi-pass (local embed is cheap; still bound work).
     team_keys = team_keys[:10]
+    # NVD uses product terms (or concrete tokens from the comma list), not only llm.
+    text = (keyword or "").strip()
+    parts = [p.strip() for p in text.replace(";", ",").split(",") if p.strip()] if text else []
+    nvd_keys = _nvd_keywords(parts if parts else [primary])
 
     # NVD 外网采集归 intelligence 模块；壳侧不重复直采。
     # 仅当多源情报关闭，或显式 ROOT_NVD_ENABLED=1 时走 legacy facade。
@@ -87,19 +197,40 @@ def run(keyword="llm"):
         setting.strip().lower() not in {"0", "false", "no", "off"} if setting is not None else
         team_disabled
     )
-    nvd = NVDCollector(keyword=primary) if root_nvd_enabled else None
-    try:
-        nvd_items = nvd.collect() if nvd is not None else []
-        nvd_stats = dict(nvd.last_stats or {}) if nvd is not None else {
-            "fetched": 0, "kept": 0, "external_fetches": 0, "disabled_duplicate": True,
+
+    nvd_collectors = []
+    nvd_batches = []
+    nvd_rows = []
+    if root_nvd_enabled:
+        for kw in nvd_keys:
+            coll = NVDCollector(keyword=kw)
+            try:
+                items = coll.collect()
+                nvd_batches.append(items)
+                nvd_collectors.append(coll)
+                nvd_rows.append({"keyword": kw, "ok": True, "stats": dict(coll.last_stats or {}), "err": ""})
+            except Exception as exc:
+                nvd_rows.append({
+                    "keyword": kw, "ok": False,
+                    "stats": {"fetched": 0, "kept": 0, "external_fetches": 0},
+                    "err": str(exc),
+                })
+        nvd_items = _merge_by_cve(nvd_batches)
+        nvd_stats = _sum_stats(nvd_rows)
+        nvd_stats["kept"] = len(nvd_items)
+        nvd_ok = bool(nvd_stats["keyword_ok"])
+        nvd_err = "；".join(
+            "%s: %s" % (row["keyword"], row["err"][:120])
+            for row in nvd_rows if not row["ok"] and row.get("err")
+        )
+    else:
+        nvd_items = []
+        nvd_stats = {
+            "fetched": 0, "kept": 0, "external_fetches": 0,
+            "disabled_duplicate": True, "keywords": [],
         }
         nvd_ok = True
         nvd_err = ""
-    except Exception as exc:
-        nvd_items = []
-        nvd_stats = {"fetched": 0, "kept": 0, "external_fetches": 0}
-        nvd_ok = False
-        nvd_err = str(exc)
 
     if nvd_stats.get("disabled_duplicate"):
         nvd_step = _step(
@@ -110,15 +241,18 @@ def run(keyword="llm"):
             note="关闭多源情报可设 TEAM_INTEL_MODE=off；临时回退可设 ROOT_NVD_ENABLED=1",
         )
     elif nvd_ok:
+        labels = "、".join(nvd_stats.get("keywords") or nvd_keys) or primary
+        fail_note = ""
+        if nvd_stats.get("keyword_fail"):
+            fail_note = "；%d 个词失败已跳过" % nvd_stats["keyword_fail"]
         wm = nvd_stats.get("watermark_before") or ""
         nvd_step = _step(
             "调用 NVD",
-            "关键词 %s；得到 %d 条" % (primary, len(nvd_items)),
-            did="按关键词完整分页查询 NVD：%s 至 %s"
-            % (nvd_stats.get("window_start_at") or "历史起点",
-               nvd_stats.get("window_end_at") or "本轮固定边界"),
-            got="取回 %d 条候选" % nvd_stats.get("fetched", len(nvd_items)),
-            produced="保留 %d 条进入整理" % len(nvd_items),
+            "关键词 %s；查询返回 %d，去重后保留 %d%s"
+            % (labels, nvd_stats.get("fetched", 0), len(nvd_items), fail_note),
+            did="按 AI 组件产品词分词查询 NVD（每轮最多 %d 个，轮换覆盖）" % _nvd_keyword_limit(),
+            got="取回 %d 条候选（多词合计）" % nvd_stats.get("fetched", len(nvd_items)),
+            produced="去重后保留 %d 条进入整理" % len(nvd_items),
             impact="将与 OSV / 多源情报结果合并后入库",
             note=("上次位点 %s" % wm) if wm else "首次或无游标：使用默认近窗",
             ok=True,
@@ -127,7 +261,7 @@ def run(keyword="llm"):
         nvd_step = _step(
             "调用 NVD 失败",
             "已跳过，其他来源继续。%s" % nvd_err,
-            did="尝试访问 NVD API",
+            did="尝试按产品词访问 NVD API",
             got="失败",
             produced="0 条",
             impact="本轮无 NVD 增量",
@@ -135,6 +269,7 @@ def run(keyword="llm"):
             ok=False,
         )
 
+    # OSV: broad primary still expands PACKAGES (incl. open-webui).
     osv = OSVCollector(keyword=primary)
     try:
         osv_items = osv.collect()
@@ -151,7 +286,7 @@ def run(keyword="llm"):
         wm = osv_stats.get("watermark_before") or ""
         osv_step = _step(
             "调用 OSV",
-            "关键词 %s；查询返回 %d，水位后保留 %d"
+            "宽词/首词 %s → AI 组件包；查询返回 %d，水位后保留 %d"
             % (primary, osv_stats.get("fetched", 0), osv_stats.get("kept", len(osv_items))),
             did="按已登记 AI 组件包批量查询 OSV API",
             got="外部请求 %d 次包查询，查询返回 %d 条原始记录（含水位前历史）"
@@ -253,11 +388,13 @@ def run(keyword="llm"):
         + int(team_fetches or 0)
     )
 
+    nvd_handle = _CursorGroup(nvd_collectors) if nvd_collectors else None
+
     return {
         "items": nvd_items + osv_items + team_items,
         "steps": [nvd_step, osv_step, team_step],
-        "keywords": {"primary": primary, "team": team_keys},
-        "collectors": {"nvd": nvd if nvd_ok else None, "osv": osv if osv_ok else None},
+        "keywords": {"primary": primary, "nvd": nvd_keys, "team": team_keys},
+        "collectors": {"nvd": nvd_handle if nvd_ok else None, "osv": osv if osv_ok else None},
         "stats": {
             "hit": hit,
             "kept": kept,

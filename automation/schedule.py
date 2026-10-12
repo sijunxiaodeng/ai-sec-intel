@@ -34,7 +34,8 @@ AUTO_ON_START = os.environ.get("AUTO_MONITOR_ON_START", "1").strip().lower() not
 # Broad AI-security scope (comma-separated); matches api AUTO_MONITOR_KEYWORDS.
 DEFAULT_KEYWORDS = os.environ.get(
     "AUTO_MONITOR_KEYWORDS",
-    "llm,vllm,langchain,huggingface,openai,ollama,adversarial,jailbreak,prompt injection",
+    "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama,"
+    "open-webui,open webui,adversarial,jailbreak,prompt injection",
 )
 _STARTED = False
 _RUN_LOCK = threading.Lock()
