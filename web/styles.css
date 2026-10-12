@@ -277,11 +277,17 @@ button[aria-busy="true"] { pointer-events: none; }
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   font-size: 12px;
   color: var(--muted);
 }
 .pipeline-metrics strong { color: var(--ink); font-weight: 700; }
+.pipeline-metrics-legend {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 52rem;
+}
 .pipeline-stages {
   list-style: none;
   margin: 0;

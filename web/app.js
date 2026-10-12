@@ -473,12 +473,14 @@ function renderCollectPipeline(pipeline, opts) {
   var box = $("collect-pipeline");
   var stagesEl = $("pipeline-stages");
   var metricsEl = $("pipeline-metrics");
+  var legendEl = $("pipeline-metrics-legend");
   var summaryEl = $("pipeline-summary");
   var techEl = $("pipeline-tech");
   var techBody = $("pipeline-tech-body");
   if (!box || !stagesEl) return;
   if (!pipeline || !(pipeline.stages || []).length) {
     if (!opts.forceShow) box.hidden = true;
+    if (legendEl) legendEl.hidden = true;
     return;
   }
   box.hidden = false;
@@ -519,6 +521,9 @@ function renderCollectPipeline(pipeline, opts) {
     }
     metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
     metricsEl.hidden = false;
+  }
+  if (legendEl) {
+    legendEl.hidden = !!(countsPending || status === "idle");
   }
   clear(stagesEl);
   // Coarse product stages only — no per-source 抓取·X rows.

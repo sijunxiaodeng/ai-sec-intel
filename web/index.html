@@ -160,6 +160,9 @@
             <p class="hint" id="pipeline-summary">点「立即刷新」后显示整体进度与命中/新增/合并（多方面来源一并跑，不按来源拆步）。</p>
           </header>
           <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
+          <p class="hint pipeline-metrics-legend" id="pipeline-metrics-legend" hidden>
+            漏斗：命中＝本轮各源查询匹配总数（可很大）→ 游标/去重后保留送入库 → <strong>新增</strong>＝库里没有的新 CVE 行；<strong>合并</strong>＝同 CVE 已在库、只更新字段（不是没搜到）。新增少通常说明库里已有大部分命中。
+          </p>
           <ol class="pipeline-stages" id="pipeline-stages"></ol>
           <details class="pipeline-tech" id="pipeline-tech" hidden>
             <summary>技术细节（可选）</summary>
@@ -464,6 +467,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261012-zerohits1"></script>
+  <script src="/assets/app.js?v=20261012-funnel1"></script>
 </body>
 </html>
