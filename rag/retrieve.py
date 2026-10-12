@@ -1,6 +1,7 @@
 """保持整条情报返回格式，附加片段；样例库独立于监测库。"""
 
 import copy
+from pathlib import Path
 from enrichment.guidance import library_for, report as guidance_report
 from database.store import load_kb
 from rag.answer import TOPIC_WORDS
@@ -41,10 +42,21 @@ def _empty_guidance(cve_id, detail=""):
     }
 
 
-def _attach_guidance(record, db_path, library_db=None):
+def _attach_guidance(record, db_path, library_db=None, poc_db=None):
     """Attach related_guidance; never fail the whole item detail on extract deps."""
     library = library_db if library_db is not None else library_for(db_path)
     raw = record["item"].setdefault("raw_data", {})
+    # Read archived code provenance only; item views and QA never fetch/execute it.
+    from enrichment.poc_sources import report as poc_report
+    try:
+        if poc_db is not None or Path(db_path).resolve() == DEFAULT_DB.resolve():
+            raw["poc_code"] = poc_report(record["item"]["cve_id"], db_path=poc_db)
+        else:
+            raw["poc_code"] = {"cve_id": record["item"]["cve_id"], "status": "unconfigured",
+                               "detail": "独立证据库未指定代码来源库，不混入生产 PoC 记录", "items": [], "evidence": [], "facts": []}
+    except (ValueError, OSError):
+        raw["poc_code"] = {"cve_id": record["item"]["cve_id"], "status": "invalid_evidence",
+                           "detail": "代码存档完整性未通过，未使用该证据", "items": [], "evidence": [], "facts": []}
     if library is None:
         return record
     try:
@@ -65,9 +77,9 @@ def _attach_guidance(record, db_path, library_db=None):
     return record
 
 
-def get_record(cve_id, db_path=DEFAULT_DB, *, library_db=None):
+def get_record(cve_id, db_path=DEFAULT_DB, *, library_db=None, poc_db=None):
     record = next((row for row in knowledge_records(db_path) if row["item"]["cve_id"].upper() == cve_id.upper()), None)
-    return _attach_guidance(record, db_path, library_db) if record else None
+    return _attach_guidance(record, db_path, library_db, poc_db) if record else None
 
 
 def _blob(record):
@@ -75,7 +87,7 @@ def _blob(record):
     return " ".join(str(item.get(key) or "") for key in ("cve_id", "title", "description", "product", "affected", "source"))
 
 
-def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB, library_db=None):
+def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB, library_db=None, poc_db=None):
     if top_k <= 0:
         return []
     records = knowledge_records(db_path)
@@ -129,4 +141,4 @@ def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB, library_db=None):
             record["retrieval_notice"] = "；".join(sorted(notices))
             ranked.append((score, record))
     ranked.sort(key=lambda pair: (-pair[0], pair[1]["item"]["cve_id"]))
-    return [_attach_guidance(row, db_path, library_db) for _, row in ranked[:top_k]]
+    return [_attach_guidance(row, db_path, library_db, poc_db) for _, row in ranked[:top_k]]

@@ -111,6 +111,11 @@ class AssetObservationPreviewBody(AssetObservationBody):
     cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
 
 
+class PoCCodeCollectBody(BaseModel):
+    class Config:
+        extra = "forbid"
+
+
 def _summary(record):
     item = record.get("item") or {}
     cvss = record.get("cvss") or {}
@@ -471,7 +476,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         {"id": "enrichment_accuracy", "metric": "富化准确率", "level": "空", "note": "independent_enrichment_accuracy=null"},
         {"id": "qa_quality", "metric": "问答质量", "level": "部分（开发验证）" if docs_n >= 1 else "缺口", "note": "独立准确率 null；勿把规则测试当竞赛分"},
         {"id": "internet_assets", "metric": "互联网资产定位", "level": "部分（导入流程）", "note": "登记/平台观测范围筛选；真实互联网发现待验收"},
-        {"id": "poc_verify", "metric": "PoC 可用验证", "level": "未验收", "note": "候选未正式验收"},
+        {"id": "poc_verify", "metric": "PoC 可用验证", "level": "部分（静态审查）", "note": "固定代码来源及开发审查已实现；运行可用性未验收"},
     ]
 
     integration = [
@@ -896,7 +901,43 @@ def item_detail(cve_id: str):
     except Exception as exc:
         payload["assessment"] = {"status": "error", "detail": "自动评估暂不可用：%s" % str(exc)[:160]}
     payload["related_guidance"] = (record["item"].get("raw_data") or {}).get("related_guidance")
+    payload["poc_code"] = (record["item"].get("raw_data") or {}).get("poc_code")
     return payload
+
+
+def _poc_record(cve_id):
+    from rag.evidence import CVE
+    if not CVE.fullmatch(cve_id):
+        raise HTTPException(status_code=422, detail="需要有效 CVE 编号")
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="请先收录这条漏洞")
+    return record
+
+
+@app.get("/api/poc-code/{cve_id}")
+def poc_code_report(cve_id: str):
+    from enrichment.poc_sources import report
+    _poc_record(cve_id)
+    try:
+        return report(cve_id.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="代码存档暂不可读取，请核对本机存储") from exc
+
+
+@app.post("/api/poc-code/{cve_id}/collect")
+def poc_code_collect(cve_id: str, body: PoCCodeCollectBody = PoCCodeCollectBody()):
+    import sqlite3
+    from enrichment.poc_sources import collect
+    _poc_record(cve_id)
+    try:
+        return collect(cve_id.upper())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (OSError, sqlite3.Error) as exc:
+        raise HTTPException(status_code=503, detail="代码存档保存未完成，请核对本机存储；未确认成功") from exc
 
 
 @app.get("/api/article-candidates/{cve_id}")
