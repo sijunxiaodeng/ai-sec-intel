@@ -816,7 +816,7 @@ def monitor_feed(q: str = "", kind: str = "all"):
         "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
         "mix_note": (
             "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
-            "类型/分类与来源分两维看；聚合库=监测抓取的一路，不是第二套监测/端口。"
+            "类型/分类与来源分两维看；本机库=监测读本地情报，不是第二套监测/端口。"
             if doc_items else
             "当前几乎只有漏洞条目——请先监测刷新或同步资料库，资料类才会进入监测流。"
         ),
@@ -1079,7 +1079,7 @@ def monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if not team.get("reachable"):
-        warnings.append("本机聚合情报暂不可用，本轮仍继续其它来源与资料刷新。")
+        warnings.append("本机情报库暂不可用，本轮仍继续其它来源与资料刷新。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
             "部分来源刷新%s（%s）；监测仍继续。"
@@ -1094,7 +1094,7 @@ def monitor_run(body: MonitorRunBody):
         tech = result.get("tech_detail") or ""
         if b_cycle and b_cycle.get("status") in {"success", "partial"}:
             tech = (
-                "本轮曾刷新本机聚合情报（%s，%s/%s）；%s"
+                "本轮曾刷新本机情报库（%s，%s/%s）；%s"
                 % (
                     b_cycle.get("status"),
                     b_cycle.get("success_sources"),
@@ -1119,7 +1119,7 @@ def monitor_run(body: MonitorRunBody):
             update_stage(
                 "library_sync",
                 status="running",
-                did="同步公开资料与聚合摘要",
+                did="同步公开资料与本机库摘要",
                 phase="资料同步",
             )
             # Public library sync brings research / vendor / paper into the monitor
@@ -1135,7 +1135,7 @@ def monitor_run(body: MonitorRunBody):
                 warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
             if not team.get("reachable"):
                 library["team"] = {"status": "skipped", "error": "team unreachable"}
-                warnings.append("已跳过聚合库资料同步。")
+                warnings.append("已跳过本机库资料同步。")
             else:
                 try:
                     from rag.library import sync_team
@@ -1144,7 +1144,7 @@ def monitor_run(body: MonitorRunBody):
                     library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
                     library["team"] = {"status": "error", "error": type(exc).__name__}
-                    warnings.append("聚合库资料同步失败，CVE/公开源结果仍已刷新。")
+                    warnings.append("本机库资料同步失败，CVE/公开源结果仍已刷新。")
             # Backward-compatible top-level fields for older UI.
             library["status"] = (
                 (library.get("team") or {}).get("status")
@@ -1158,7 +1158,7 @@ def monitor_run(body: MonitorRunBody):
                 "library_sync",
                 status="error" if lib_bad else "ok",
                 did="同步资料到资料库",
-                got="公开 %s；聚合摘要 %s" % (pub_st, team_st),
+                got="公开 %s；本机库摘要 %s" % (pub_st, team_st),
                 produced="资料可供监测流展示",
                 impact="无 CVE 资料进入情报流",
                 note="失败不回滚已入库 CVE",
@@ -1202,12 +1202,12 @@ def monitor_run(body: MonitorRunBody):
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     steps = result.get("steps") or []
     team_failed = any(
-        ("聚合库" in (s.get("action") or "") or "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
+        ("本机库" in (s.get("action") or "") or "聚合库" in (s.get("action") or "") or "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
         and "失败" in (s.get("action") or "")
         for s in steps
     )
-    if team_failed and "聚合库" not in " ".join(warnings):
-        warnings.append("聚合库本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    if team_failed and "本机库" not in " ".join(warnings) and "聚合库" not in " ".join(warnings):
+        warnings.append("本机库本轮失败或跳过；NVD/OSV 与本地库仍继续。")
 
     def _step_status(name):
         for step in steps:
@@ -1223,7 +1223,9 @@ def monitor_run(body: MonitorRunBody):
 
     nvd = _step_status("NVD")
     osv = _step_status("OSV")
-    b_step = _step_status("聚合库")
+    b_step = _step_status("本机库")
+    if b_step["status"] == "未跑":
+        b_step = _step_status("聚合库")
     if b_step["status"] == "未跑":
         b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
@@ -1247,14 +1249,14 @@ def monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") in {"error", "busy"}:
         c_sync = {"status": "失败", "detail": library.get("error") or library.get("status")}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步公开/聚合资料到资料库"}
+        c_sync = {"status": "成功", "detail": "已尽力同步公开/本机库资料到资料库"}
 
     if b_cycle is None:
-        b_mon = {"status": "未请求", "detail": "本轮未另刷聚合库"}
+        b_mon = {"status": "未请求", "detail": "本轮未另刷本机库"}
     elif b_cycle.get("status") in {"success", "partial"}:
         b_mon = {
             "status": "成功" if b_cycle.get("status") == "success" else "部分",
-            "detail": "聚合库刷新 %s/%s 路成功"
+            "detail": "本机库刷新 %s/%s 路成功"
             % (b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
         }
     elif b_cycle.get("status") == "skipped":
@@ -1262,7 +1264,7 @@ def monitor_run(body: MonitorRunBody):
     elif b_cycle.get("status") == "timeout":
         b_mon = {"status": "超时", "detail": b_cycle.get("error") or "overall timeout"}
     elif b_cycle.get("status") == "disabled":
-        b_mon = {"status": "禁用", "detail": "聚合库刷新已关闭"}
+        b_mon = {"status": "禁用", "detail": "本机库刷新已关闭"}
     else:
         b_mon = {"status": "失败", "detail": b_cycle.get("error") or b_cycle.get("status")}
 

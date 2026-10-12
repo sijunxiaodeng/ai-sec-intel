@@ -1,8 +1,8 @@
-"""监测智能体：NVD + OSV + 聚合库 CVE（同属情报监测一条流水线）。
+"""监测智能体：NVD + OSV + 本机库 CVE（同属一次监测刷新）。
 
 默认主关键词为 llm（不再只盯 ollama）。
 逗号分隔多词时：NVD/OSV 只用第一个词（避免外网限流拖死），
-聚合库对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
+本机库对每个词各查一次并按 cve_id 去重，以覆盖更广的 AI 安全集合。
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
@@ -101,7 +101,7 @@ def run(keyword="llm"):
             ),
             got="取回 %d 条候选" % nvd_stats.get("fetched", len(nvd_items)),
             produced="保留 %d 条进入整理" % len(nvd_items),
-            impact="将与 OSV / 聚合库结果合并后入库",
+            impact="将与 OSV / 本机库结果合并后入库",
             note=("上次位点 %s" % wm) if wm else "首次或无游标：使用默认近窗",
             ok=True,
         )
@@ -187,9 +187,9 @@ def run(keyword="llm"):
 
     if team_err and not team_items:
         team_step = _step(
-            "调用 聚合库 失败",
+            "调用 本机库 失败",
             "已跳过，其他来源继续。%s" % team_err,
-            did="读取本机聚合库中的 CVE",
+            did="读取本机情报库中的 CVE",
             got="失败",
             produced="0 条",
             impact="本轮其余来源（NVD/OSV）仍继续",
@@ -203,9 +203,9 @@ def run(keyword="llm"):
         if team_err:
             detail += "；部分关键词失败已跳过"
         team_step = _step(
-            "调用 聚合库",
+            "调用 本机库",
             detail,
-            did="按关键词读入本机聚合库 CVE（监测一路，非第二产品）",
+            did="按关键词读入本机情报库 CVE",
             got="原始 %d 条" % team_raw,
             produced="去重后 %d 条" % len(team_items),
             impact="与 NVD/OSV 一并整理、入库",
