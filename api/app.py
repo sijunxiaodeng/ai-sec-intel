@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictStr
 from agents.conversation import sessions, SessionError
 
 from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich, run_documents
@@ -95,6 +95,20 @@ class RelationReviewBody(BaseModel):
     reviewer: str = Field(..., min_length=1, max_length=80)
     note: str = Field(..., min_length=10, max_length=1000)
     review_kind: str = "user_source_review"
+
+
+class AssetObservationBody(BaseModel):
+    provider: Literal["shodan", "fofa"]
+    content: StrictStr = Field(..., min_length=1, max_length=1024 * 1024)
+    fields: list[StrictStr] = Field(default_factory=list, max_items=20)
+    is_demo: StrictBool = False
+
+    class Config:
+        extra = "forbid"
+
+
+class AssetObservationPreviewBody(AssetObservationBody):
+    cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
 
 
 def _summary(record):
@@ -387,11 +401,11 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
             "id": "enrich",
             "title": "情报富集",
             "position": "管线 02 · 单条补维度",
-            "duty": "对单条漏洞补 EPSS / KEV / 论文等，并评估影响资产（登记匹配，非互联网发现）。",
+            "duty": "对单条漏洞补 EPSS / KEV / 论文等，筛选登记清单与平台观测；真实互联网发现待验收。",
             "standard": {
                 "level": enrich_dim_level,
                 "summary": f"富化维度 {enrich_dim_level}；准确率 空",
-                "detail": f"{enrich_dim_note}。independent_enrichment_accuracy=null；互联网资产定位未实现；PoC 可用性未验收。已登记资产 {asset_n}。",
+                "detail": f"{enrich_dim_note}。independent_enrichment_accuracy=null；被动观测导入已实现，真实互联网发现待验收；PoC 可用性未验收。已登记资产 {asset_n}。",
                 "honest": True,
             },
             "integration": {
@@ -456,7 +470,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         {"id": "latency", "metric": "发布→采集延迟", "level": latency_level, "note": latency_note},
         {"id": "enrichment_accuracy", "metric": "富化准确率", "level": "空", "note": "independent_enrichment_accuracy=null"},
         {"id": "qa_quality", "metric": "问答质量", "level": "部分（开发验证）" if docs_n >= 1 else "缺口", "note": "独立准确率 null；勿把规则测试当竞赛分"},
-        {"id": "internet_assets", "metric": "互联网资产定位", "level": "未实现", "note": "仅登记/预览匹配"},
+        {"id": "internet_assets", "metric": "互联网资产定位", "level": "部分（导入流程）", "note": "登记/平台观测范围筛选；真实互联网发现待验收"},
         {"id": "poc_verify", "metric": "PoC 可用验证", "level": "未验收", "note": "候选未正式验收"},
     ]
 
@@ -977,6 +991,58 @@ def assets_preview(body: AssetPreview):
 @app.get("/api/asset-impact/{cve_id}")
 def asset_impact(cve_id: str):
     return impact_report(_asset_assessment(cve_id), load_assets())
+
+
+@app.get("/api/asset-observations/demo")
+def asset_observations_demo():
+    import json
+    with open(os.path.join(ROOT, "enrichment", "samples", "passive_assets_demo.json"), encoding="utf-8") as stream:
+        payload = json.load(stream)
+    return dict(payload, is_demo=True)
+
+
+@app.get("/api/asset-observations")
+def asset_observations():
+    from enrichment.asset_observations import load_observations
+    try:
+        rows = load_observations()
+        return {"items": rows, "count": len(rows), "demo_count": sum(bool(row.get("is_demo")) for row in rows)}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/api/asset-observations/preview")
+def asset_observations_preview(body: AssetObservationPreviewBody):
+    from enrichment.asset_observations import preview_export, evaluate_observations
+    try:
+        result = preview_export(body.provider, body.content, body.fields, is_demo=body.is_demo)
+        if body.cve_id:
+            result["impact"] = evaluate_observations(_asset_assessment(body.cve_id), result["items"])
+            result["impact"]["preview"] = True
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/api/asset-observations/import")
+def asset_observations_import(body: AssetObservationBody):
+    from enrichment.asset_observations import import_export
+    try:
+        return import_export(body.provider, body.content, body.fields, is_demo=body.is_demo)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/asset-observation-impact/{cve_id}")
+def asset_observation_impact(cve_id: str):
+    from enrichment.asset_observations import evaluate_observations, load_observations
+    assessment = _asset_assessment(cve_id)
+    try:
+        report = evaluate_observations(assessment, load_observations())
+        report["preview"] = False
+        return report
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 # Built-in AI-security scope for one-click auto monitor (comma-separated).
