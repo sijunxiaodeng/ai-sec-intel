@@ -11,6 +11,11 @@ from rag.evidence import _connection
 from rag.library import detail, documents, ingest_document, overview, search, sync
 
 
+def source_by_id(source_id):
+    """Fixture format follows source identity, independent of registry order."""
+    return next(source for source in SOURCES if source["id"] == source_id)
+
+
 class LibraryTest(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -154,34 +159,35 @@ class LibraryTest(unittest.TestCase):
         self.assertEqual(ingest_document(candidate, self.db, fetch_json)["status"], "error")
 
     def test_rss_topic_filter_and_host_allowlist(self):
-        source = SOURCES[2]
+        source = source_by_id("trailofbits_research")
         body = b'<rss><channel><item><title>LLM prompt injection security</title><link>https://blog.trailofbits.com/good/</link></item><item><title>LLM security</title><link>https://evil.example/article</link></item><item><title>Office news</title><link>https://blog.trailofbits.com/news/</link></item></channel></rss>'
         rows = parse_feed(source, {"body": body})
         self.assertEqual([r["url"] for r in rows], ["https://blog.trailofbits.com/good/"])
 
     def test_atom_has_no_cve_requirement_and_rejects_unrelated(self):
         body = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>http://arxiv.org/abs/2601.00001v1</id><title>LLM prompt injection</title><summary>security attacks</summary></entry><entry><id>http://arxiv.org/abs/2601.00002</id><title>Astronomy</title><summary>Stars</summary></entry></feed>'
-        rows = parse_feed(SOURCES[3], {"body": body})
+        rows = parse_feed(source_by_id("arxiv_security"), {"body": body})
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["url"], "https://arxiv.org/abs/2601.00001v1")
 
     def test_dtd_or_invalid_json_not_treated_as_empty_success(self):
         with self.assertRaises(ValueError):
-            parse_feed(SOURCES[2], {"body": b'<!DOCTYPE rss [<!ENTITY x "hi">]><rss/>'})
+            parse_feed(source_by_id("trailofbits_research"), {"body": b'<!DOCTYPE rss [<!ENTITY x "hi">]><rss/>'})
         with self.assertRaises(ValueError):
-            parse_feed(SOURCES[0], {"body": b'{"message":"rate limited"}'})
+            parse_feed(source_by_id("vllm_advisories"), {"body": b'{"message":"rate limited"}'})
         with self.assertRaises(ValueError):
-            parse_feed(SOURCES[2], {"body": b'<html><body>Access denied</body></html>'})
+            parse_feed(source_by_id("trailofbits_research"), {"body": b'<html><body>Access denied</body></html>'})
 
     def test_sync_source_failure_is_visible_and_other_source_continues(self):
-        source = SOURCES[2]
+        source = source_by_id("trailofbits_research")
+        failing_source = source_by_id("vllm_advisories")
         feed = b'<rss><channel><item><title>LLM prompt injection</title><link>https://blog.trailofbits.com/good/</link></item></channel></rss>'
         def fetcher(url):
-            if url == SOURCES[0]["url"]:
+            if url == failing_source["url"]:
                 raise TimeoutError("source unavailable")
             return {"body": feed if url == source["url"] else self.body, "url": url, "content_type": "text/plain"}
         with patch("rag.library.update_index", return_value={"status": "deferred"}):
-            result = sync(self.db, sources=(SOURCES[0], source), seeds=(), fetcher=fetcher)
+            result = sync(self.db, sources=(failing_source, source), seeds=(), fetcher=fetcher)
         self.assertEqual(result["ok"], 1)
         self.assertEqual(result["sources"][0]["status"], "error")
         self.assertEqual(overview(self.db)["source_categories"], ["research"])
@@ -211,7 +217,9 @@ class LibraryScheduleTest(unittest.TestCase):
     def run_with(self, error=False):
         from automation.schedule import run_once
         with patch("agents.orchestrator.run_collect", side_effect=TimeoutError("NVD unavailable") if error else None, return_value={"records": []}), \
+             patch("api.b_monitor.b_monitor_on_refresh", return_value=False), \
              patch("rag.library.sync", return_value={"ok": 2, "attempted": 3, "sources": []}) as library, \
+             patch("rag.library.sync_team", return_value={"status": "ok", "attempted": 0, "ok": 0}) as team, \
              patch("automation.schedule.ensure_state", return_value={}), patch("automation.schedule._write_state"), patch("automation.schedule.log_line"):
             if error:
                 with self.assertRaises(TimeoutError):
@@ -219,6 +227,7 @@ class LibraryScheduleTest(unittest.TestCase):
             else:
                 run_once()
             library.assert_called_once_with(include_seeds=False)
+            team.assert_called_once_with(max_documents=30)
 
     def test_schedule_syncs_library_after_success(self):
         self.run_with()

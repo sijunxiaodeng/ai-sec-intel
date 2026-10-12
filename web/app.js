@@ -296,18 +296,25 @@ function dateText(value) {
 
 function epssText(epss) {
   if (!epss) return "尚未查询";
-  if (epss.status === "ok") return String(epss.score);
-  if (epss.status === "empty") return "公开源未收录";
+  if (epss.status === "ok") return String(epss.score) + publicFeedAttemptSuffix(epss);
+  if (epss.status === "empty") return "公开源未收录" + publicFeedAttemptSuffix(epss);
   if (epss.status === "error") return "查询失败";
   return "尚未查询";
 }
 
 function kevText(kev) {
   if (!kev) return "尚未查询";
-  if (kev.status === "listed") return "已列入" + (kev.date_added ? "，" + kev.date_added : "");
-  if (kev.status === "not_listed") return "未列入";
+  if (kev.status === "listed") return "已列入" + (kev.date_added ? "，" + kev.date_added : "") + publicFeedAttemptSuffix(kev);
+  if (kev.status === "not_listed") return "未列入" + publicFeedAttemptSuffix(kev);
   if (kev.status === "error") return "查询失败";
   return "尚未查询";
+}
+
+function publicFeedAttemptSuffix(value) {
+  if (value.retained_previous && value.latest_attempt && value.latest_attempt.status === "error") {
+    return "（本次查询失败，保留上次成功结果" + (value.last_success_at ? "：" + dateText(value.last_success_at) : "") + "）";
+  }
+  return "";
 }
 
 function clear(node) {
@@ -417,12 +424,12 @@ function setView(name, opts) {
 function setTeamHealth(team) {
   var el = $("team-health");
   if (!el) return;
-  if (team && team.reachable === false) {
+  if (team && team.enabled !== false && team.reachable === false) {
     el.hidden = false;
     var err = team.error || "";
     var hint;
     if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
-      hint = "请先生成本机库：cd intelligence && PYTHONPATH=. python seed_demo_db.py --force；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
+      hint = "请先生成本机库：cd intelligence && python seed_demo_db.py；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
     } else if (/多源资料探测失败|聚合|Connection refused|8765/i.test(err)) {
       hint = "嵌入模式下应直读本机库，无需第二端口。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
     } else {
@@ -457,6 +464,7 @@ function stageStatusLabel(status) {
   if (status === "ok") return { text: "完成", cls: "st-ok" };
   if (status === "skip") return { text: "跳过", cls: "st-skip" };
   if (status === "error") return { text: "失败", cls: "st-err" };
+  if (status === "partial") return { text: "部分成功", cls: "st-err" };
   return { text: "等待", cls: "st-pend" };
 }
 
@@ -564,7 +572,8 @@ function renderMonitorLive(data, opts) {
   var running = !!(opts.running || (data && data.running) || monitorRefreshing);
   var phase = opts.phase || (data && data.run_phase) || "";
   var elapsed = opts.elapsedSec != null ? opts.elapsedSec : null;
-  var hours = (data && data.interval_hours) || 6;
+  var minutes = (data && data.interval_minutes) || ((data && data.interval_hours) ? data.interval_hours * 60 : 15);
+  var intervalText = minutes < 60 ? (minutes + " 分钟") : ((minutes / 60) + " 小时");
   live.classList.toggle("is-running", running);
   if (progress) progress.hidden = !running;
   // One primary clock: last collect → next scheduled refresh (not item publish age).
@@ -578,7 +587,8 @@ function renderMonitorLive(data, opts) {
   } else {
     stateEl.textContent = "空闲";
     if (phaseEl) {
-      phaseEl.textContent = "约每 " + hours + " 小时自动刷新；也可点「立即刷新一轮」。非实时推流。";
+      phaseEl.textContent = data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
+        : "完成一轮后等待约 " + intervalText + " 自动刷新；也可点「立即刷新一轮」。非实时推流。";
     }
   }
   if (lastEl) {
@@ -590,11 +600,12 @@ function renderMonitorLive(data, opts) {
   }
   if (nextEl) {
     if (running) nextEl.textContent = "本轮进行中…";
-    else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（约每 " + hours + " 小时）";
-    else nextEl.textContent = "完成首轮后按约每 " + hours + " 小时估算";
+    else if (data && data.auto_enabled === false) nextEl.textContent = "自动监测已关闭";
+    else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（等待约 " + intervalText + "）";
+    else nextEl.textContent = "完成首轮后等待约 " + intervalText;
   }
   if (data && data.pipeline) {
-    renderCollectPipeline(data.pipeline, { forceShow: running || data.pipeline.status === "done" });
+    renderCollectPipeline(data.pipeline, { forceShow: running || ["done", "partial", "error"].indexOf(data.pipeline.status) !== -1 });
   } else if (opts.pipeline) {
     renderCollectPipeline(opts.pipeline, { forceShow: true });
   }
@@ -619,6 +630,8 @@ function loadMonitorStatus() {
     } else bits.push("尚未刷新；可点「立即刷新一轮」");
     if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
     if (data.last_error) bits.push("上次错误：" + data.last_error);
+    if (data.last_status) bits.push("上次结果：" + ({success: "成功", partial: "部分成功", failed: "失败"}[data.last_status] || data.last_status));
+    if ((data.last_warnings || []).length && !data.last_error) bits.push("上次提示：" + data.last_warnings[0]);
     setMonitorStatus(bits.join(" · ") + "。");
     var line = $("monitor-line");
     if (line) {
@@ -765,7 +778,9 @@ function renderMonitorFeed(data) {
   var summary = $("monitor-summary");
   var teamTotal = (((data.team_documents || {}).total) || 0);
   var teamMeta = data.team_documents || {};
-  if (teamMeta.reachable === false) {
+  if (teamMeta.enabled === false) {
+    setTeamHealth(teamMeta);
+  } else if (teamMeta.reachable === false) {
     setTeamHealth({
       reachable: false,
       error: teamMeta.error || "本机库资料探测失败",
@@ -1017,6 +1032,49 @@ function renderGuidance(panel, report) {
   (report.limitations || []).forEach(function (text) { add(section, "p", "meta", text); });
 }
 
+function renderArticleCandidates(panel, cveId) {
+  var section = add(panel, "div", "article-candidates");
+  add(section, "h3", "", "论文与分析文章关联候选");
+  add(section, "p", "meta", "只查询已入库资料。候选需结合原文核对，不用于改写评分、版本、修复或资产结论。");
+  var button = add(section, "button", "ghost", "查看本地关联候选");
+  button.type = "button";
+  var content = add(section, "div", "");
+  button.addEventListener("click", function () {
+    button.disabled = true;
+    button.textContent = "正在检索本地资料…";
+    api("/api/article-candidates/" + encodeURIComponent(cveId)).then(function (report) {
+      if (panel.querySelector(".article-candidates") !== section) return;
+      clear(content);
+      add(content, "p", "meta", report.detail || report.notice);
+      (report.warnings || []).forEach(function (text) { add(content, "p", "meta", text); });
+      (report.items || []).forEach(function (row) {
+        var block = add(content, "details", "guidance-fact");
+        add(block, "summary", "", (row.category === "paper" ? "论文 · " : "分析文章 · ") + row.title);
+        add(block, "span", "tag", row.explicit_cve_mention ? "完整编号提及 · 未审核候选" : "机制 / CWE 关联候选 · 未审核");
+        add(block, "p", "meta", row.association_notice);
+        var scopes = {abstract: "论文摘要", full_text_html: "HTML 提取正文", article_body: "文章提取正文", team_summary: "团队接口摘要（非原始全文）"};
+        add(block, "p", "meta", "资料范围：" + (scopes[row.content_scope] || missingText(row.content_scope, "未写明")) + " · 获取于 " + dateText(row.retrieved_at));
+        if (row.retained_previous) add(block, "p", "meta", "最近更新失败，沿用上述日期的成功存档。");
+        (row.match_basis || []).forEach(function (basis) { add(block, "p", "meta", basis.label + "（" + basis.term + "） · " + basis.citation_id); });
+        (row.evidence || []).forEach(function (chunk) {
+          add(block, "p", "desc", chunk.text);
+          var link = add(block, "a", "meta", "引用片段：" + chunk.citation_id);
+          link.href = chunk.url; link.target = "_blank"; link.rel = "noopener";
+          add(block, "p", "meta", chunk.locator + " · 快照 SHA256：" + chunk.source_response_sha256);
+        });
+      });
+      add(content, "p", "meta", report.notice);
+      button.textContent = "重新检索本地关联候选";
+    }).catch(function (error) {
+      if (panel.querySelector(".article-candidates") !== section) return;
+      clear(content);
+      add(content, "p", "meta", error.message || "候选检索未完成，请稍后重试。");
+      button.textContent = "重试本地关联候选";
+    }).then(function () { button.disabled = false; });
+  });
+}
+
+
 function renderDetail(item) {
   var panel = $("enrich-detail");
   clear(panel);
@@ -1041,6 +1099,7 @@ function renderDetail(item) {
   });
   renderAssessment(panel, item.assessment);
   renderGuidance(panel, item.related_guidance);
+  renderArticleCandidates(panel, item.cve_id);
   var guidanceButton = add(panel, "button", "ghost", "补充关联建议");
   guidanceButton.type = "button";
   guidanceButton.addEventListener("click", function () {
@@ -1316,7 +1375,7 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("本机库", diag.b_team || (team.reachable === false ? { status: "不可达" } : null));
+  srcLine("本机库", diag.b_team || (team.enabled === false ? {status: "已禁用"} : team.reachable === false ? { status: "不可达" } : null));
   srcLine("本机库刷新", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
@@ -1328,10 +1387,10 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   if (rs.hit > 0 && (rs.inserted || 0) === 0) {
     bits.push("已查到来源数据但无新编号——多半是增量游标之后无更新，或 CVE 已在库中");
   }
-  if (team.reachable === false) {
+  if (team.enabled !== false && team.reachable === false) {
     bits.push("本机库不可用时仍应有 NVD/OSV 与本地资料");
   }
-  if (teamDocs.reachable === false) {
+  if (teamDocs.enabled !== false && teamDocs.reachable === false) {
     bits.push("本机库资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
   }
   if (keyword) {
@@ -1424,31 +1483,34 @@ function runMonitorRefresh(options) {
     var warns = data.warnings || [];
     var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
     var rs = data.round_stats || {};
+    var outcomeLabel = {success: "采集成功", partial: "采集部分成功", failed: "采集失败"}[data.status] || "本轮完成";
     if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
     var roundLine = "本轮命中 " + (rs.hit != null ? rs.hit : "—")
       + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
       + " · 合并 " + (rs.merged != null ? rs.merged : "—");
-    setMonitorStatus("本轮完成：" + roundLine
+    setMonitorStatus(outcomeLabel + "：" + roundLine
       + (bmon.status ? "；本机库刷新 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
       + "。正在刷新情报流…");
-    showToast("监测完成：" + roundLine, "busy");
+    showToast(outcomeLabel + "：" + roundLine, "busy");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
-      var done = "刷新完成：" + roundLine + "；当前显示 "
+      var done = outcomeLabel + "：" + roundLine + "；当前显示 "
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
       if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
         done += " 已查到来源数据但无新 CVE 编号（增量位点之后无更新，或已在库中合并）。";
       }
+      if (data.status === "failed") done += " 采集未成功，当前显示保留的已有记录。";
       setMonitorStatus(done);
-      var toastKind = warns.length ? "error" : (((data.count || 0) === 0 && total === 0) ? "error" : "ok");
+      var toastKind = (warns.length || data.status === "failed" || data.status === "partial") ? "error" : (((data.count || 0) === 0 && total === 0) ? "error" : "ok");
       showToast(done + (warns.length ? " " + warns[0] : ""), toastKind);
       if (!total) {
         var why = diagnoseEmptyFeed(data, feed, keyword);
-        showError(new Error(keyword
-          ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why
-          : "刷新已完成，但情报流仍为空。" + why));
+        showError(new Error(data.status === "failed"
+          ? "采集失败，暂无已保存的匹配条目。" + (data.error || "") + why
+          : (keyword ? "刷新已完成，但关键词「" + keyword + "」没有匹配条目。" + why
+                     : "刷新已完成，但情报流仍为空。" + why)));
       } else if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
         // Visible work, empty keep — not an error, but surface explanation.
         clearError();
@@ -1505,12 +1567,14 @@ on("collect-form", "submit", function (event) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ keyword: keyword })
   }).then(function (data) {
-    setMonitorStatus("补采完成：本轮写入相关 " + (data.count || 0) + " 条 CVE；正在刷新情报流…");
+    var resultLabel = {success: "补采成功", partial: "补采部分成功", failed: "补采失败"}[data.status] || "补采完成";
+    var inserted = ((data.round_stats || {}).inserted) || 0;
+    setMonitorStatus(resultLabel + "：本轮新增 " + inserted + " 条 CVE；正在刷新情报流…");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
-      var msg = "补采完成：写入相关 " + (data.count || 0) + " 条；当前流匹配「" + keyword + "」共 " + total + " 条。";
+      var msg = resultLabel + "：本轮新增 " + inserted + " 条；当前流匹配「" + keyword + "」共 " + total + " 条。";
       setMonitorStatus(msg);
-      showToast(msg, total ? "ok" : "error");
+      showToast(msg, total && ["failed", "partial"].indexOf(data.status) === -1 ? "ok" : "error");
       if (!total) showError(new Error("补采已执行，但关键词「" + keyword + "」在情报流中暂无匹配。可清除关键词查看全部。"));
     });
   }).catch(function (error) {
@@ -1774,6 +1838,33 @@ function renderLibraryEvidence(data) {
 
 function renderLibraryRelations(data) {
   var target = $("library-relations"); clear(target);
+  if (data.reasoning_mode === "reasoning") {
+    var kinds = {finding: "证据事实", inference: "证据推断", conditional: "条件性结论"};
+    (data.reasoning_claims || []).forEach(function (claim) {
+      var block = add(target, "details", "relation-fact");
+      add(block, "summary", "", kinds[claim.kind] || "结论依据");
+      add(block, "p", "", claim.text);
+      (claim.assumptions || []).forEach(function (value) { add(block, "p", "hint", "尚需确认：" + value); });
+      (claim.supports || []).forEach(function (support) {
+        add(block, "p", "", support.quote);
+        add(block, "p", "meta", "引用：" + support.citation_id);
+      });
+    });
+    if ((data.reasoning_trace || []).length) {
+      var trace = add(target, "details", "relation-fact");
+      add(trace, "summary", "", "查看检索与核验记录");
+      data.reasoning_trace.forEach(function (step) {
+        if (step.tool === "local_library_search") {
+          add(trace, "p", "meta", "检索「" + step.query + "」：新增 " + step.new_evidence + " 条证据");
+        } else if (step.status === "received") {
+          add(trace, "p", "meta", "已收到分析或核验结果，结论仍须通过证据检查。");
+        } else if (step.missing_document_ids) {
+          add(trace, "p", "hint", "未找到可用证据的资料：" + step.missing_document_ids.join("、"));
+        }
+      });
+    }
+    return;
+  }
   var facts = data.facts || [];
   if (facts.length) add(target, "h3", "", "来源事实与限定条件");
   var roles = {mechanism: "风险机制", condition: "场景条件", impact: "可能影响", mitigation: "潜在防护", limitation: "防护局限", assessment: "评估建议", provenance: "引用关系"};
@@ -2074,14 +2165,14 @@ on("library-ask-form", "submit", function (event) {
   var button = $("library-ask"); button.disabled = true; button.textContent = "正在检索原文…";
   $("library-answer").textContent = "正在按资料证据处理…"; clear($("library-evidence")); clear($("library-relations"));
   var requestMode = $("library-mode").value;
-  var requestBody = JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value});
+  var requestBody = JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value, mode: $("library-mode").value === "reasoning" ? "reasoning" : "excerpts"});
   api(requestMode === "relations" ? "/api/library/analyze" : "/api/library/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: requestBody}).then(function (result) {
-    if (requestMode !== $("library-mode").value || requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
+    if (requestMode !== $("library-mode").value || requestBody !== JSON.stringify({question: $("library-question").value.trim(), document_ids: librarySelectedDocs, document_type: $("library-type").value, mode: $("library-mode").value === "reasoning" ? "reasoning" : "excerpts"})) { $("library-answer").textContent = "问题或选择已变化，请重新提问。"; return; }
     $("library-answer").textContent = result.answer;
     renderLibraryRelations(result);
     var rows = result.evidence || [];
     ((result.reviewed_quotes || {}).evidence || []).forEach(function (row) { if (!rows.some(function (r) { return r.citation_id === row.citation_id; })) rows.push(row); });
-    renderLibraryEvidence({evidence: rows, notice: requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
+    renderLibraryEvidence({evidence: rows, notice: requestMode === "reasoning" ? "结论附带来源引文；缺少前提、来源冲突或核验失败会明确提示。" : requestMode === "relations" ? "限定综合与来源事实分开展示；原文可在此核对。" : result.used_model ? "模型挑选的原文已核对；不构成自由推理结论。" : "依据检索原文摘录。"});
   }).catch(showError).then(function () { button.disabled = false; button.textContent = "按证据回答"; });
 });
 on("library-search-form", "submit", function (event) {
@@ -2115,6 +2206,10 @@ on("library-team-sync", "click", function () {
   clearError();
   showToast("正在同步本机库摘要（题名/描述窗口）…", "busy");
   api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
+    if (data.status === "skipped" || data.enabled === false) {
+      showToast("本机库摘要同步按配置已跳过，已有资料和选择保留。", "busy");
+      return;
+    }
     var msg = data.status === "error"
       ? "本机库摘要暂不可用，已有资料仍可使用"
       : ("本机库摘要同步完成：" + data.ok + "/" + data.attempted + " 份");
@@ -2135,6 +2230,8 @@ api("/api/monitor/status").then(function (data) {
   if (data && data.running) {
     showToast("后台正在自动监测一轮宽范围 AI 安全情报…", "busy");
   } else if (data && data.last_run) {
-    showToast("自动监测已就绪：最近一轮 " + data.last_run + "，相关 " + (data.last_count || 0) + " 条", "ok");
+    var statusLabel = {success: "成功", partial: "部分成功", failed: "失败"}[data.last_status] || "已结束";
+    showToast("最近一轮监测" + statusLabel + "：" + data.last_run + "，新增 " + (data.last_count || 0) + " 条",
+      ["failed", "partial"].indexOf(data.last_status) !== -1 ? "error" : "ok");
   }
 }).catch(function () {});

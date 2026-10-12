@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 
 from enrichment.documents import canonical, digest, now
+from collectors.intelligence import team_intel_disabled
 
 # Local demo / compose hosts only (never arbitrary remote).
 _ALLOWED_TEAM_HOSTS = frozenset({"127.0.0.1", "localhost", "b-api"})
@@ -75,6 +76,11 @@ class TeamDocumentCollector:
         if type(max_documents) is not int or not 1 <= max_documents <= 200:
             raise ValueError("每轮多源资料数量必须为 1 到 200")
         self.timeout, self.max_documents = timeout, max_documents
+        self.disabled = base_url is None and team_intel_disabled()
+        if self.disabled:
+            self.embed = False
+            self.base_url = "disabled://team"
+            return
         # Omit base_url in embed mode (in-process). An explicit base_url always
         # selects the HTTP adapter so sidecar/tests keep host/port validation.
         if base_url is None and _embed_mode():
@@ -99,6 +105,8 @@ class TeamDocumentCollector:
         self.base_url = base_url
 
     def get(self, path):
+        if self.disabled:
+            raise ValueError("本机库资料同步已按配置禁用")
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 raise ValueError("团队 API 不接受重定向")
@@ -173,6 +181,10 @@ class TeamDocumentCollector:
         }
 
     def collect(self):
+        if self.disabled:
+            return {"status": "skipped", "enabled": False, "candidates": [], "errors": [],
+                    "total": None, "selected": 0, "remaining": None,
+                    "coverage": "按配置跳过本机库资料同步；未查询当前总量"}
         if self.embed:
             return self._collect_embed()
         records, total = [], None

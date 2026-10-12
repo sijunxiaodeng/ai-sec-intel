@@ -1,3 +1,4 @@
+import json
 import threading
 import unittest
 from unittest.mock import patch
@@ -13,9 +14,13 @@ def record(cve, score, version="3.1"):
     eid = cve + "/FIXTURE"
     metric = {"score": score, "version": version, "severity": "HIGH", "vector": "", "source": "fixture",
               "metric_type": "Primary", "evidence_ids": [eid]}
+    raw_metric = {"source": "fixture", "type": "Primary", "cvssData": {
+        "version": version, "baseScore": score, "baseSeverity": "HIGH", "vectorString": ""}}
     report = {"status": "partial", "cvss": metric, "affected_ranges": [], "attack_conditions": [],
               "technical_impact": [], "fix_records": [], "poc_candidates": [], "warnings": [],
-              "evidence": [{"citation_id": eid, "text": "Synthetic score fixture.", "url": "https://example.org", "locator": "metrics", "text_kind": "automatic_structured_extract"}]}
+              "evidence": [{"citation_id": eid, "text": json.dumps(raw_metric), "structured_value": raw_metric,
+                            "url": "https://example.org", "locator": "metrics/cvssMetricV" + version.replace(".", "") + "/0",
+                            "text_kind": "automatic_structured_extract"}]}
     return {"item": {"cve_id": cve, "raw_data": {"automatic_assessment": report}}, "cvss": metric}
 
 

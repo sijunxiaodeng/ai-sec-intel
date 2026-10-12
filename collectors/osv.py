@@ -1,6 +1,7 @@
 # OSV 是与 NVD 不同的公开来源。同一 CVE 编号在入库时合并。
-# 默认按已知 AI 组件包集合查询，并限制单包条数，避免某一组件（如 ollama）独占列表。
+# 默认按已知 AI 组件包集合查询；限制每轮输出，未入库的记录留待后续轮次。
 
+import hashlib
 import json
 import urllib.request
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ PACKAGES = {
     "openai": [("PyPI", "openai")],
 }
 
-# Cap per package so one ecosystem (historically ollama) cannot flood the feed.
+# Per-product batch cap; deferred source identities remain unacknowledged.
 PER_PACKAGE_LIMIT = 6
 
 # Broad AI-security keywords used by AUTO_MONITOR / monitor_agent primary.
@@ -73,15 +74,21 @@ def _product_label(ecosystem, name):
     return short or name
 
 
-def _post(ecosystem, name):
-    body = json.dumps({"package": {"ecosystem": ecosystem, "name": name}}).encode("utf-8")
+def _post(ecosystem, name, page_token=""):
+    query = {"package": {"ecosystem": ecosystem, "name": name}}
+    if page_token:
+        query["page_token"] = page_token
+    body = json.dumps(query).encode("utf-8")
     request = urllib.request.Request(
         QUERY_URL,
         data=body,
         headers={"Content-Type": "application/json", "User-Agent": "ai-sec-intel-student"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+        body = response.read(4 * 1024 * 1024 + 1)
+        if len(body) > 4 * 1024 * 1024:
+            raise ValueError("OSV response exceeds the size limit")
+        return json.loads(body.decode("utf-8"))
 
 
 def _cve_id(vuln):
@@ -173,75 +180,128 @@ def _round_robin_merge(buckets):
     return out
 
 
-def _vuln_stamp(vuln):
-    """Prefer OSV modified time; fall back to published for incremental cut."""
-    return str(vuln.get("modified") or vuln.get("published") or "")
+def package_cursor_key(ecosystem, name):
+    from collectors.cursors import scoped_key
+    return scoped_key("osv", ecosystem, name)
+
+
+def _revision(vuln):
+    text = json.dumps(vuln, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class OSVCollector(object):
     """collect() 返回 IntelligenceItem 列表。查不到包时返回空列表，不编造记录。
 
-    When a watermark exists (data/collect_cursors.json → osv), only vulns with
-    modified/published **after** that stamp are kept for upsert — still counts
-    every API hit so the UI can show「命中多 / 保留 0」honestly.
+    Each (ecosystem, package) remembers only revisions actually emitted and then
+    successfully upserted. A capped/failed package cannot be skipped by another
+    package's timestamp. Legacy global watermarks are retained but not trusted.
     """
 
-    def __init__(self, keyword="llm", per_package_limit=PER_PACKAGE_LIMIT, use_cursor=True):
+    def __init__(self, keyword="llm", per_package_limit=PER_PACKAGE_LIMIT, use_cursor=True, max_pages=5):
         self.keyword = keyword or "llm"
         self.per_package_limit = max(1, int(per_package_limit or PER_PACKAGE_LIMIT))
         self.use_cursor = bool(use_cursor)
+        if type(max_pages) is not int or max_pages <= 0:
+            raise ValueError("OSV max_pages must be a positive integer")
+        self.max_pages = max_pages
         self.last_stats = {}
+        self._pending_states = {}
 
     def collect(self):
-        from collectors.cursors import get_cursor
+        from collectors.cursors import get_cursor, get_state
 
         packages = resolve_packages(self.keyword)
         collected_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        watermark = get_cursor("osv") if self.use_cursor else ""
+        self.last_stats = {}
+        self._pending_states = {}
+        legacy = get_cursor("osv") if self.use_cursor else ""
         fetched = 0
         package_ok = 0
         package_fail = 0
-        max_stamp = watermark
+        calls = 0
+        watermarks = []
+        incremental = False
+        pending_states = {}
         # Merge ecosystem variants (PyPI + GIT) per product before capping.
         by_product = {}
         for ecosystem, name in packages:
             product = _product_label(ecosystem, name)
+            key = package_cursor_key(ecosystem, name)
+            state = get_state(key) if self.use_cursor else {}
+            meta = state.get("meta")
+            if not isinstance(meta, dict) or meta.get("protocol") != "osv_package_revisions_v2":
+                state = {}  # Replay untrusted global / older scoped state.
+            saved = state.get("record_revisions") or {}
+            saved = saved if isinstance(saved, dict) else {}
+            incremental |= bool(state)
+            if state.get("window_end_at"):
+                watermarks.append(state["window_end_at"])
             try:
-                payload = _post(ecosystem, name)
+                token, tokens, ids, rows = "", set(), set(), []
+                for page in range(self.max_pages):
+                    calls += 1
+                    payload = _post(ecosystem, name, page_token=token) if token else _post(ecosystem, name)
+                    if not isinstance(payload, dict) or not isinstance(payload.get("vulns", []), list):
+                        raise ValueError("OSV package response is invalid")
+                    for vuln in payload.get("vulns", []):
+                        fetched += 1
+                        if not isinstance(vuln, dict) or not isinstance(vuln.get("id"), str) or not vuln["id"]:
+                            raise ValueError("OSV record lacks its source identity")
+                        if vuln["id"] in ids:
+                            raise ValueError("OSV repeated an identity during pagination")
+                        ids.add(vuln["id"])
+                        revision = _revision(vuln)
+                        if saved.get(vuln["id"]) != revision:
+                            rows.append({"key": key, "osv_id": vuln["id"], "revision": revision,
+                                         "item": to_item(vuln, product, collected_at)})
+                    following = payload.get("next_page_token", "")
+                    if following is None:
+                        following = ""
+                    if not isinstance(following, str) or following in tokens:
+                        raise ValueError("OSV pagination token is invalid or repeated")
+                    if not following:
+                        break
+                    tokens.add(following)
+                    token = following
+                else:
+                    raise RuntimeError("OSV exceeded max_pages; package state will not advance")
                 package_ok += 1
             except Exception:
-                # One package failure must not drop the rest of the AI set.
+                # Discard partial pages. Other independently scoped packages continue.
                 package_fail += 1
                 continue
-            bucket = by_product.setdefault(product, [])
-            seen_ids = {item.get("cve_id") for item in bucket}
-            for vuln in payload.get("vulns") or []:
-                fetched += 1
-                stamp = _vuln_stamp(vuln)
-                if stamp and (not max_stamp or stamp > max_stamp):
-                    max_stamp = stamp
-                # Incremental: skip records at/before last successful position.
-                if watermark and stamp and stamp <= watermark:
-                    continue
-                item = to_item(vuln, product, collected_at)
-                cve = item.get("cve_id")
-                if not cve or cve in seen_ids:
-                    continue
-                seen_ids.add(cve)
-                bucket.append(item)
-        buckets = []
+            by_product.setdefault(product, []).extend(rows)
+            pending_states[key] = {
+                "window_end_at": collected_at, "record_revisions": {},
+                "meta": {"protocol": "osv_package_revisions_v2", "ecosystem": ecosystem, "package": name},
+            }
+        if packages and not package_ok:
+            raise RuntimeError("No OSV package completed successfully; positions were not advanced")
+        buckets, candidates = [], []
         for product, bucket in by_product.items():
-            bucket.sort(
-                key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
-                reverse=True,
-            )
-            buckets.append(bucket[: self.per_package_limit])
-        items = _round_robin_merge(buckets)
-        # Cap already enforces package diversity; newest published first overall.
-        items.sort(
-            key=lambda row: str((row.get("published_at") if isinstance(row, dict) else "") or ""),
-            reverse=True,
-        )
+            bucket.sort(key=lambda row: (row["item"].get("published_at") or "", row["osv_id"]), reverse=True)
+            candidates.extend(bucket)
+            # Duplicate CVEs across package variants are deferred, not acknowledged.
+            unique, seen = [], set()
+            for row in bucket:
+                cve = row["item"].get("cve_id")
+                if cve and cve not in seen:
+                    unique.append(row)
+                    seen.add(cve)
+            buckets.append(unique[:self.per_package_limit])
+        selected, seen = [], set()
+        for index in range(self.per_package_limit):
+            for bucket in buckets:
+                if index < len(bucket):
+                    row = bucket[index]
+                    cve = row["item"]["cve_id"]
+                    if cve not in seen:
+                        selected.append(row)
+                        seen.add(cve)
+                        pending_states[row["key"]]["record_revisions"][row["osv_id"]] = row["revision"]
+        items = [row["item"] for row in selected]
+        self._pending_states = pending_states if self.use_cursor else {}
         self.last_stats = {
             "source": "OSV",
             "fetched": fetched,
@@ -249,26 +309,18 @@ class OSVCollector(object):
             "packages_queried": package_ok,
             "packages_failed": package_fail,
             "packages_planned": len(packages),
-            "watermark_before": watermark,
-            "watermark_candidate": max_stamp or collected_at,
-            "incremental": bool(watermark),
-            "external_fetches": package_ok,
+            "watermark_before": max(watermarks) if watermarks else "",
+            "watermark_candidate": collected_at,
+            "incremental": incremental,
+            "legacy_global_replayed": bool(legacy) and not incremental,
+            "cursor_scope": "package_record_revisions",
+            "deferred_records": len(candidates) - len(selected),
+            "external_fetches": calls,
         }
         return items
 
     def commit_cursor(self):
-        """Advance watermark after a successful upsert that included this collect."""
-        from collectors.cursors import set_cursor
-
-        candidate = (self.last_stats or {}).get("watermark_candidate")
-        if not candidate:
-            return
-        set_cursor(
-            "osv",
-            candidate,
-            meta={
-                "fetched": (self.last_stats or {}).get("fetched"),
-                "kept": (self.last_stats or {}).get("kept"),
-                "keyword": self.keyword,
-            },
-        )
+        """Acknowledge only emitted revisions after the caller's successful upsert."""
+        from collectors.cursors import commit_states
+        commit_states(self._pending_states)
+        self._pending_states = {}

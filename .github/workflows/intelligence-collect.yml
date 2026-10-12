@@ -46,6 +46,7 @@ jobs:
       DEEPSEEK_KEY_AVAILABLE: ${{ secrets.DEEPSEEK_API_KEY != '' }}
       DEEPSEEK_REVIEW_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.deepseek_review }}
       DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-chat' }}
+      DEPLOY_INGEST_AVAILABLE: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
       GITHUB_TOKEN: ${{ github.token }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
@@ -54,9 +55,8 @@ jobs:
       - name: Check out collector
         uses: actions/checkout@v4
         with:
-          # Only this small workflow needs to be in the default branch. B's
-          # runtime stays on its existing team branch; A/C are not overwritten.
-          ref: feat/intelligence
+          # Collect with the exact reviewed commit that owns this workflow.
+          ref: ${{ github.sha }}
           persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -108,7 +108,7 @@ jobs:
         # Real sync path: artifact alone never reaches a running 8023 DB.
         # When DEPLOY_INGEST_URL + DEPLOY_INGEST_TOKEN secrets are set, POST the
         # verified snapshot zip to the main app's /api/admin/actions-sync.
-        if: ${{ always() && steps.snapshot.outcome == 'success' && secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
+        if: ${{ always() && steps.snapshot.outcome == 'success' && env.DEPLOY_INGEST_AVAILABLE == 'true' }}
         env:
           DEPLOY_INGEST_URL: ${{ secrets.DEPLOY_INGEST_URL }}
           DEPLOY_INGEST_TOKEN: ${{ secrets.DEPLOY_INGEST_TOKEN }}

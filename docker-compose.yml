@@ -1,4 +1,5 @@
-# Unified demo: ONE public process on :8023 with B embedded in-process.
+# Unified demo: ONE public entry on :8023; B queries are embedded.
+# B collection uses an isolated, deadline-bounded child process.
 # Seed job writes intelligence.db; main-app reads it (no forever :8765 sidecar).
 # One-click: ./scripts/demo-up.sh
 # Smoke:     ./scripts/demo-smoke.sh
@@ -17,7 +18,8 @@ services:
     user: "10001:10001"
     volumes:
       - b-data:/app/data
-    command: ["python", "seed_demo_db.py", "--force"]
+    # Existing state is retained, including live records collected after seeding.
+    command: ["python", "seed_demo_db.py"]
     restart: "no"
 
   # Optional legacy B HTTP process (not started by default).
@@ -68,10 +70,14 @@ services:
       APP_PORT: "8023"
       TEAM_INTEL_MODE: embed
       INTELLIGENCE_DB_PATH: /app/intelligence/data/intelligence.db
-      B_MONITOR_ENABLED: "1"
-      B_MONITOR_ON_REFRESH: "1"
-      B_MONITOR_SOURCE_TIMEOUT: "45"
-      B_MONITOR_OVERALL_TIMEOUT: "180"
+      B_MONITOR_ENABLED: ${B_MONITOR_ENABLED:-1}
+      B_MONITOR_ON_REFRESH: ${B_MONITOR_ON_REFRESH:-1}
+      AUTO_MONITOR_ON_START: ${AUTO_MONITOR_ON_START:-1}
+      AUTO_MONITOR_ENABLED: ${AUTO_MONITOR_ENABLED:-1}
+      MONITOR_INTERVAL_MINUTES: ${MONITOR_INTERVAL_MINUTES:-}
+      MONITOR_INTERVAL_HOURS: ${MONITOR_INTERVAL_HOURS:-}
+      B_MONITOR_SOURCE_TIMEOUT: ${B_MONITOR_SOURCE_TIMEOUT:-45}
+      B_MONITOR_OVERALL_TIMEOUT: ${B_MONITOR_OVERALL_TIMEOUT:-180}
       # Stable demo default: skip long network ingest on every collect.
       AUTO_INGEST_ON_COLLECT: ${AUTO_INGEST_ON_COLLECT:-0}
       # Actions → deploy ingest (optional). Set on host to enable POST /api/admin/actions-sync.

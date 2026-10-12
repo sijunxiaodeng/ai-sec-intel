@@ -4,10 +4,10 @@
 
 ## 怎么打开系统（一键演示）
 
-固定端口：**主应用 8023**，**B 情报 API 8765**。
+默认只打开 **http://127.0.0.1:8023**。B 查询嵌入主应用，采集由独立子进程执行；`8765` 仅供显式启用的旧 HTTP 服务模式使用。
 
 ```bash
-./scripts/demo-up.sh      # Docker Compose，或无 Docker 时本地双进程
+./scripts/demo-up.sh      # Bash：Docker Compose，或本地 embed 模式
 ./scripts/demo-smoke.sh   # 健康检查 + collect→enrich→ask
 ```
 
@@ -24,7 +24,7 @@ python main.py
 
 ## 当前验收入口
 
-任务 C 的功能状态、比赛阈值、演示脚本和部署联调步骤集中在 [任务 C 验收包](验收包/README.md)。已完成开发链路；新文章通用关系处理、独立质量评测、另一台电脑部署和正式比赛材料仍按四阶段收尾。
+任务 C 的功能状态、比赛阈值、演示脚本和部署联调步骤集中在 [任务 C 验收包](验收包/README.md)。本轮系统修复及待验收边界见 [系统整改与回归](验收包/系统整改与回归.md)。独立质量评测、真实资产、PoC 可用性和正式比赛材料仍需补齐。本文按步骤记录的旧测试数量与本机数据量是历史记录，不是当前版本的验收结果。
 
 启动系统后运行 `python -m questions.acceptance_snapshot`，报告写入本机 `data/`。该程序不调用模型或触发采集，只检查资料现状、接口和引用绑定，不据此判断比赛得分。
 
@@ -56,7 +56,7 @@ python collect_nvd.py
 - `dev`：三人往这里合
 - 各自从 `dev` 拉分支，例如 `feature/collector`、`feature/enrich`
 
-三人整合启动顺序、文件冻结与 `AUTO_INGEST_ON_COLLECT`（默认 **`1`**）见 [INTEGRATION.md](INTEGRATION.md)。不要把密钥写进仓库。
+三人整合启动顺序与环境变量见 [INTEGRATION.md](INTEGRATION.md)。`AUTO_INGEST_ON_COLLECT` 主应用默认 `1`，演示脚本和 Compose 默认 `0`；后者保留独立资料同步，避免每轮重复抓取大量关联全文。不要把密钥写进仓库。
 
 ## 任务 C 的首日证据样例
 

@@ -41,7 +41,7 @@ class TestOSVIncremental(unittest.TestCase):
         cursors_mod.CURSOR_PATH = self._old
         self.tmp.cleanup()
 
-    def test_watermark_filters_kept_but_counts_fetched(self):
+    def test_saved_package_revisions_filter_kept_but_count_fetched(self):
         cursors_mod.set_cursor("osv", "2024-06-01T00:00:00Z")
 
         def fake_post(eco, name):
@@ -65,7 +65,14 @@ class TestOSVIncremental(unittest.TestCase):
         coll = OSVCollector(keyword="vllm", per_package_limit=10)
         with patch("collectors.osv._post", side_effect=fake_post):
             with patch("collectors.osv.resolve_packages", return_value=[("PyPI", "vllm")]):
-                items = coll.collect()
+                first = coll.collect()
+                # An old global timestamp cannot prove either record was saved.
+                self.assertEqual(len(first), 2)
+                coll.commit_cursor()
+                changed = fake_post("PyPI", "vllm")
+                changed["vulns"][1]["summary"] = "new revision"
+                with patch("collectors.osv._post", return_value=changed):
+                    items = coll.collect()
         self.assertEqual(coll.last_stats["fetched"], 2)
         self.assertEqual(coll.last_stats["kept"], 1)
         self.assertEqual(len(items), 1)
@@ -90,6 +97,8 @@ class TestOSVIncremental(unittest.TestCase):
         coll = OSVCollector(keyword="vllm", per_package_limit=10)
         with patch("collectors.osv._post", side_effect=fake_post):
             with patch("collectors.osv.resolve_packages", return_value=[("PyPI", "vllm")]):
+                self.assertEqual(len(coll.collect()), 1)
+                coll.commit_cursor()
                 items = coll.collect()
         self.assertEqual(items, [])
         self.assertEqual(coll.last_stats["fetched"], 1)

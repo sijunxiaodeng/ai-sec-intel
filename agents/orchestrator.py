@@ -7,7 +7,7 @@ from agents.enrichment_agent import run as enrich_run
 from agents.monitor_agent import run as monitor_run
 from agents.qa_agent import run as qa_run
 from agents.verifier_agent import run as verify_run
-from database.store import append_run, latest_run, load_kb, upsert, upsert_stats
+from database.store import append_run, collection_lock, latest_run, load_kb, upsert, upsert_stats
 from enrichment.papers import fetch_papers
 from enrichment.service import apply_public_feeds
 from models import enriched_record
@@ -39,7 +39,52 @@ def run_documents(record):
     return dict(result, steps=steps)
 
 
+def _monitor_outcome(monitored):
+    """A successful empty poll is different from unavailable collection sources."""
+    stats = monitored.get("stats") or {}
+    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "本机库"}
+    sources, warnings = {}, []
+    for name, label in labels.items():
+        if name == "nvd" and stats.get("nvd_disabled_duplicate"):
+            sources[name] = "skipped"
+        elif name == "aggregate" and stats.get("aggregate_disabled"):
+            sources[name] = "skipped"
+        elif name + "_ok" in stats:
+            sources[name] = "success" if stats[name + "_ok"] else "failed"
+            if sources[name] == "failed":
+                warnings.append(label + " 本轮采集失败")
+    # Preserve callers using the older items/steps contract without source flags.
+    if not sources:
+        warnings = [(s.get("action") or "") for s in monitored.get("steps", []) if "失败" in (s.get("action") or "")]
+        failed = bool(warnings) and not monitored.get("items")
+    else:
+        active = [value for value in sources.values() if value != "skipped"]
+        failed = not active or all(value == "failed" for value in active)
+    if (stats.get("osv") or {}).get("packages_failed"):
+        warnings.append("OSV 部分包查询失败，未完成包会重试")
+        if sources.get("osv") == "success":
+            sources["osv"] = "partial"
+    if (stats.get("nvd") or {}).get("pending_windows"):
+        warnings.append("NVD 仍有历史窗口待续采")
+        if sources.get("nvd") == "success":
+            sources["nvd"] = "partial"
+    if stats.get("aggregate_partial") or any("部分关键词失败" in (s.get("detail") or "") for s in monitored.get("steps", [])):
+        warnings.append("本机库部分关键词查询失败")
+        if sources.get("aggregate") == "success":
+            sources["aggregate"] = "partial"
+    status = "failed" if failed else "partial" if warnings else "success"
+    error = "本轮可用采集来源全部失败；已有情报已保留。" if failed else "；".join(dict.fromkeys(warnings))
+    return {"status": status, "error": error, "warnings": list(dict.fromkeys(warnings)), "source_outcomes": sources}
+
+
 def run_collect(keyword="llm", *, on_phase=None):
+    # Also guard direct callers, not just the HTTP/scheduled entry points.
+    # A busy round performs no fetch/write/ack and is safe to retry.
+    with collection_lock(timeout=0):
+        return _run_collect(keyword, on_phase=on_phase)
+
+
+def _run_collect(keyword="llm", *, on_phase=None):
     """Run monitor → normalize → upsert.
 
     ``on_phase(stage_id, **fields)`` optional callback for live pipeline UI.
@@ -62,15 +107,8 @@ def run_collect(keyword="llm", *, on_phase=None):
     stats = monitored.get("stats") or {}
     steps_in = monitored.get("steps") or []
 
-    failed_bits = []
-    for step in steps_in:
-        action = step.get("action") or ""
-        if "失败" in action:
-            failed_bits.append(action.replace("调用 ", "").strip())
-    # Soft-fail: any source failure alone is not a whole-stage error if others worked.
-    all_failed = bool(failed_bits) and not (
-        stats.get("nvd_ok") or stats.get("osv_ok") or stats.get("aggregate_ok")
-    )
+    outcome = _monitor_outcome(monitored)
+    all_failed = outcome["status"] == "failed"
     phase(
         "monitoring",
         status="error" if all_failed else "ok",
@@ -78,7 +116,7 @@ def run_collect(keyword="llm", *, on_phase=None):
         got="命中 %d，保留 %d" % (stats.get("hit", 0), stats.get("kept", 0)),
         produced="进入整理入库 %d 条" % len(monitored.get("items") or []),
         impact="本轮监测结果将规范化并写入知识库",
-        note=("部分来源未通：" + "、".join(failed_bits[:4]) if failed_bits else "多方面来源已尽力查询"),
+        note=outcome["error"] or "多方面来源已尽力查询（成功空轮也会保留查询状态）",
         phase="监测刷新中",
     )
     # Compact tech line for optional UI disclosure (not a stage checklist).
@@ -89,6 +127,19 @@ def run_collect(keyword="llm", *, on_phase=None):
         if action:
             tech_bits.append("%s：%s" % (action.replace("调用 ", ""), detail))
     monitored["tech_detail"] = "；".join(tech_bits)[:480]
+
+    if all_failed:
+        saved = load_kb()
+        phase("persist", status="skip", did="采集未完成，保留已有知识库",
+              produced="本轮不写入、不推进游标", note=outcome["error"], phase="整理入库")
+        steps = steps_in + [{"role": "编排", "action": "保留已有知识库", "detail": outcome["error"]}]
+        append_run(steps, "collect")
+        write = {"records": saved, "fetched": 0, "inserted": 0, "merged": 0, "skipped_dup": 0, "total": len(saved)}
+        return dict(outcome, records=saved, steps=steps, documents=[], write=write,
+                    round_stats={"hit": stats.get("hit", 0), "kept": 0, "inserted": 0, "merged": 0,
+                                 "skipped_dup": 0, "total": len(saved), "external_fetches": stats.get("external_fetches", 0),
+                                 "nvd": stats.get("nvd") or {}, "osv": stats.get("osv") or {}},
+                    tech_detail=monitored["tech_detail"])
 
     phase(
         "persist",
@@ -108,7 +159,9 @@ def run_collect(keyword="llm", *, on_phase=None):
             try:
                 coll.commit_cursor()
             except Exception:
-                pass
+                outcome["status"] = "partial"
+                outcome["warnings"].append(key.upper() + " 位点未保存，下轮将重试；本轮情报已入库")
+                outcome["error"] = "；".join(outcome["warnings"])
     phase(
         "persist",
         status="ok",
@@ -121,7 +174,14 @@ def run_collect(keyword="llm", *, on_phase=None):
         phase="整理入库",
     )
 
-    documents, document_steps = _documents_step(enriched["records"])
+    try:
+        documents, document_steps = _documents_step(enriched["records"])
+    except Exception:
+        outcome["status"] = "partial"
+        outcome["warnings"].append("关联资料补充未完成；已入库情报保留，独立资料同步仍可继续")
+        outcome["error"] = "；".join(outcome["warnings"])
+        documents = []
+        document_steps = [{"role": "富化", "action": "关联资料补充失败", "detail": outcome["warnings"][-1]}]
     steps = monitored["steps"] + enriched["steps"] + [{
         "role": "编排",
         "action": "写入知识库",
@@ -146,6 +206,7 @@ def run_collect(keyword="llm", *, on_phase=None):
         "osv": stats.get("osv") or {},
     }
     return {
+        **outcome,
         "records": saved,
         "steps": steps,
         "documents": documents,
@@ -160,6 +221,10 @@ def run_enrich():
     feed = apply_public_feeds(records)
     cve_ids = [(record.get("item") or {}).get("cve_id") for record in records]
     papers, paper_error = fetch_papers(cve_ids)
+    paper_status = dict(getattr(papers, "metadata", {}) or {})
+    if paper_status:
+        feed["papers"] = paper_status
+    feed["paper_error"] = paper_error
     attached = 0
     for record in records:
         cve_id = (record.get("item") or {}).get("cve_id")
@@ -169,8 +234,13 @@ def run_enrich():
             attached += len(found)
     saved = upsert([enriched_record(record) for record in records])
     detail = "已查询 EPSS、CISA KEV，并按编号检索论文。对上编号的论文 %d 篇。" % attached
-    if feed.get("epss_error") or feed.get("kev_error") or paper_error:
+    if feed.get("epss_error") or feed.get("kev_error"):
         detail = "部分公开源没有连通，失败项已跳过，已有字段仍保留。"
+    if paper_error:
+        detail += " 论文查询状态：" + str(paper_error)[:500]
+    if paper_status:
+        detail += " 论文查询覆盖 %d/%d 个编号（有界轮转，非全量论文召回）。" % (
+            len(paper_status.get("queried_cve_ids") or []), len(paper_status.get("requested_cve_ids") or []))
     steps = [{
         "role": "富化",
         "action": "补充 EPSS、KEV 与论文",

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import urllib.request
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -103,21 +104,20 @@ def artifact(run_id=42, expired=False):
 class ActionsStateTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.source = self.root / 'source'
         self.connection = fixture(self.source)
+        self.addCleanup(self.connection.close)
         self.snapshot = self.root / 'snapshot'
         save_state(self.source, self.snapshot, repository=REPOSITORY, branch=BRANCH, run_id=42)
         self.payload = archive_of(self.snapshot)
-    def tearDown(self):
-        self.connection.close()
-        self.temporary.cleanup()
     def restore(self, **kwargs):
         return restore_archive(self.payload, self.root / 'restored', repository=REPOSITORY,
                                branch=BRANCH, run_id=42, **kwargs)
     def test_wal_database_preserves_first_seen_cursors_baselines_http_and_classifications(self):
         self.restore()
-        with sqlite3.connect(self.root / 'restored/intelligence.db') as db:
+        with closing(sqlite3.connect(self.root / 'restored/intelligence.db')) as db:
             self.assertEqual(db.execute('SELECT first_seen_at FROM source_items').fetchone()[0], FIRST_SEEN)
             self.assertEqual(db.execute('SELECT first_seen_at FROM unified_vulnerabilities').fetchone()[0], FIRST_SEEN)
             self.assertEqual(db.execute('SELECT started_at FROM source_observation_baselines').fetchone()[0], BASELINE)
@@ -126,6 +126,23 @@ class ActionsStateTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT state FROM ai_classifications').fetchone()[0], 'classified')
         restored_baseline = json.loads((self.root / 'restored/monitoring_baseline.json').read_text())
         self.assertEqual(restored_baseline['started_at'], BASELINE)
+
+    def test_production_backup_and_restore_close_owned_database_connections(self):
+        connections, connect = [], sqlite3.connect
+        def tracked(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+        with patch('deployment.actions_state.sqlite3.connect', side_effect=tracked):
+            save_state(self.source, self.root / 'closure-snapshot', repository=REPOSITORY, branch=BRANCH, run_id=42)
+            self.restore()
+        self.assertGreaterEqual(len(connections), 3)
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute('SELECT 1')
+        # The fixture deliberately owns a live WAL writer; backup must not close it.
+        self.assertEqual(self.connection.execute('SELECT first_seen_at FROM source_items').fetchone()[0], FIRST_SEEN)
     def test_snapshot_excludes_credentials_locks_pid_and_logs(self):
         with zipfile.ZipFile(io.BytesIO(self.payload)) as archive:
             self.assertEqual(set(archive.namelist()), {'intelligence.db', 'monitoring_baseline.json',

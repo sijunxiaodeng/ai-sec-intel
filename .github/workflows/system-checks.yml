@@ -1,0 +1,84 @@
+name: Offline regressions and container state
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AUTO_MONITOR_ON_START: '0'
+      AUTO_MONITOR_ENABLED: '0'
+      B_MONITOR_ENABLED: '0'
+      AUTO_INGEST_ON_COLLECT: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate workflow expressions
+        uses: docker://rhysd/actionlint:1.7.7
+      - name: Root application regressions
+        run: |
+          python -m venv .venv-ci
+          .venv-ci/bin/python -m pip install -r requirements-test.txt
+          .venv-ci/bin/python -m unittest discover -s questions -p 'test_*.py' -v
+      - name: B collector regressions in its own environment
+        run: |
+          python -m venv .venv-ci-b
+          .venv-ci-b/bin/python -m pip install -r intelligence/requirements.lock.txt
+          cd intelligence
+          ../.venv-ci-b/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Validate UI syntax and candidate detail interactions
+        run: |
+          node --check web/app.js
+          node questions/test_article_candidates_ui.js
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AUTO_MONITOR_ON_START: '0'
+      AUTO_MONITOR_ENABLED: '0'
+      B_MONITOR_ENABLED: '0'
+      AUTO_INGEST_ON_COLLECT: '0'
+      COMPOSE_PROJECT_NAME: regression
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Start the offline demonstration
+        run: docker compose up -d --build --wait --wait-timeout 120
+      - name: Exercise legacy volume ownership migration without deleting data
+        run: |
+          docker compose exec -T --user 0 main-app python -c "import os; from pathlib import Path; p=Path('/app/data/ci-legacy-owner'); p.write_text('preserve'); os.chown(p,10002,10002); os.chown(p.parent,10002,10002)"
+          docker compose exec -T --user 0 main-app python scripts/migrate_volume_owner.py --apply
+          docker compose exec -T main-app python -c "from pathlib import Path; p=Path('/app/data/ci-legacy-owner'); assert p.read_text()=='preserve'; assert p.stat().st_uid==10001; p.unlink()"
+      - name: Verify shared database write permission
+        run: docker compose exec -T -e CI_STATE_PROBE=1 main-app python scripts/check_container_state.py prepare
+      - name: Run the seed service again without resetting state
+        run: docker compose run --rm b-seed
+      - name: Recreate the application with its persisted data and settings
+        run: docker compose up -d --no-deps --force-recreate --wait --wait-timeout 90 main-app
+      - name: Verify state survives and the API remains responsive
+        run: docker compose exec -T -e CI_STATE_PROBE=1 main-app python scripts/check_container_state.py check
+      - name: Container diagnostics
+        if: ${{ failure() }}
+        run: docker compose logs --no-color
+      - name: Remove only this disposable CI stack
+        if: ${{ always() }}
+        run: docker compose down --volumes

@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_PORT=8023 \
     TEAM_INTEL_MODE=embed \
     INTELLIGENCE_DB_PATH=/app/intelligence/data/intelligence.db \
+    APP_SETTINGS_PATH=/app/data/model-settings.json \
     B_MONITOR_ENABLED=1 \
     B_MONITOR_ON_REFRESH=1 \
     AUTO_INGEST_ON_COLLECT=0 \
@@ -17,12 +18,12 @@ WORKDIR /app
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
-    && groupadd --gid 10002 app \
-    && useradd --uid 10002 --gid 10002 --no-create-home app
+    && groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home app
 
-COPY --chown=10002:10002 . .
-RUN mkdir -p /app/data && chown 10002:10002 /app/data
+COPY --chown=10001:10001 . .
+RUN mkdir -p /app/data && chown 10001:10001 /app /app/data
 
-USER 10002:10002
+USER 10001:10001
 EXPOSE 8023
 CMD ["python", "main.py"]

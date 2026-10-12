@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -26,7 +26,7 @@ class ReviewTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.db = Path(self.temp.name) / "intelligence.db"
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.executescript("""
                 CREATE TABLE unified_vulnerabilities (
                     cve_id TEXT PRIMARY KEY,payload_json TEXT,content_sha256 TEXT,
@@ -43,7 +43,29 @@ class ReviewTests(unittest.TestCase):
         self.store = ClassificationStore(self.db)
 
     def status_file(self):
-        return json.loads((self.db.parent / "deepseek_status.json").read_text())
+        return json.loads((self.db.parent / "deepseek_status.json").read_text(encoding="utf-8"))
+
+    def test_production_classification_snapshot_closes_on_success_early_return_and_error(self):
+        empty, invalid = self.db.parent / "no-classification.db", self.db.parent / "invalid-classification.db"
+        for path, schema in ((empty, "CREATE TABLE other_table(id INTEGER)"),
+                             (invalid, "CREATE TABLE ai_classifications(unrelated INTEGER)")):
+            with closing(sqlite3.connect(path)) as connection, connection:
+                connection.execute(schema)
+        connections, connect = [], sqlite3.connect
+        def tracked(*args, **kwargs):
+            connection = connect(*args, **kwargs)
+            connections.append(connection)
+            self.addCleanup(connection.close)
+            return connection
+        with patch.object(review.sqlite3, "connect", side_effect=tracked):
+            self.assertEqual(review._classification_snapshot(self.db), {})
+            self.assertEqual(review._classification_snapshot(empty), {})
+            with self.assertRaises(sqlite3.DatabaseError):
+                review._classification_snapshot(invalid)
+        self.assertEqual(len(connections), 3)
+        for connection in connections:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
 
     def test_missing_key_and_disabled_phase_never_start_a_child(self):
         for kwargs, reason in (({"api_key": ""}, "missing_api_key"),
@@ -128,8 +150,9 @@ class ReviewTests(unittest.TestCase):
         marker, descendant_pid = self.db.parent / "escaped.txt", self.db.parent / "descendant.pid"
         child_code = """
 import json, pathlib, sqlite3, subprocess, sys, time
+from contextlib import closing
 db, progress, marker, pidfile, cve = sys.argv[1:]
-with sqlite3.connect(db) as con:
+with closing(sqlite3.connect(db)) as con, con:
     con.execute("UPDATE ai_classifications SET state='classified',ai_related=1,decision_source='semantic_judge',attempts=attempts+1 WHERE cve_id=?", (cve,))
 pathlib.Path(progress).write_text(json.dumps({'status':'running','semantic_calls':2,'semantic_success':1,'retry':0,'reason_category':'completed'}))
 code = "import pathlib,sys,time; time.sleep(1); pathlib.Path(sys.argv[1]).write_text('escaped')"
@@ -174,7 +197,7 @@ time.sleep(20)
         self.assertNotIn("RAW_BODY", output.getvalue())
 
     def test_workflow_keeps_model_secret_out_of_the_collection_step(self):
-        source = (review.ROOT.parent / ".github/workflows/intelligence-collect.yml").read_text()
+        source = (review.ROOT.parent / ".github/workflows/intelligence-collect.yml").read_text(encoding="utf-8")
         self.assertIn("CLASSIFY_V5_MAX_LLM_CALLS: '0'", source)
         self.assertIn("default: true", source)
         self.assertEqual(source.count("DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}"), 1)

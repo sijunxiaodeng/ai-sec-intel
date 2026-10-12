@@ -9,6 +9,8 @@ intelligence/data
 data
 *.log
 .env
+**/.env
 config/local.json
+backups
 .demo
 **/node_modules

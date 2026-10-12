@@ -1,10 +1,81 @@
 import re
-from agents.citation_guard import answer_issues
+from agents.citation_guard import answer_issues, cvss_assertions, matching_cvss_metrics
 from agents.question_scope import positive_question, topics as question_topics
 
 CVE = re.compile(r"CVE-\d{4}-\d{4,7}", re.I)
 SCORE = re.compile(r"CVSS(?!:[234]\.[01]/)(?:\s*v?[234]\.[01])?\s*(?:基础分(?:为|是)?|评分(?:为|是)?|分数(?:为|是)?|为|是|:|：)\s*([0-9]+(?:\.[0-9]+)?)", re.I)
 CITATION = re.compile(r"\[([^\[\]\n]+)\]")
+POC_SUBJECT = r"(?:(?<![A-Za-z0-9_])poc(?![A-Za-z0-9_])|proof.of.concept|exploit code|利用代码|验证代码)"
+POC_SUCCESS = r"(?:已(?:经)?(?:成功)?(?:验证|复现)(?:通过|成功|可用)?|验证(?:已)?通过|复现(?:已)?成功|验证成功|(?:already\s+|successfully\s+)?(?<![A-Za-z])(?:verified|validated|reproduced|runtime_verified)(?![A-Za-z]))"
+POC_FORWARD = re.compile(POC_SUBJECT + r"[^。！？；;\n]{0,80}?(?P<action>" + POC_SUCCESS + ")", re.I)
+POC_REVERSE = re.compile(r"(?P<action>" + POC_SUCCESS + r")[^。！？；;，,\n]{0,30}?" + POC_SUBJECT, re.I)
+POC_CVE = re.compile(r"(?<![A-Za-z0-9_-])CVE-\d{4}-\d{4,7}(?![A-Za-z0-9_-])", re.I)
+
+
+def _poc_successes(text):
+    # URLs, citations and unrelated negative clauses are not verification claims.
+    plain = CITATION.sub("", re.sub(r"https?://[^\s。；，<>]+", "", text))
+    result, seen = [], set()
+    for pattern in (POC_FORWARD, POC_REVERSE):
+        for match in pattern.finditer(plain):
+            identity = match.span("action")
+            if identity in seen:
+                continue
+            seen.add(identity)
+            before = plain[max(0, identity[0] - 40):identity[0]]
+            before = re.split(r"[。！？；;，,\n]|但是|但|然而|不过|\bbut\b|\bhowever\b", before, flags=re.I)[-1]
+            before = re.sub(POC_SUBJECT, "", before, flags=re.I)
+            negative_tail = (r"(?:尚未|并未|未能|未|没有|不能|无法|不代表|不等于|不证明|不可|并非|没有证据)"
+                             r"(?:\s|被|确认|认定|证明|断言|认为|标为|声称|据此|成功|经过|运行|状态为){0,12}$|"
+                             r"\b(?:not|never|cannot|no evidence|unable to|isn't|hasn't|wasn't)\b"
+                             r"(?:\s|yet|been|be|being|already|successfully){0,12}$")
+            after = plain[identity[1]:identity[1] + 24]
+            if re.search(negative_tail, before, re.I) or re.match(r"(?:可用|成功|通过)?的说法(?:不成立|不正确|未经证实|没有依据)", after):
+                continue
+            result.append(match.group())
+    return result
+
+
+def poc_claim_issues(answer, evidence, citation_owners):
+    """A mutable candidate flag/reference is never a trusted project experiment.
+
+    This project has no authenticated runtime-validation ledger. Consequently
+    even well-scoped positive project claims must fail closed until one exists.
+    Clearly attributed source quotes remain source claims, subject to their own
+    exact snippet and CVE/citation binding; they do not enable project success.
+    """
+    records = {(r.get("item", {}).get("cve_id") or "").upper(): r for r in evidence or []}
+    chunks = {c["citation_id"]: c for r in evidence or [] for c in r.get("evidence_chunks", [])}
+    issues = []
+    # Keep trailing citations after a full stop attached to their statement.
+    next_subject = r"(?:CVE-|PoC|本项目|我们的|该项目|来源|研究方|厂商|作者|第三方)"
+    clauses = re.split(r"[；;\n]|[，,](?=\s*" + next_subject + r")|(?<=[。！？!?])(?=\s*" + next_subject + r")", answer or "", flags=re.I)
+    for clause in clauses:
+        successes = _poc_successes(clause)
+        if not successes:
+            continue
+        declared = {v.upper() for v in POC_CVE.findall(CITATION.sub("", clause))}
+        cited = [c for c in CITATION.findall(clause) if c in chunks]
+        owners = {citation_owners[c] for c in cited if c in citation_owners}
+        target = next(iter(declared)) if len(declared) == 1 else ""
+        if not target or owners != {target}:
+            issues.append("PoC 肯定复现声明须明确单一 CVE，并与该声明的具体引用所属漏洞一致")
+            continue
+        source_claim = bool(re.search(r"(?:来源(?:原文|报告)?|研究方|厂商|作者|第三方)(?:声称|称|表示|报告|写道)|(?:来源|报告)原文", clause))
+        own_success = bool(re.search(r"(?:本项目|本系统|我们)[^。！？；;，,\n]{0,200}" + POC_SUCCESS, clause, re.I))
+        if source_claim and not own_success:
+            # Only source wording actually present in the cited snippet may pass.
+            if all(any(value in _poc_successes(chunk.get("text", ""))
+                       for c in cited for chunk in [chunks[c]]) for value in successes):
+                continue
+            issues.append("来源声称 PoC 已验证的表述未绑定该 CVE 引用中的实际原文")
+            continue
+        candidate_urls = {r.get("url") for r in records.get(target, {}).get("poc", []) if r.get("url")}
+        claimed_urls = set(re.findall(r"https?://[^\s。；，<>\[\]]+", clause))
+        if not candidate_urls & claimed_urls:
+            issues.append("PoC 肯定复现声明未明确绑定当前漏洞的具体候选代码")
+        issues.append("证据没有可信的本项目 PoC 实验台账；verified/runtime_verified 字段或来源 Exploit 标签不能证明本项目已复现")
+    return list(dict.fromkeys(issues))
 
 
 def _condition_present(plain, row):
@@ -51,16 +122,31 @@ def required_fields(answer, evidence, question):
         metric = report.get("cvss")
         if not metric:
             continue
+        candidates = [metric] + (report.get("cvss_candidates") or [])
+        scoring_rows = [{"source": row.get("source"), "type": row.get("metric_type"),
+                         "cvssData": {"version": row.get("version"), "baseScore": row.get("score"),
+                                      "baseSeverity": row.get("severity"), "vectorString": row.get("vector")}}
+                        for row in candidates]
+        explicit_profiles = []
+        for line in plain.splitlines():
+            facts = cvss_assertions(line)
+            if facts["vectors"] or (facts["providers"] and facts["components"]):
+                matches = matching_cvss_metrics(line, scoring_rows)
+                if matches and all(row == matches[0] for row in matches):
+                    explicit_profiles.append(matches[0])
         if any(w in q for w in ("cvss", "评分", "分数", "严重等级", "向量")):
-            if str(metric["score"]) not in plain or metric["version"] not in plain:
+            matching = [(line, cvss_assertions(line), matches) for line in plain.splitlines()
+                        if (facts := cvss_assertions(line))["scores"] and facts["versions"]
+                        and (matches := matching_cvss_metrics(line, scoring_rows))]
+            if not matching:
                 issues.append("没有完整保留来源评分和 CVSS 版本")
-            provider = (metric.get("source") or "").lower()
             provider_requested = any(w in q for w in ("提供者", "评分来源", "评分记录来源"))
-            if provider_requested and provider and provider not in plain:
-                if not (provider == "nvd@nist.gov" and "nvd" in plain):
-                    issues.append("评分提供者未与来源字段一致")
-            if provider and provider != "nvd@nist.gov" and re.search(r"(?:评分提供者|评分来源|由).{0,10}nvd|nvd.{0,8}(?:自评|评分|打分)", plain):
-                issues.append("将 NVD 收录的其他来源评分错误归属于 NVD")
+            if provider_requested and not any(facts["providers"] for _, facts, _ in matching):
+                issues.append("评分提供者未与来源字段一致")
+            if "严重等级" in q and not any(facts["severity"] or "severity" in facts["missing"] for _, facts, _ in matching):
+                issues.append("未保留来源中的严重等级")
+            if "向量" in q and not any(facts["vectors"] or "vectors" in facts["missing"] for _, facts, _ in matching):
+                issues.append("未保留来源中的完整 CVSS 向量")
         if any(w in q for w in ("受影响版本", "版本范围", "影响哪个版本", "影响哪些版本")):
             for row in report.get("affected_ranges", []):
                 values = [row[k] for k in ("versionStartIncluding", "versionStartExcluding", "versionEndIncluding", "versionEndExcluding") if row.get(k)]
@@ -93,7 +179,12 @@ def required_fields(answer, evidence, question):
             wanted.add("PR")
         if "用户交互" in q:
             wanted.add("UI")
-        conditions = [row for row in report.get("attack_conditions", []) if row["metric"] in wanted]
+        condition_rows = report.get("attack_conditions", [])
+        if explicit_profiles and all(row == explicit_profiles[0] for row in explicit_profiles):
+            from enrichment.assessment import vector_explanations
+            data = explicit_profiles[0]["cvssData"]
+            condition_rows = vector_explanations({"version": data["version"], "vector": data["vectorString"]})
+        conditions = [row for row in condition_rows if row["metric"] in wanted]
         for row in conditions:
             if not _condition_present(plain, row):
                 issues.append("没有完整保留评分向量中的%s" % row["label"])
@@ -158,15 +249,9 @@ def run(answer, evidence):
                     wrong_owner.append(owner + "：" + score)
     invalid = [citation for citation in citations if citation not in allowed]
     lacks_citations = bool(evidence) and not citations
-    verified_poc = any(row.get("validation") == "verified" for record in evidence or [] for row in record.get("poc") or [])
-    claims_verified = False
-    for clause in re.split(r"[。\n]", answer or ""):
-        if re.search(r"(?:poc|利用代码|验证代码).{0,12}(?:已验证|已复现|验证通过)", clause, re.I):
-            if not any(word in clause for word in ("未", "没有", "不能", "不代表", "无法")):
-                claims_verified = True
-    bad_poc = claims_verified and not verified_poc
+    poc_issues = poc_claim_issues(answer or "", evidence or [], citation_owners)
     field_issues = answer_issues(answer or "", evidence or [])
-    passed = not missing and not bad_scores and not invalid and not lacks_citations and not bad_poc and not wrong_owner and not field_issues
+    passed = not missing and not bad_scores and not invalid and not lacks_citations and not poc_issues and not wrong_owner and not field_issues
     notes = []
     if missing:
         notes.append("回答里出现了证据中没有的编号：" + "、".join(missing))
@@ -176,8 +261,7 @@ def run(answer, evidence):
         notes.append("引用了不存在的证据标识：" + "、".join(invalid))
     if lacks_citations:
         notes.append("回答没有附上证据引用")
-    if bad_poc:
-        notes.append("证据没有本项目已验证可用的 PoC 状态")
+    notes.extend(poc_issues)
     if wrong_owner:
         notes.append("显式评分不属于该句引用的漏洞：" + "、".join(wrong_owner))
     notes.extend(field_issues)

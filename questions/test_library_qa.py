@@ -24,6 +24,19 @@ class LibraryQATest(unittest.TestCase):
     def encoded(self, identifier):
         return json.dumps({"selections": [{"excerpt_id": identifier}]})
 
+    def ingest_policy(self, source, *, published_at=None):
+        # Store the actual synthetic clauses, not a placeholder paired with a
+        # mocked extraction. Retrieval must independently reparse archived bytes.
+        candidate = dict(source, source_id=source["id"], source_name=source["name"], document_type="policy")
+        payload = {"title": source["expected_title"], "description": policy_body(source)}
+        if published_at:
+            payload["published_at"] = published_at
+        body = json.dumps(payload, ensure_ascii=False)
+        stored = ingest_document(candidate, self.db, lambda url: response(url, body, "application/json"))
+        self.assertEqual(stored["status"], "ok", stored)
+        self.assertEqual(detail(stored["document_id"], self.db)["integrity_status"], "ok")
+        return stored
+
     def test_model_selects_stored_original_without_copying_or_rewriting(self):
         selected = _select(self.encoded("EX-01"), [self.option], {self.row["document_id"]})
         self.assertEqual(selected[0]["quote"], self.row["text"])
@@ -45,10 +58,7 @@ class LibraryQATest(unittest.TestCase):
 
     def test_policy_adds_full_scope_exemption_and_effective_clause(self):
         source = REFERENCE_SOURCES[0]
-        body = policy_body(source)
-        candidate = dict(source, source_id=source["id"], source_name=source["name"], document_type="policy")
-        with patch("enrichment.reference_text.extract_document", return_value={"title": source["expected_title"], "parts": [("body", body)], "published_at": "2023-07-13"}):
-            stored = ingest_document(candidate, self.db, lambda u: response(u, "synthetic fixture"))
+        stored = self.ingest_policy(source, published_at="2023-07-13")
         self.assertEqual(stored["status"], "ok")
         with patch("rag.library._dense", side_effect=RuntimeError()):
             result = run("安全评估是什么规定？", document_ids=[stored["document_id"]], use_model=False, db_path=self.db)
@@ -88,10 +98,7 @@ class LibraryQATest(unittest.TestCase):
     def test_valid_model_selections_keep_two_policies_and_forced_clauses_grouped(self):
         ids = []
         for source in REFERENCE_SOURCES[:2]:
-            body = policy_body(source)
-            candidate = dict(source, source_id=source["id"], source_name=source["name"], document_type="policy")
-            with patch("enrichment.reference_text.extract_document", return_value={"title": source["expected_title"], "parts": [("body", body)]}):
-                stored = ingest_document(candidate, self.db, lambda u: response(u, "fixture " + source["id"]))
+            stored = self.ingest_policy(source)
             ids.append(stored["document_id"])
         def select_original(messages, **kwargs):
             payload = json.loads(messages[-1]["content"])
@@ -114,10 +121,7 @@ class LibraryQATest(unittest.TestCase):
     def test_scope_and_effective_only_keeps_complete_clauses_without_model_extra(self):
         ids = []
         for source in REFERENCE_SOURCES[:2]:
-            body = policy_body(source)
-            candidate = dict(source, source_id=source["id"], source_name=source["name"], document_type="policy")
-            with patch("enrichment.reference_text.extract_document", return_value={"title": source["expected_title"], "parts": [("body", body)]}):
-                stored = ingest_document(candidate, self.db, lambda u: response(u, "fixture " + source["id"]))
+            stored = self.ingest_policy(source)
             ids.append(stored["document_id"])
         with patch("rag.library._dense", side_effect=RuntimeError()), patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat") as model:
             result = run("请摘录两份政策各自的适用范围及施行条款，不判断我是否属于监管对象。", document_ids=ids, db_path=self.db)

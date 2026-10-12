@@ -1,30 +1,24 @@
-"""Invoke B's multi-source monitor cycle from the A process (same venv, no :8765).
+"""Run B collection in an isolated process without changing A imports.
 
-Uses intelligence/monitoring.multisource.run_cycle (same as run_monitor.py --once).
-Root and intelligence/ both ship a top-level ``collectors`` package — we temporarily
-prefer intelligence on sys.path and clear the conflicting module cache for the call.
-Per-source timeouts and overall wall-clock budget — partial success is OK.
+The embedded query API remains in A. Collector workers have their own package
+namespace and process tree; a deadline terminates that tree rather than waiting
+for a Python thread to finish its network work.
 """
 from __future__ import annotations
 
+import json
 import os
+import signal
+import subprocess
 import sys
+import tempfile
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from contextlib import contextmanager
-from typing import Any, Iterator
+from pathlib import Path
+from typing import Any
 
-
-# Packages that exist under both repo root and intelligence/ (or only intel but
-# may have been partially imported). Cleared for the duration of run_cycle.
-_INTEL_SHADOW = (
-    "collectors",
-    "storage",
-    "incremental",
-    "monitoring",
-    "classification",
-    "sources",
-)
+_CYCLE_LOCK = threading.Lock()
+_CLEANUP_TIMEOUT = 3
+_MAX_RESULT_BYTES = 1024 * 1024
 
 
 def b_monitor_enabled() -> bool:
@@ -34,10 +28,7 @@ def b_monitor_enabled() -> bool:
 
 
 def b_monitor_on_refresh() -> bool:
-    """Whether /api/monitor/run and the schedule should refresh B before reading."""
-    if not b_monitor_enabled():
-        return False
-    return os.environ.get("B_MONITOR_ON_REFRESH", "1").strip().lower() not in {
+    return b_monitor_enabled() and os.environ.get("B_MONITOR_ON_REFRESH", "1").strip().lower() not in {
         "0", "false", "no", "off",
     }
 
@@ -49,120 +40,129 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-@contextmanager
-def _intelligence_import_scope() -> Iterator[None]:
-    """Prefer intelligence/ imports; restore root ``collectors`` afterward.
+def _bounded(value, name, default, minimum, maximum):
+    value = _int_env(name, default) if value is None else value
+    if type(value) is not int:
+        raise ValueError("%s must be an integer" % name)
+    return max(minimum, min(value, maximum))
 
-    Holds ``b_embed._PATH_LOCK`` for the whole cycle so concurrent
-    ``prefer_root_packages()`` cannot interleave mid-import.
+
+def _worker_command(root, db, result_path, source_timeout, workers, poll_minutes):
+    return [os.environ.get("B_MONITOR_PYTHON") or sys.executable,
+            str(root / "deployment" / "run_embedded_cycle.py"),
+            "--db", str(db), "--result", str(result_path),
+            "--timeout", str(source_timeout), "--workers", str(workers),
+            "--poll-minutes", str(poll_minutes)]
+
+
+def _stop_process_tree(child) -> bool:
+    """Stop the owned worker and descendants, with bounded cleanup waits.
+
+    Windows taskkill /T covers the worker's source subprocesses. POSIX workers
+    start in a new session so killing their process group cannot kill A.
+    Return false when tree termination could not be confirmed.
     """
-    from api.b_embed import INTEL_ROOT, ROOT, _PATH_LOCK, prefer_root_packages
-
-    with _PATH_LOCK:
-        intel = str(INTEL_ROOT.resolve())
-        root = str(ROOT.resolve())
-        for path in (intel, root):
-            while path in sys.path:
-                sys.path.remove(path)
-        sys.path.insert(0, intel)
-        sys.path.insert(1, root)
-
-        stashed: dict[str, Any] = {}
-        for key in list(sys.modules):
-            if any(key == name or key.startswith(name + ".") for name in _INTEL_SHADOW):
-                stashed[key] = sys.modules.pop(key)
+    tree_stopped = False
+    try:
+        if os.name == "nt":
+            killed = subprocess.run(
+                ["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False, timeout=_CLEANUP_TIMEOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            tree_stopped = killed.returncode == 0
+        else:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+                tree_stopped = True
+            except ProcessLookupError:
+                tree_stopped = True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if child.poll() is None:
         try:
-            yield
-        finally:
-            for key in list(sys.modules):
-                if any(key == name or key.startswith(name + ".") for name in _INTEL_SHADOW):
-                    sys.modules.pop(key, None)
-            sys.modules.update(stashed)
-            prefer_root_packages()
+            child.kill()
+        except OSError:
+            pass
+    try:
+        child.wait(timeout=_CLEANUP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return tree_stopped
 
 
 def run_b_monitor_cycle(
-    *,
-    source_timeout: int | None = None,
-    workers: int | None = None,
+    *, source_timeout: int | None = None, workers: int | None = None,
     overall_timeout: int | None = None,
 ) -> dict[str, Any]:
-    """Run one B multi-source cycle. Never raises for source failures."""
+    """Run a collector worker; retain committed SQLite data after failures."""
     if not b_monitor_enabled():
-        return {"status": "disabled", "mode": "embed", "sources": {}}
-
-    from api.b_embed import INTEL_ROOT, db_path, ensure_intelligence_path
-
-    ensure_intelligence_path()
-    root = INTEL_ROOT
-    db = db_path()
-    source_timeout = source_timeout if source_timeout is not None else _int_env(
-        "B_MONITOR_SOURCE_TIMEOUT", 45
-    )
-    workers = workers if workers is not None else _int_env("B_MONITOR_WORKERS", 4)
-    overall_timeout = overall_timeout if overall_timeout is not None else _int_env(
-        "B_MONITOR_OVERALL_TIMEOUT", 180
-    )
-    source_timeout = max(5, min(source_timeout, 300))
-    workers = max(1, min(workers, 8))
-    overall_timeout = max(15, min(overall_timeout, 600))
-
-    holder: dict[str, Any] = {}
-
-    def _call():
-        with _intelligence_import_scope():
-            from monitoring.multisource import run_cycle
-
-            holder["result"] = run_cycle(
-                root,
-                db_path=db,
-                workers=workers,
-                timeout_seconds=source_timeout,
-                poll_interval_minutes=_int_env("MONITOR_INTERVAL_MINUTES", 15),
-            )
-
+        return {"status": "disabled", "mode": "embed", "execution": "subprocess", "sources": {}}
+    if not _CYCLE_LOCK.acquire(blocking=False):
+        return {"status": "skipped", "mode": "embed", "execution": "subprocess",
+                "error": "B collector already running", "sources": {}}
+    summary: dict[str, Any] = {"status": "failed", "mode": "embed", "execution": "subprocess"}
+    child = None
     try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            fut = pool.submit(_call)
-            fut.result(timeout=overall_timeout)
-        result = holder.get("result") or {"status": "failed", "error": "empty result"}
-    except FuturesTimeout:
-        result = {
-            "status": "timeout",
-            "error": "B monitor exceeded %ss wall clock — seed/partial DB kept" % overall_timeout,
-            "sources": {},
-        }
+        from api.b_embed import INTEL_ROOT, db_path
+        db = db_path()
+        source_timeout = _bounded(source_timeout, "B_MONITOR_SOURCE_TIMEOUT", 45, 5, 300)
+        workers = _bounded(workers, "B_MONITOR_WORKERS", 4, 1, 8)
+        overall_timeout = _bounded(overall_timeout, "B_MONITOR_OVERALL_TIMEOUT", 180, 1, 600)
+        poll_minutes = _bounded(None, "MONITOR_INTERVAL_MINUTES", 15, 1, 1440)
+        summary.update(db_path=str(db), source_timeout_seconds=source_timeout,
+                       workers=workers, overall_timeout_seconds=overall_timeout)
+        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+        with tempfile.TemporaryDirectory(prefix="b-monitor-") as temporary:
+            result_path = Path(temporary) / "result.json"
+            command = _worker_command(INTEL_ROOT, db, result_path, source_timeout, workers, poll_minutes)
+            with (Path(temporary) / "worker.log").open("wb") as log:
+                options = {"start_new_session": True} if os.name != "nt" else {
+                    "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW,
+                }
+                child = subprocess.Popen(command, cwd=INTEL_ROOT, env=env,
+                                         stdout=log, stderr=subprocess.STDOUT, **options)
+                try:
+                    child.wait(timeout=overall_timeout)
+                except subprocess.TimeoutExpired:
+                    stopped = _stop_process_tree(child)
+                    summary.update(status="timeout", termination_confirmed=stopped,
+                                   error="B collector deadline exceeded; committed data retained"
+                                         + ("; process tree termination unconfirmed" if not stopped else ""))
+                    return summary
+            if not result_path.is_file() or result_path.stat().st_size > _MAX_RESULT_BYTES:
+                summary["error"] = "B collector worker produced no valid result (exit %s)" % child.returncode
+                return summary
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(result, dict):
+                raise ValueError("B collector worker returned an invalid result")
+            sources = result.get("sources") or {}
+            if not isinstance(sources, dict):
+                raise ValueError("B collector worker returned invalid source names")
+            status = result.get("status") or "failed"
+            if child.returncode:
+                status = "failed"
+            summary.update(
+                status=status if status in {"success", "partial", "skipped", "timeout", "failed", "disabled"} else "partial",
+                configured_sources=result.get("configured_sources"),
+                success_sources=result.get("success_sources"),
+                failed_sources=result.get("failed_sources"),
+                source_names=sorted(sources), error=result.get("error"),
+            )
+            if child.returncode and not summary["error"]:
+                summary["error"] = "B collector worker failed (exit %s)" % child.returncode
+            return summary
     except Exception as exc:
-        result = {
-            "status": "failed",
-            "error": "%s: %s" % (type(exc).__name__, exc)[:200],
-            "sources": {},
-        }
-
-    status = result.get("status") or "failed"
-    sources = result.get("sources") or {}
-    summary = {
-        "status": status,
-        "mode": "embed",
-        "db_path": str(db),
-        "source_timeout_seconds": source_timeout,
-        "workers": workers,
-        "overall_timeout_seconds": overall_timeout,
-        "configured_sources": result.get("configured_sources"),
-        "success_sources": result.get("success_sources"),
-        "failed_sources": result.get("failed_sources"),
-        "source_names": sorted(sources.keys()) if isinstance(sources, dict) else [],
-        "error": result.get("error"),
-    }
-    if status in {"success", "partial", "skipped", "timeout", "failed", "disabled"}:
+        if child is not None and child.poll() is None:
+            summary["termination_confirmed"] = _stop_process_tree(child)
+        summary["error"] = "%s: B collector worker could not complete" % type(exc).__name__
         return summary
-    summary["status"] = "partial"
-    return summary
+    finally:
+        _CYCLE_LOCK.release()
 
 
 def run_b_monitor_async(callback=None) -> threading.Thread:
-    """Fire-and-forget wrapper for schedule startup (daemon)."""
-
     def _target():
         result = run_b_monitor_cycle()
         if callback:
@@ -170,7 +170,6 @@ def run_b_monitor_async(callback=None) -> threading.Thread:
                 callback(result)
             except Exception:
                 pass
-
     thread = threading.Thread(target=_target, name="b-monitor-cycle", daemon=True)
     thread.start()
     return thread
