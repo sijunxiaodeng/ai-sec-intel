@@ -465,17 +465,9 @@ function setTeamHealth(team) {
   if (team && team.enabled !== false && team.reachable === false) {
     el.hidden = false;
     var err = team.error || "";
-    var hint;
-    if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
-      hint = "多源情报数据尚未就绪；NVD / OSV 仍可继续刷新。";
-    } else if (/多源资料探测失败|聚合|Connection refused|8765/i.test(err)) {
-      hint = "多源情报暂时读不到；请稍后重试或联系维护人员。NVD / OSV 仍可继续。";
-    } else {
-      hint = "NVD / OSV 仍可继续刷新。";
-    }
-    el.textContent = "多源情报暂不可用"
+    el.textContent = "部分情报来源暂不可用"
       + (err ? "：" + err : "")
-      + "。" + hint;
+      + "。仍可查看已有情报，并继续刷新 NVD / OSV。";
   } else {
     el.hidden = true;
     el.textContent = "";
@@ -615,7 +607,7 @@ function renderMonitorLive(data, opts) {
     stateEl.textContent = "空闲";
     if (phaseEl) {
       phaseEl.textContent = data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
-        : "完成一轮后等待约 " + intervalText + " 自动刷新；也可点「立即刷新一轮」。非实时推流。";
+        : "约 " + intervalText + " 后自动刷新，也可立即刷新。";
     }
   }
   if (lastEl) {
@@ -1263,7 +1255,7 @@ function renderDetail(item) {
     ["CISA KEV", kevText(item.kev)],
     ["公开利用链接", item.poc_count ? item.poc_count + " 条链接" : "未见 Exploit 标记"],
     ["论文", item.paper_count ? item.paper_count + " 篇" : "尚未关联"],
-    ["记录类型", isDemoItem(item) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
+    ["记录类型", isDemoItem(item) ? "演示数据" : "联网/入库情报"]
   ].forEach(function (pair) {
     var field = add(fields, "div", "field");
     add(field, "span", "", pair[0]);
@@ -1762,13 +1754,13 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
         : ""));
   }
   if (rs.hit > 0 && (rs.inserted || 0) === 0) {
-    bits.push("查询返回含水位前历史行；水位后保留/新增少是增量正常——不等于没搜到");
+    bits.push("本轮无新增编号；已有情报仍可浏览");
   }
   if (team.enabled !== false && team.reachable === false) {
-    bits.push("多源情报不可用时仍应有 NVD/OSV 与本地资料");
+    bits.push("部分来源暂不可用，仍可查看 NVD / OSV 与已有资料");
   }
   if (teamDocs.enabled !== false && teamDocs.reachable === false) {
-    bits.push("资料摘要不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
+    bits.push("资料摘要暂不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : ""));
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
@@ -1877,7 +1869,7 @@ function runMonitorRefresh(options) {
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
       if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
-        done += " 查询返回含水位前历史；水位后保留少或新增 0 是增量正常（已入库修订未变，或已合并）。";
+        done += " 本轮无新增编号；可查看查询返回与水位后保留。";
       }
       if (data.status === "failed") done += " 采集未成功，当前显示保留的已有记录。";
       setMonitorStatus(done);

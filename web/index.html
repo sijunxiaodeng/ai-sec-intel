@@ -126,7 +126,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">默认定时自动刷新，也可立即刷新。情报流展示漏洞与已入库资料；条目「发布」为原文公开日，监测是否在跑请看「最近更新」。</p>
+            <p class="hint">自动汇聚漏洞与安全资料；可立即刷新，或等待定时更新。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -148,7 +148,7 @@
           </div>
           <div class="monitor-live-row" id="monitor-live-phase-row">
             <span class="monitor-live-label">说明</span>
-            <span id="monitor-live-phase">每轮完成后默认等待约 15 分钟；非实时推流</span>
+            <span id="monitor-live-phase">空闲时按计划自动刷新</span>
           </div>
           <div class="monitor-progress" id="monitor-progress" hidden>
             <div class="monitor-progress-bar" id="monitor-progress-bar"></div>
@@ -165,7 +165,7 @@
         <p id="team-health" class="hint team-health" hidden></p>
 
         <details class="filter-drawer" id="monitor-filter-drawer">
-          <summary>关键词筛选 / 定向补采</summary>
+          <summary>关键词筛选</summary>
           <form id="collect-form" class="toolbar monitor-keyword-bar">
             <label class="grow">关键词
               <input id="keyword" value="" placeholder="留空=全部；如 llm,ollama,vllm" />
