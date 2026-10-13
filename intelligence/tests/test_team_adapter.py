@@ -25,12 +25,11 @@ with patch.dict(sys.modules, {'models': model_module}):
 
 class TeamCollectorTests(unittest.TestCase):
     def setUp(self):
-        # These fixtures exercise the HTTP adapter, not the default embed path.
-        env = patch.dict(os.environ, {'TEAM_INTEL_MODE':'sidecar',
-                                      'TEAM_INTEL_UPSTREAM':'http://127.0.0.1:8765',
-                                      'TEAM_INTEL_BASE_URL':'http://127.0.0.1:8765'})
-        env.start()
-        self.addCleanup(env.stop)
+        self.enterContext(patch.dict(os.environ, {
+            'TEAM_INTEL_MODE': 'sidecar',
+            'TEAM_INTEL_UPSTREAM': 'http://127.0.0.1:8765',
+            'TEAM_INTEL_BASE_URL': 'http://127.0.0.1:8765',
+        }))
 
     def test_paginated_rows_are_normalized_and_query_encoded(self):
         rows = [{'cve_id': f'CVE-2026-{10000 + i}', 'raw_data': {}} for i in range(101)]

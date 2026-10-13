@@ -105,7 +105,8 @@ def serve_fixture_app(team_url, port):
     from unittest.mock import patch
     import uvicorn
     from agents import monitor_agent, orchestrator
-    from collectors.intelligence import IntelligenceCollector
+    from collectors.intelligence import IncrementalIntelligenceCollector
+    from collectors.team_documents import TeamDocumentCollector
     from rag.ingest import ingest
     from rag.library import sync_team, full_text
     from api.app import app
@@ -128,16 +129,22 @@ def serve_fixture_app(team_url, port):
                     "content_type": "text/plain", "url": url}
         raise TimeoutError("synthetic offline reference failure")
 
+    def sync_fixture(*args, **kwargs):
+        # The production adapter permits only fixed localhost ports. This
+        # isolated test explicitly injects our owned ephemeral-port collector.
+        collector = TeamDocumentCollector('http://127.0.0.1:8765',
+            max_documents=kwargs.get('max_documents', 30), use_changefeed=True)
+        collector.base_url = team_url
+        kwargs.pop('base_url', None)
+        kwargs['collector'] = collector
+        return sync_team(*args, **kwargs)
+
     with ExitStack() as stack:
-        stack.enter_context(patch.object(monitor_agent.NVDCollector, "collect",
-                                         side_effect=TimeoutError("synthetic NVD monitor failure")))
-        stack.enter_context(patch.object(monitor_agent.OSVCollector, "collect",
-                                         side_effect=TimeoutError("synthetic OSV monitor failure")))
-        stack.enter_context(patch.object(monitor_agent, "IntelligenceCollector",
-            side_effect=lambda keyword: IntelligenceCollector(keyword, base_url=team_url, timeout=2)))
+        stack.enter_context(patch.object(monitor_agent, "IncrementalIntelligenceCollector",
+            side_effect=lambda **kwargs: IncrementalIntelligenceCollector(base_url=team_url, **kwargs)))
         stack.enter_context(patch.object(orchestrator, "ingest",
             side_effect=lambda record, **kwargs: ingest(record, fetcher=fetch_fixture, **kwargs)))
-        stack.enter_context(patch("rag.library.sync_team", side_effect=lambda **kwargs: sync_team(base_url=team_url, **kwargs)))
+        stack.enter_context(patch("rag.library.sync_team", side_effect=sync_fixture))
         stack.enter_context(patch("rag.library.full_text", side_effect=lambda document_id: full_text(document_id, fetcher=fetch_fixture)))
         stack.enter_context(patch.object(urllib.request, "urlopen", side_effect=localhost_only))
         uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
@@ -224,7 +231,8 @@ def rehearse(directory, team_python):
         raw_responses.append({"path": path, "request": payload, "response": value})
         return value
 
-    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8",
+               AUTO_MONITOR_ENABLED="0", B_MONITOR_ENABLED="0", AUTO_INGEST_ON_COLLECT="0")
     db = directory / "intelligence.db"
     env["INTELLIGENCE_DB_PATH"] = str(db)
     processes = []
@@ -258,7 +266,8 @@ def rehearse(directory, team_python):
             require("team_collect_enrich_store", collected["count"] == 1
                     and collected["items"][0]["cve_id"] == CVE and collected["items"][0]["cvss"] == 9.8)
             failed_steps = [row for row in collected["steps"] if "失败" in row["action"]]
-            require("nvd_osv_failures_preserved", len(failed_steps) == 2)
+            require("only_b_import_used", not failed_steps and any("全部有效 AI 变更" in row["action"] for row in collected["steps"]))
+            request("/api/documents", {"cve_id": CVE})
             score = request("/api/ask", {"question": CVE + " 的 CVSS 评分、向量和来源是什么？"})
             require("score_and_source", "9.8" in score["answer"] and "CVSS:3.1/" in score["answer"]
                     and "synthetic-fixture" in score["answer"])
@@ -280,7 +289,7 @@ def rehearse(directory, team_python):
             require("unknown_cve_has_no_old_evidence", not unknown["evidence"] and "9.8" not in unknown["answer"])
             before = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             repeated = request("/api/collect", {"keyword": "ollama"})
-            require("repeat_collection_is_idempotent", repeated["count"] == 1)
+            require("repeat_collection_is_idempotent", repeated["count"] == 0 and repeated["kb_total"] == 1)
             inspection = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             require("document_failure_preserved", any(row["status"] == "error" for row in inspection["documents"]))
             require("bm25_without_vector_model", inspection["mode"] == "bm25")
@@ -300,7 +309,7 @@ def rehearse(directory, team_python):
             require("team_summary_qa_retains_scope_without_model", not library_answer["model_attempted"]
                     and "接口字段摘录" in library_answer["answer"] and "非原始全文" in library_answer["answer"])
             repeat_import = request("/api/library/team-sync", {"max_documents": 10})
-            require("repeat_team_document_import_is_stable", repeat_import["ok"] == 4 and repeat_import["changed"] == 0)
+            require("repeat_team_document_import_is_stable", repeat_import["changed"] == 0 and repeat_import["overview"]["documents"] == 4)
             library_state = json.loads(command([sys.executable, "-m", "questions.rehearse_team_chain", "--inspect"], source))
             require("team_api_snapshots_match_hashes", library_state["library_hashes_ok"])
             blog = next(doc for doc in docs if doc["document_type"] == "research_article")

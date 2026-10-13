@@ -35,6 +35,10 @@ class AIRelevanceClassifier:
         "model context protocol",
         "mcp server",
         "mcp client",
+        "提示注入",
+        "提示泄露",
+        "模型投毒",
+        "数据投毒",
     }
     AI_ENTITIES = {
 
@@ -54,6 +58,7 @@ class AIRelevanceClassifier:
 
         "model_and_data": [
             "huggingface",
+            "hugging face",
             "transformers",
             "sentence-transformers",
             "weaviate",
@@ -106,6 +111,8 @@ class AIRelevanceClassifier:
 
             "model poisoning": 3,
             "data poisoning": 3,
+            "模型投毒": 3,
+            "数据投毒": 3,
         },
 
         "ai_application_agent": {
@@ -122,6 +129,8 @@ class AIRelevanceClassifier:
             "mcp server": 3,
             "mcp client": 3,
             "model context protocol": 3,
+            "提示注入": 3,
+            "提示泄露": 3,
         },
 
         "ai_supply_chain": {

@@ -16,6 +16,7 @@ CLASSIFIER_FILES = (
     "classification/ai_relevance.py",
     "classification/hybrid_classifier.py",
     "classification/semantic_judge.py",
+    "classification/scope_policy.py",
 )
 
 
@@ -100,7 +101,8 @@ def _record(row: sqlite3.Row, full: bool = False, include_raw: bool = False) -> 
 
 class IntelligenceRepository:
     def __init__(self, db_path: Path, root: Path):
-        self.db_path = Path(db_path).resolve()
+        # Resolve current/ at connection time so atomic mirror swaps are visible.
+        self.db_path = Path(db_path).absolute()
         self.root = Path(root).resolve()
 
     @contextmanager
@@ -108,7 +110,7 @@ class IntelligenceRepository:
         """Open an SQLite URI in mode=ro; never initialize or mutate schemas."""
         if not self.db_path.is_file():
             raise FileNotFoundError(str(self.db_path))
-        uri = self.db_path.as_uri() + "?mode=ro"
+        uri = self.db_path.resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True, timeout=20)) as con:
             con.row_factory = sqlite3.Row
             con.execute("PRAGMA query_only = ON")

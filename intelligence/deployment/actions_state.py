@@ -170,7 +170,8 @@ def validate_baseline(path):
         raise StateError("Monitoring baseline must have a timezone")
 
 
-def save_state(source, destination, *, repository, branch, run_id):
+def save_state(source, destination, *, repository, branch, run_id, workflow=None,
+               collector_commit=None, run_number=None):
     source, destination = Path(source), Path(destination)
     if not (source / "intelligence.db").is_file() or not (source / "monitoring_baseline.json").is_file():
         raise StateError("No complete database/baseline available to snapshot")
@@ -197,6 +198,17 @@ def save_state(source, destination, *, repository, branch, run_id):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": {p.name: {"sha256": _sha256(p), "bytes": p.stat().st_size} for p in sorted(destination.iterdir())},
     }
+    # Deployment mirrors additionally bind the data to the exact main-branch
+    # workflow and code revision. Legacy snapshots remain restorable by the
+    # collector so the existing database/baselines can be migrated in place.
+    if workflow is not None:
+        manifest["workflow"] = workflow
+    if collector_commit is not None:
+        if re.fullmatch(r"[0-9a-fA-F]{40}", collector_commit) is None:
+            raise StateError("Collector commit must be a full hexadecimal SHA")
+        manifest["collector_commit"] = collector_commit.lower()
+    if run_number is not None:
+        manifest["run_number"] = int(run_number)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
 
@@ -340,6 +352,7 @@ def main(argv=None):
     parser.add_argument("--run-id", default=os.getenv("GITHUB_RUN_ID"))
     parser.add_argument("--run-number", default=os.getenv("GITHUB_RUN_NUMBER"))
     parser.add_argument("--run-attempt", default=os.getenv("GITHUB_RUN_ATTEMPT", "1"))
+    parser.add_argument("--collector-commit", default=os.getenv("GITHUB_SHA"))
     parser.add_argument("--uploaded-artifact-id")
     parser.add_argument("--keep", type=int, default=8)
     parser.add_argument("--workflow", default="intelligence-collect.yml")
@@ -352,7 +365,8 @@ def main(argv=None):
         if args.command == "save":
             if not args.source:
                 parser.error("--source is required for save")
-            save_state(args.source, args.directory, repository=args.repository, branch=args.branch, run_id=args.run_id)
+            save_state(args.source, args.directory, repository=args.repository, branch=args.branch, run_id=args.run_id,
+                       workflow=args.workflow, collector_commit=args.collector_commit, run_number=args.run_number)
             print("Public SQLite/history snapshot verified; no credentials or runtime files exported", flush=True)
         elif args.command == "restore-file":
             if not args.archive:

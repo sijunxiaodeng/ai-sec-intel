@@ -106,14 +106,28 @@ def run_b_monitor_cycle(
     child = None
     try:
         from api.b_embed import INTEL_ROOT, db_path
+        from intelligence.deployment.state_role import claim_role
         db = db_path()
+        # A mirror generation is immutable, even if its caller has write permission.
+        for parent in (db.parent, *db.parents):
+            marker = parent / ".writer-mode"
+            if marker.exists() and marker.read_text().strip() == "actions-mirror":
+                raise ValueError("Actions mirrors cannot run a second collector")
+        claim_role(db.parent, "collector")
         source_timeout = _bounded(source_timeout, "B_MONITOR_SOURCE_TIMEOUT", 45, 5, 300)
         workers = _bounded(workers, "B_MONITOR_WORKERS", 4, 1, 8)
         overall_timeout = _bounded(overall_timeout, "B_MONITOR_OVERALL_TIMEOUT", 180, 1, 600)
         poll_minutes = _bounded(None, "MONITOR_INTERVAL_MINUTES", 15, 1, 1440)
         summary.update(db_path=str(db), source_timeout_seconds=source_timeout,
                        workers=workers, overall_timeout_seconds=overall_timeout)
-        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+        env = dict(
+            os.environ,
+            PYTHONUTF8="1",
+            PYTHONIOENCODING="utf-8",
+            CLASSIFY_V5_MAX_LLM_CALLS="0",
+            CLASSIFY_V4_MAX_LLM_CALLS="0",
+        )
+        env.pop("DEEPSEEK_API_KEY", None)
         with tempfile.TemporaryDirectory(prefix="b-monitor-") as temporary:
             result_path = Path(temporary) / "result.json"
             command = _worker_command(INTEL_ROOT, db, result_path, source_timeout, workers, poll_minutes)

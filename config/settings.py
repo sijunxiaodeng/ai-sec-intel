@@ -6,8 +6,11 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-_configured_path = Path(os.environ.get("APP_SETTINGS_PATH") or ROOT / "config" / "local.json").expanduser()
-LOCAL = _configured_path if _configured_path.is_absolute() else ROOT / _configured_path
+if os.environ.get("OFFLINE_DEMO") == "1":
+    LOCAL = Path(os.environ.get("MAIN_DATA_DIR", ROOT / ".demo/offline/main-data")) / "model-settings.json"
+else:
+    _configured_path = Path(os.environ.get("APP_SETTINGS_PATH") or ROOT / "config" / "local.json").expanduser()
+    LOCAL = _configured_path if _configured_path.is_absolute() else ROOT / _configured_path
 
 DEFAULTS = {
     "base_url": "https://api.deepseek.com",

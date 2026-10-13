@@ -5,6 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || true)"
+if [[ "$mode" == "offline-compose" ]]; then
+  docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" down
+  rm -f "$DEMO_DIR/mode"
+  exit 0
+fi
 if [[ "$mode" == "compose" ]] || have_docker; then
   if have_docker; then
     log "stopping compose project $COMPOSE_PROJECT"
@@ -23,10 +28,6 @@ for name in b.pid main.pid; do
     rm -f "$DEMO_DIR/$name"
   fi
 done
-# Best-effort free fixed ports
-if command -v fuser >/dev/null 2>&1; then
-  fuser -k "${B_PORT}/tcp" 2>/dev/null || true
-  fuser -k "${MAIN_PORT}/tcp" 2>/dev/null || true
-fi
+# Only stop processes recorded by this demo; a shared port may belong to production.
 rm -f "$DEMO_DIR/mode"
 log "demo stopped"

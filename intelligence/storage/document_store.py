@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from collectors.documents import KnowledgeDocument
+from storage.changefeed import ensure_changefeed
 
 SOURCE_CATEGORIES = frozenset({
     "vulnerability_database", "security_community", "vendor_advisory",
@@ -130,6 +131,7 @@ class SQLiteDocumentStore:
             connection.execute("BEGIN IMMEDIATE")
             for statement in statements:
                 connection.execute(statement)
+            ensure_changefeed(connection)
 
     @staticmethod
     def _run_identity(source: str, category: str) -> tuple[str, str]:

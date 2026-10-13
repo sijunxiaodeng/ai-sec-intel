@@ -4,13 +4,18 @@ import json
 import os
 import tempfile
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
+from config.paths import DATA_ROOT
+
 ROOT = Path(__file__).resolve().parent.parent
-STATE_PATH = ROOT / "data" / "monitor.json"
-LOG_PATH = ROOT / "data" / "collect.log"
+STATE_PATH = DATA_ROOT / "monitor.json"
+LOG_PATH = DATA_ROOT / "collect.log"
+
+
 def _interval_minutes():
     # A minute-based setting wins; the old explicit hour setting still works.
     try:
@@ -25,6 +30,7 @@ def _interval_minutes():
 
 INTERVAL_MINUTES = _interval_minutes()
 INTERVAL_HOURS = INTERVAL_MINUTES / 60
+PUBLIC_LIBRARY_INTERVAL_HOURS = float(os.environ.get("PUBLIC_LIBRARY_INTERVAL_HOURS", "6"))
 AUTO_ENABLED = os.environ.get("AUTO_MONITOR_ENABLED", "1").strip().lower() not in {
     "0", "false", "no", "off",
 }
@@ -40,6 +46,7 @@ DEFAULT_KEYWORDS = os.environ.get(
 _STARTED = False
 _RUN_LOCK = threading.Lock()
 _STATE_LOCK = threading.RLock()
+_STOP = threading.Event()
 
 
 def _now():
@@ -62,12 +69,14 @@ def _read_state_unlocked():
 
 
 def _write_state(data):
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _STATE_LOCK:
-        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=STATE_PATH.parent,
-                                             prefix=STATE_PATH.name + ".", suffix=".tmp", delete=False) as handle:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=STATE_PATH.parent,
+                prefix=STATE_PATH.name + ".", suffix=".tmp", delete=False,
+            ) as handle:
                 temporary = Path(handle.name)
                 handle.write(json.dumps(data, ensure_ascii=False, indent=2))
                 handle.flush()
@@ -84,7 +93,7 @@ def ensure_state():
 
 
 def _ensure_state_unlocked():
-    data = _read_state()
+    data = _read_state_unlocked()
     previous = deepcopy(data)
     if not data.get("started_at"):
         data["started_at"] = _now()
@@ -96,6 +105,7 @@ def _ensure_state_unlocked():
     data.setdefault("last_error", "")
     data.setdefault("last_status", "")
     data.setdefault("last_warnings", [])
+    data.setdefault("source_results", [])
     data.setdefault("last_count", 0)
     data.setdefault("last_keyword", "")
     data.setdefault("running", False)
@@ -130,30 +140,52 @@ def parse_stamp(value):
 
 def countable_latency(records):
     """Count precise UTC-compatible live samples, excluding backfill and future time."""
-    from intelligence.monitoring.metrics import parse_timestamp
-
-    started = parse_timestamp(ensure_state().get("started_at"))
-    now = datetime.now(timezone.utc)
-    count = 0
-    if not started or started > now:
-        return 0
-    for record in records:
-        item = record.get("item") or {}
-        sources = item.get("sources") or [item.get("source")]
-        published = parse_timestamp(item.get("published_at"), nvd_utc="NVD" in sources)
-        collected = parse_timestamp(item.get("collected_at"))
-        if (not published or not collected or published < started or collected < started
-                or published > now or collected > now):
-            continue
-        if (collected - published).total_seconds() >= 0:
-            count += 1
-    return count
+    try:
+        from intelligence.monitoring.metrics import parse_timestamp
+        started = parse_timestamp(ensure_state().get("started_at"))
+        now = datetime.now(timezone.utc)
+        count = 0
+        if not started or started > now:
+            return 0
+        for record in records:
+            item = record.get("item") or {}
+            sources = item.get("sources") or [item.get("source")]
+            published = parse_timestamp(item.get("published_at"), nvd_utc="NVD" in sources)
+            collected = parse_timestamp(item.get("collected_at"))
+            if (not published or not collected or published < started or collected < started
+                    or published > now or collected > now):
+                continue
+            if (collected - published).total_seconds() >= 0:
+                count += 1
+        return count
+    except Exception:
+        started = parse_stamp(ensure_state().get("started_at"))
+        count = 0
+        if not started:
+            return 0
+        for record in records:
+            item = record.get("item") or {}
+            published = parse_stamp(item.get("published_at"))
+            collected = parse_stamp(item.get("collected_at"))
+            if not published or not collected or published < started:
+                continue
+            if (collected - published).total_seconds() >= 0:
+                count += 1
+        return count
 
 
 def log_line(text):
-    LOG_PATH.parent.mkdir(exist_ok=True)
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write("%s %s\n" % (_now(), text))
+
+
+def _patch_state(**values):
+    with _STATE_LOCK:
+        data = ensure_state()
+        data.update(values)
+        _write_state(data)
+        return data
 
 
 def mark_running(*, phase="starting", keyword=""):
@@ -190,7 +222,6 @@ def next_run_iso(data=None):
     if minutes is None:
         minutes = float(data.get("interval_hours") or INTERVAL_HOURS) * 60
     from datetime import timedelta
-
     nxt = last + timedelta(minutes=max(float(minutes), 1))
     return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -206,6 +237,8 @@ def library_outcome(result):
         return "skipped"
     if status == "partial":
         return "partial"
+    if status == "ok":
+        return "success"
     sources = result.get("sources") or []
     failed_sources = sum(s.get("status") in {"error", "failed"} for s in sources)
     attempted, succeeded = int(result.get("attempted") or 0), int(result.get("ok") or 0)
@@ -239,12 +272,16 @@ def combine_monitor_outcome(result, *, b_cycle=None, libraries=()):
     warnings = list(dict.fromkeys(warnings))
     if status != "failed" and warnings:
         status = "partial"
-    return {"status": status, "warnings": warnings,
-            "error": (result.get("error") or "本轮漏洞采集未完成，已有情报保留") if status == "failed"
-            else "；".join(warnings) if status == "partial" else ""}
+    return {
+        "status": status,
+        "warnings": warnings,
+        "error": (result.get("error") or "本轮漏洞采集未完成，已有情报保留") if status == "failed"
+        else "；".join(warnings) if status == "partial" else "",
+    }
 
 
-def mark_run(*, count=0, keyword="", error="", status=None, warnings=None, metrics=None):
+def mark_run(*, count=0, keyword="", error="", status=None, warnings=None,
+             metrics=None, source_results=None):
     """Update monitor state after a manual /api/monitor/run (or other external cycle)."""
     data = ensure_state()
     data["last_run"] = _now()
@@ -254,6 +291,8 @@ def mark_run(*, count=0, keyword="", error="", status=None, warnings=None, metri
     status = status or ("failed" if error else "success")
     data["last_status"] = status
     data["last_warnings"] = list(warnings or [])
+    if source_results is not None:
+        data["source_results"] = list(source_results or [])
     data["running"] = False
     data["run_phase"] = ""
     data["run_started_at"] = ""
@@ -268,10 +307,12 @@ def mark_run(*, count=0, keyword="", error="", status=None, warnings=None, metri
         if started and finished:
             pipe["elapsed_sec"] = max(0, int((finished - started).total_seconds()))
         if metrics:
-            pipe.setdefault("metrics", {}).update({key: int(value) for key, value in metrics.items() if value is not None})
+            pipe.setdefault("metrics", {}).update(
+                {key: int(value) for key, value in metrics.items() if value is not None})
         _recount(pipe)
         if status in {"partial", "failed"}:
-            pipe["summary"] = ("本轮监测未完成：" if status == "failed" else "本轮部分完成：") + (error or "；".join(warnings or []))
+            pipe["summary"] = ("本轮监测未完成：" if status == "failed" else "本轮部分完成：") + (
+                error or "；".join(warnings or []))
         elif not pipe.get("summary"):
             pipe["summary"] = "本轮查询完成，新增 %d 条；成功空轮不表示来源失败。" % data["last_count"]
     _write_state(data)
@@ -293,7 +334,8 @@ def run_once(keyword=None):
 def _run_once(keyword=None):
     from agents.orchestrator import run_collect
     from rag.library import sync as sync_library
-    from rag.library import sync_team
+    from rag.library import sync_team_drain
+    from automation.pipeline import begin_pipeline, update_stage, finish_pipeline
 
     keyword = (keyword or "").strip() or DEFAULT_KEYWORDS
     if not _RUN_LOCK.acquire(blocking=False):
@@ -301,30 +343,19 @@ def _run_once(keyword=None):
         data["last_error"] = "上一轮自动监测仍在进行"
         _write_state(data)
         log_line("跳过重叠的自动监测请求")
-        return ensure_state()
+        return dict(ensure_state(), skipped="overlapping_cycle")
 
     collect_error, b_result, result, library, team_library = None, None, None, None, None
     try:
-        data = ensure_state()
-        from automation.pipeline import empty_pipeline
-        pipe = empty_pipeline()
-        pipe.update(status="running", started_at=_now())
-        data["pipeline"] = pipe
-        data["running"] = True
-        data["last_error"] = ""
-        data["run_phase"] = "监测刷新中"
-        data["run_started_at"] = pipe["started_at"]
-        _write_state(data)
+        begin_pipeline()
+        mark_running(phase="监测刷新中", keyword=keyword)
 
         def on_phase(stage_id, **fields):
-            state = ensure_state()
-            for stage in (state.get("pipeline") or {}).get("stages", []):
-                if stage.get("id") == stage_id:
-                    stage.update({key: value for key, value in fields.items() if key != "phase"})
+            update_stage(stage_id, **fields)
             if fields.get("phase"):
-                state["run_phase"] = fields["phase"]
-            _write_state(state)
-        # Refresh B multi-source DB in-process before A reads team intel (embed).
+                mark_phase(fields["phase"])
+
+        # Refresh B multi-source DB in-process before A reads intel (embed).
         try:
             from api.b_embed import embed_enabled
             from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
@@ -351,60 +382,96 @@ def _run_once(keyword=None):
             result = run_collect(keyword, on_phase=on_phase)
         except Exception as exc:
             collect_error = exc
-            result = {"status": "failed", "error": "漏洞采集流程未完成（%s），已有资料保留。" % type(exc).__name__, "records": []}
+            result = {
+                "status": "failed",
+                "error": "漏洞采集流程未完成（%s），已有资料保留。" % type(exc).__name__,
+                "records": [],
+            }
             on_phase("monitoring", status="error", note=result["error"])
             on_phase("persist", status="skip", note="采集流程未完成，不追加新的入库操作")
 
         # Library synchronization is independent of CVE collection success.
-        on_phase("library_sync", status="running", phase="资料同步")
+        on_phase("library_sync", status="running", phase="资料同步",
+                 did="按持久游标同步知识资料")
         try:
             library = sync_library(include_seeds=False)
         except Exception as exc:
             library = {"status": "error", "error": "公开资料同步未完成（%s）" % type(exc).__name__}
-        # B has already refreshed its own store. Import its latest non-CVE
-        # summaries independently, even if public/CVE collection failed.
         try:
-            team_library = sync_team(max_documents=30)
+            team_library = sync_team_drain(max_documents=200)
         except Exception as exc:
             team_library = {"status": "error", "error": "资料摘要同步未完成（%s）" % type(exc).__name__}
         libraries = (("公开资料同步", library), ("资料摘要同步", team_library))
         library_states = [(label, library_outcome(value)) for label, value in libraries]
         configured_skip = library_outcome(team_library) == "skipped" and team_library.get("enabled") is False
-        issues = [label + "未全部同步" for label, state in library_states
-                  if state != "success" and not (label == "资料摘要同步" and configured_skip)]
+        issues = [
+            label + "未全部同步" for label, state in library_states
+            if state != "success" and not (label == "资料摘要同步" and configured_skip)
+        ]
         data = ensure_state()
         data["library_last_run"] = _now()
         data["library_last_ok"] = int(library.get("ok") or 0) + int(team_library.get("ok") or 0)
         data["library_last_error"] = "；".join(issues)
-        data["library_source_errors"] = [row["source_id"] for row in library.get("sources", [])
-                                         if row.get("status") in {"error", "failed"} and row.get("source_id")]
+        data["library_source_errors"] = [
+            row["source_id"] for row in library.get("sources", [])
+            if row.get("status") in {"error", "failed"} and row.get("source_id")
+        ]
         data["library_public_last_status"] = library_outcome(library)
         data["library_public_last_ok"] = int(library.get("ok") or 0)
         data["library_team_last_status"] = library_outcome(team_library)
         data["library_team_last_ok"] = int(team_library.get("ok") or 0)
         data["library_team_last_checked_at"] = _now()
-        data["library_team_last_error"] = "" if configured_skip or library_outcome(team_library) == "success" else "资料摘要未全部同步"
+        data["library_team_last_error"] = (
+            "" if configured_skip or library_outcome(team_library) == "success"
+            else "资料摘要未全部同步"
+        )
+        data["team_library_last_run"] = _now()
+        data["team_library_last_ok"] = int(team_library.get("ok") or 0)
+        data["team_library_last_error"] = data["library_team_last_error"]
         if not configured_skip:
             data["library_team_last_run"] = _now()
         _write_state(data)
-        active_states = [state for label, state in library_states
-                         if not (label == "资料摘要同步" and configured_skip)]
-        on_phase("library_sync", status="error" if all(state == "failed" for state in active_states) else "ok",
-                 got="公开 %s；资料摘要 %s" % (library_outcome(library), library_outcome(team_library)),
-                 note="；".join(issues) if issues else "已启用的资料同步完成（含合法空轮）")
+        active_states = [
+            state for label, state in library_states
+            if not (label == "资料摘要同步" and configured_skip)
+        ]
+        on_phase(
+            "library_sync",
+            status="error" if active_states and all(state == "failed" for state in active_states) else "ok",
+            got="公开 %s；资料摘要 %s" % (library_outcome(library), library_outcome(team_library)),
+            produced="本轮成功 %d 条" % (int(library.get("ok") or 0) + int(team_library.get("ok") or 0)),
+            note="；".join(issues) if issues else "已启用的资料同步完成（含合法空轮）",
+        )
         outcome = combine_monitor_outcome(result, b_cycle=b_result, libraries=libraries)
         if outcome["status"] == "failed":
             on_phase("monitoring", status="error", note=outcome["error"])
         round_stats = result.get("round_stats") or {}
-        mark_run(count=round_stats.get("inserted", 0), keyword=keyword,
-                 metrics={key: round_stats.get(key, 0) for key in ("hit", "kept", "inserted", "merged", "external_fetches")},
-                 **outcome)
-        log_line("自动监测 %s，关键词 %s，本轮新增 %d；%s" %
-                 (outcome["status"], keyword, int(round_stats.get("inserted") or 0), outcome["error"] or "查询完成"))
+        mark_run(
+            count=round_stats.get("inserted", 0),
+            keyword=keyword,
+            metrics={key: round_stats.get(key, 0) for key in ("hit", "kept", "inserted", "merged", "external_fetches")},
+            source_results=result.get("source_results"),
+            **outcome,
+        )
+        finish_pipeline(
+            ok=outcome["status"] == "success",
+            summary=outcome.get("error") or "",
+            metrics=round_stats,
+            tech_detail=result.get("tech_detail"),
+        )
+        log_line(
+            "自动监测 %s，关键词 %s，本轮新增 %d；%s"
+            % (outcome["status"], keyword, int(round_stats.get("inserted") or 0), outcome["error"] or "查询完成")
+        )
     except Exception as exc:
         collect_error = exc
         mark_run(count=0, keyword=keyword, status="failed", error="监测流程未完成（%s）" % type(exc).__name__)
+        try:
+            finish_pipeline(ok=False, summary=str(exc)[:200])
+        except Exception:
+            pass
     finally:
+        _patch_state(running=False, run_phase="", run_started_at="")
         _RUN_LOCK.release()
 
     if collect_error:
@@ -412,28 +479,63 @@ def _run_once(keyword=None):
     return ensure_state()
 
 
+def run_public_once():
+    from rag.library import sync as sync_library
+    try:
+        library = sync_library(include_seeds=False)
+        failures = [r["source_id"] for r in library["sources"] if r["status"] == "error"]
+        return _patch_state(
+            library_last_run=_now(),
+            library_last_epoch=time.time(),
+            library_last_ok=library["ok"],
+            library_last_error="部分来源失败" if failures else "",
+            library_source_errors=failures,
+        )
+    except Exception as exc:
+        return _patch_state(
+            library_last_run=_now(),
+            library_last_epoch=time.time(),
+            library_last_error=type(exc).__name__,
+        )
+
+
+def _public_loop():
+    # A slow catalog request never occupies the B synchronization lock.
+    while not _STOP.is_set():
+        data = ensure_state()
+        due = time.time() - float(data.get("library_last_epoch", 0)) >= PUBLIC_LIBRARY_INTERVAL_HOURS * 3600
+        if due:
+            run_public_once()
+        _STOP.wait(60)
+
+
 def _loop():
     if not AUTO_ENABLED:
         return
     ensure_state()
-    # Brief delay so uvicorn is accepting before the first collect hits NVD/OSV/B.
-    threading.Event().wait(2.0)
+    if _STOP.wait(2):
+        return
+    deadline = time.monotonic()
     if AUTO_ON_START:
         log_line("定时监测已启动：启动后立即自动跑一轮，之后每 %d 分钟。范围：宽范围 AI 安全。" % INTERVAL_MINUTES)
         try:
             run_once(DEFAULT_KEYWORDS)
         except Exception as exc:
-            # Keep the loop alive, but never silently drop the first-cycle failure.
             log_line("启动首轮自动监测失败（将按间隔重试）：%s: %s" % (type(exc).__name__, exc))
     else:
         log_line("定时监测已启动，间隔 %d 分钟。AUTO_MONITOR_ON_START 已关闭，启动不立即抓取。" % INTERVAL_MINUTES)
-    while True:
-        threading.Event().wait(INTERVAL_MINUTES * 60)
+        deadline += INTERVAL_MINUTES * 60
+    while not _STOP.is_set():
+        if _STOP.wait(max(0, deadline - time.monotonic())):
+            return
         try:
             run_once(DEFAULT_KEYWORDS)
         except Exception as exc:
             log_line("定时自动监测失败（继续等待下一轮）：%s: %s" % (type(exc).__name__, exc))
-            continue
+        deadline += INTERVAL_MINUTES * 60
+        if deadline < time.monotonic():
+            # No backlog of simultaneous cycles when one takes longer than the period.
+            deadline = time.monotonic()
 
 
 def start():
@@ -444,6 +546,15 @@ def start():
         ensure_state()
         return
     _STARTED = True
+    _STOP.clear()
     ensure_state()
-    thread = threading.Thread(target=_loop, name="monitor-schedule", daemon=True)
-    thread.start()
+    from automation.processing import start as start_processing
+    start_processing()
+    threading.Thread(target=_loop, name="monitor-schedule", daemon=True).start()
+    threading.Thread(target=_public_loop, name="public-library-schedule", daemon=True).start()
+
+
+def stop():
+    _STOP.set()
+    from automation.processing import stop as stop_processing
+    stop_processing()

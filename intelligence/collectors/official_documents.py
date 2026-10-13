@@ -15,17 +15,9 @@ import requests
 
 from collectors.documents import CollectionResult, KnowledgeDocument, make_document_id
 from collectors.http import _get
+from classification.scope_policy import classify_scope
 
 
-_AI = re.compile(
-    r"\b(?:artificial intelligence|machine learning|deep learning|generative ai|"
-    r"large language models?|foundation models?|neural networks?|llms?|ai)\b", re.I
-)
-_SECURITY = re.compile(
-    r"\b(?:security|cybersecurity|safety|safe|risk|risks|governance|privacy|"
-    r"trustworthy|responsible|adversarial|robustness|accountability|transparency|"
-    r"bias|discrimination|rights|model evaluation|model testing)\b", re.I
-)
 _CVE = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.I)
 _HEADERS = {'User-Agent': 'AI-Security-Intelligence-System/official-documents',
             'Accept': 'application/json, text/html;q=0.9'}
@@ -68,7 +60,9 @@ def _date_evidence(value):
 
 
 def _relevant(text):
-    return bool(_AI.search(text) and _SECURITY.search(text))
+    # The same policy handles government publications and community/vendor
+    # documents. Ambiguous evidence remains available for review.
+    return classify_scope(title=text, record_kind='document').is_ai_related is not False
 
 
 def _https_origin_url(url, host, path=None):

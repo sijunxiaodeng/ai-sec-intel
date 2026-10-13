@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from ai_pipeline.store import ClassificationStore
 from ai_pipeline.priority_v5 import plan_batch
 from ai_pipeline.worker_v5 import run_priority_batch
+from ai_pipeline.documents import run_document_batch
 from run_ai_classification_v4 import classifier_version, atomic_status
 
 ROOT = Path(__file__).resolve().parent
@@ -23,7 +24,7 @@ def main(argv=None):
     parser.add_argument("--max-items", type=int,
                         default=int(os.getenv("CLASSIFY_V5_MAX_ITEMS", "300")))
     parser.add_argument("--max-llm-calls", type=int,
-                        default=int(os.getenv("CLASSIFY_V5_MAX_LLM_CALLS", "2")))
+                        default=int(os.getenv("CLASSIFY_V5_MAX_LLM_CALLS", "0")))
     parser.add_argument("--preview", type=int, nargs="?", const=15,
                         help="查看优先队列前 N 项（可初始化分类表，不写分类结果，无需 API）")
     parser.add_argument("--stats", action="store_true", help="只看分类表统计")
@@ -50,6 +51,7 @@ def main(argv=None):
             try:
                 report = run_priority_batch(args.db, version, args.max_items,
                                             args.max_llm_calls)
+                report["documents"] = run_document_batch(args.db, version, args.max_items)
                 atomic_status(state_dir / "classification_status.json", {
                     "status": "success", "started_at": start,
                     "finished_at": utc_now(), "classifier_version": version,

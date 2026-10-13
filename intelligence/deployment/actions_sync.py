@@ -1,4 +1,4 @@
-"""Bridge GitHub Actions collection snapshots into a running deploy/demo DB.
+"""Deliver GitHub Actions snapshots to an isolated read-only deployment mirror.
 
 Actions already upload ``intelligence-state-<run_id>`` artifacts. This module
 is the missing deploy-side half:
@@ -7,9 +7,8 @@ is the missing deploy-side half:
 * ``install-file`` — install a locally downloaded zip (same validation)
 * ``push``  — POST a prepared snapshot directory/zip to a deploy ingest URL
 
-Install replaces only the allowlisted state files under the data directory; it
-does not wipe unrelated runtime files. Checksums and provenance match
-``actions_state.restore_archive``.
+Every entry point uses actions_mirror validation and an atomic current symlink.
+Collector data is never overwritten; rollback and lost observation history fail closed.
 """
 from __future__ import annotations
 
@@ -17,187 +16,38 @@ import argparse
 import io
 import json
 import os
-import shutil
-import tempfile
-import time
 import urllib.error
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from deployment.actions_state import (
-        ARTIFACT_PREFIX,
-        GitHubClient,
-        MAX_SNAPSHOT_BYTES,
-        REQUIRED_FILES,
-        STATE_FILES,
-        StateError,
-        _sha256,
-        validate_baseline,
-        validate_database,
-    )
-except ImportError:  # running as a sibling module under intelligence/deployment
-    from actions_state import (  # type: ignore
-        ARTIFACT_PREFIX,
-        GitHubClient,
-        MAX_SNAPSHOT_BYTES,
-        REQUIRED_FILES,
-        STATE_FILES,
-        StateError,
-        _sha256,
-        validate_baseline,
-        validate_database,
-    )
+    from .actions_state import GitHubClient, MAX_SNAPSHOT_BYTES, STATE_FILES, StateError
+    from .actions_mirror import deliver_latest, install_snapshot, latest_snapshot
+except ImportError:  # Direct script invocation.
+    from actions_state import GitHubClient, MAX_SNAPSHOT_BYTES, STATE_FILES, StateError
+    from actions_mirror import deliver_latest, install_snapshot, latest_snapshot
 
 SYNC_MARKER = "actions_sync.json"
 WORKFLOW_DEFAULT = "intelligence-collect.yml"
 
 
-def _utc_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def find_latest_state(client: GitHubClient, *, workflow: str, branch: str):
-    """Return (run, artifact) for the newest non-expired collector snapshot."""
-    for run in client.runs(workflow, branch):
-        if run.get("head_branch") != branch:
-            continue
-        if run.get("event") not in {"schedule", "workflow_dispatch"}:
-            continue
-        expected = ARTIFACT_PREFIX + str(run["id"])
-        matching = [
-            item
-            for item in client.artifacts(run["id"])
-            if item.get("name") == expected and not item.get("expired")
-        ]
-        if not matching:
-            continue
-        if len(matching) != 1:
-            raise StateError("Latest collector snapshot is ambiguous; refusing to pull")
-        return run, matching[0]
-    raise StateError("No durable Actions snapshot found to pull")
+    return latest_snapshot(client, workflow=workflow, branch=branch)
 
 
-def _stage_archive(payload: bytes, *, repository: str, branch: str, run_id: int) -> tuple[Path, dict, tempfile.TemporaryDirectory]:
-    if len(payload) > MAX_SNAPSHOT_BYTES:
-        raise StateError("Snapshot exceeds size limit")
-    temporary = tempfile.TemporaryDirectory(prefix="intel-sync-")
-    staged = Path(temporary.name)
-    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-        names = archive.namelist()
-        if len(names) != len(set(names)) or not set(names) <= STATE_FILES | {"manifest.json"}:
-            temporary.cleanup()
-            raise StateError("Unexpected or duplicate snapshot member")
-        if not REQUIRED_FILES | {"manifest.json"} <= set(names):
-            temporary.cleanup()
-            raise StateError("Snapshot is incomplete")
-        if sum(item.file_size for item in archive.infolist()) > MAX_SNAPSHOT_BYTES:
-            temporary.cleanup()
-            raise StateError("Expanded snapshot exceeds size limit")
-        for name in names:
-            (staged / name).write_bytes(archive.read(name))
-    try:
-        manifest = json.loads((staged / "manifest.json").read_text(encoding="utf-8"))
-        if (
-            manifest.get("format_version") != 1
-            or manifest.get("repository") != repository
-            or manifest.get("branch") != branch
-            or int(manifest.get("run_id")) != int(run_id)
-        ):
-            raise StateError("Snapshot provenance does not match expected repository/branch/run")
-        files = manifest.get("files") or {}
-        if set(files) != set(names) - {"manifest.json"}:
-            raise StateError("Snapshot manifest does not describe every file")
-        for name, expected in files.items():
-            path = staged / name
-            if expected.get("bytes") != path.stat().st_size or expected.get("sha256") != _sha256(path):
-                raise StateError("Snapshot checksum mismatch")
-        validate_database(staged / "intelligence.db")
-        validate_baseline(staged / "monitoring_baseline.json")
-    except Exception:
-        temporary.cleanup()
-        raise
-    return staged, manifest, temporary
+def install_archive(payload: bytes, destination: Path | str, *, repository: str,
+                    branch: str, run_id: int, source: str = "pull") -> dict:
+    """Publish a verified immutable generation; refuse collector directories."""
+    return install_snapshot(payload, destination, repository=repository,
+                            branch=branch, run_id=run_id, source=source)
 
 
-def install_archive(
-    payload: bytes,
-    destination: Path | str,
-    *,
-    repository: str,
-    branch: str,
-    run_id: int,
-    source: str = "pull",
-) -> dict:
-    """Validate zip and replace allowlisted state files in ``destination``."""
-    destination = Path(destination)
-    destination.mkdir(parents=True, exist_ok=True)
-    staged, manifest, temporary = _stage_archive(
-        payload, repository=repository, branch=branch, run_id=run_id
-    )
-    try:
-        backup_root = destination / (".actions-sync-backup-%s" % int(time.time()))
-        backed = []
-        for name in list(STATE_FILES) + ["manifest.json"]:
-            current = destination / name
-            if current.is_file() or current.is_symlink():
-                backup_root.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(current), str(backup_root / name))
-                backed.append(name)
-        # Drop SQLite sidecars so the process cannot reopen a stale WAL.
-        for side in ("intelligence.db-wal", "intelligence.db-shm"):
-            side_path = destination / side
-            if side_path.exists():
-                side_path.unlink()
-        installed = []
-        for name in sorted(p.name for p in staged.iterdir()):
-            shutil.copy2(staged / name, destination / name)
-            installed.append(name)
-        marker = {
-            "synced_at": _utc_now(),
-            "source": source,
-            "repository": repository,
-            "branch": branch,
-            "run_id": int(run_id),
-            "artifact_prefix": ARTIFACT_PREFIX,
-            "files": installed,
-            "backup": str(backup_root.name) if backed else None,
-            "manifest_created_at": manifest.get("created_at"),
-        }
-        (destination / SYNC_MARKER).write_text(
-            json.dumps(marker, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        return marker
-    finally:
-        temporary.cleanup()
-
-
-def pull_latest(
-    destination: Path | str,
-    *,
-    token: str,
-    repository: str,
-    branch: str = "main",
-    workflow: str = WORKFLOW_DEFAULT,
-    api_url: str = "https://api.github.com",
-) -> dict:
+def pull_latest(destination: Path | str, *, token: str, repository: str,
+                branch: str = "main", workflow: str = WORKFLOW_DEFAULT,
+                api_url: str = "https://api.github.com") -> dict:
     client = GitHubClient(token, repository, api_url=api_url)
-    run, artifact = find_latest_state(client, workflow=workflow, branch=branch)
-    payload = client.download(artifact["id"])
-    marker = install_archive(
-        payload,
-        destination,
-        repository=repository,
-        branch=branch,
-        run_id=int(run["id"]),
-        source="github-artifact",
-    )
-    marker["artifact_id"] = artifact["id"]
-    marker["artifact_name"] = artifact.get("name")
-    marker["workflow_run_url"] = run.get("html_url")
-    return marker
+    return deliver_latest(client, destination, workflow=workflow, branch=branch)
 
 
 def zip_directory(directory: Path | str) -> bytes:
@@ -205,7 +55,7 @@ def zip_directory(directory: Path | str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(directory.iterdir()):
-            if path.is_file() and not path.name.startswith("."):
+            if path.is_file() and path.name in STATE_FILES | {"manifest.json"}:
                 archive.write(path, arcname=path.name)
     return buffer.getvalue()
 
@@ -261,7 +111,7 @@ def push_snapshot(
 
 
 def read_sync_marker(destination: Path | str) -> dict | None:
-    path = Path(destination) / SYNC_MARKER
+    path = Path(destination) / "current" / "manifest.json"
     if not path.is_file():
         return None
     try:
@@ -274,7 +124,7 @@ def read_sync_marker(destination: Path | str) -> dict | None:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("pull", "install-file", "push", "status"))
-    parser.add_argument("--directory", default=os.getenv("INTELLIGENCE_DATA_DIR") or "intelligence/data")
+    parser.add_argument("--directory", default=os.getenv("ACTIONS_SYNC_DIRECTORY") or "intelligence/actions-mirror")
     parser.add_argument("--archive")
     parser.add_argument("--repository", default=os.getenv("GITHUB_REPOSITORY") or "sijunxiaodeng/ai-sec-intel")
     parser.add_argument("--branch", default=os.getenv("ACTIONS_SYNC_BRANCH") or "main")
@@ -334,7 +184,7 @@ def main(argv=None):
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except StateError as exc:
+    except (StateError, RuntimeError, OSError, ValueError, zipfile.BadZipFile) as exc:
         print("ERROR: %s" % exc, flush=True)
         return 2
 

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 from dotenv import load_dotenv
 
 from collectors.cisa_kev import CISAKEVCollector
+from collectors.osv import OSVCollector
 from collectors.documents import ArxivCollector, FeedCollector, GitHubVendorAdvisoryCollector
 from collectors.official_documents import FederalRegisterPolicyCollector, NISTStandardCollector
 from incremental.api_collectors import GithubModifiedCollector, NVDModifiedCollector
@@ -79,6 +80,7 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             'nvd': ('NVD', 'https://services.nvd.nist.gov/rest/json/cves/2.0'),
             'github': ('GITHUB_ADVISORY', 'https://api.github.com/advisories'),
             'cisa': ('CISA_KEV', CISAKEVCollector.FEED_URL),
+            'osv': ('OSV', OSVCollector.QUERY_URL),
         }
         if spec.kind in fixed:
             name, url = fixed[spec.kind]
@@ -118,10 +120,14 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             return {'source': spec.name, 'category': spec.category,
                     'status': 'partial' if backlog['pending'] else 'success',
                     **recent_counts, 'recent_success': True, 'pending': backlog['pending'], 'backfill': backlog}
-        if spec.kind == 'cisa':
-            collector = collector or CISAKEVCollector()
+        if spec.kind in ('cisa', 'osv'):
+            collector = collector or (CISAKEVCollector() if spec.kind == 'cisa' else OSVCollector(**spec.options))
             rows = collector.collect()
+            advisory_documents = OSVCollector.documents(rows) if spec.kind == 'osv' else None
             result = store.ingest_batch(spec.name, rows, started_at=started)
+            if advisory_documents is not None:
+                result['documents'] = documents.ingest(spec.name, spec.category, advisory_documents,
+                                                       started_at=started)
             result['endpoint_used'] = getattr(collector, 'endpoint_used', None)
         else:
             collector = collector or document_collector(spec, now)
@@ -141,7 +147,7 @@ def collect_source(spec, db_path, *, now=None, collector=None):
         return {'source': spec.name, 'category': spec.category, 'status': 'success', **result, 'pending': False}
     except Exception as exc:
         error = safe_error(exc)
-        if spec.kind in ('nvd', 'github', 'cisa'):
+        if spec.kind in ('nvd', 'github', 'cisa', 'osv'):
             store.record_failure(spec.name, error, started)
         else:
             documents.record_failure(spec.name, spec.category, error, started_at=started)
@@ -184,7 +190,7 @@ def _run_child(root, spec, db_path, config_path, timeout_seconds):
         return result
     except Exception as exc:
         error = f'TimeoutError: 采集超过 {timeout_seconds} 秒，子进程已停止' if isinstance(exc, subprocess.TimeoutExpired) else safe_error(exc)
-        if spec.kind in ('nvd', 'github', 'cisa'):
+        if spec.kind in ('nvd', 'github', 'cisa', 'osv'):
             SQLiteIntelligenceStore(db_path).record_failure(spec.name, error, started)
         else:
             SQLiteDocumentStore(db_path).record_failure(spec.name, spec.category, error, started_at=started)

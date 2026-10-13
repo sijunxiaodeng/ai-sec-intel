@@ -6,6 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=demo-lib.sh
 source "$SCRIPT_DIR/demo-lib.sh"
 
+mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || echo local)"
+if [[ "$mode" == offline-* ]]; then
+  python3 "$SCRIPT_DIR/check_container_integration.py" --base-url "$MAIN_URL" --preloaded
+  log "offline synthetic smoke passed; no public collection or model calls"
+  exit 0
+fi
+
 OUT="${DEMO_SMOKE_OUT:-$DEMO_DIR/smoke-last}"
 mkdir -p "$OUT"
 KEYWORD="${DEMO_KEYWORD:-llm}"

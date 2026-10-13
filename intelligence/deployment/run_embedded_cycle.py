@@ -1,4 +1,4 @@
-"""Private process entry point for A's local B collector."""
+"""Private process entry point for A's explicitly enabled local B collector."""
 from __future__ import annotations
 
 import argparse

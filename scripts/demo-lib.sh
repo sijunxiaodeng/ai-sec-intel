@@ -6,6 +6,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DEMO_DIR="${DEMO_DIR:-$ROOT/.demo}"
+DEMO_B_DB="$DEMO_DIR/b-data/intelligence.db"
+DEMO_MAIN_DATA_DIR="$DEMO_DIR/main-data"
+DEMO_ACTIONS_MODE=0
+case "${ACTIONS_SYNC_PULL:-${ACTIONS_SYNC_ON_START:-0}}" in
+  1|true|yes|on)
+    DEMO_ACTIONS_MODE=1
+    DEMO_B_DB="$DEMO_DIR/actions-mirror/current/intelligence.db"
+    DEMO_MAIN_DATA_DIR="$DEMO_DIR/actions-main-data"
+    export ACTIONS_SYNC_DIRECTORY="$DEMO_DIR/actions-mirror"
+    export MAIN_IMPORT_DEMO_CARDS=0
+    export B_MONITOR_ENABLED=0 B_MONITOR_ON_REFRESH=0 DEMO_B_MONITOR=0
+    ;;
+esac
 B_PORT="${B_PORT:-8765}"
 MAIN_PORT="${MAIN_PORT:-8023}"
 B_URL="http://127.0.0.1:${B_PORT}"
@@ -54,8 +67,14 @@ ensure_venvs() {
   if [[ ! -x "$ROOT/.venv/bin/python" ]]; then
     log "creating root .venv (unified demo runtime)"
     python3 -m venv "$ROOT/.venv"
-    "$ROOT/.venv/bin/python" -m pip install -U pip -q
+  fi
+  # Refresh an existing old environment when the shared requirements change.
+  local fingerprint
+  fingerprint="$(python3 -c 'import hashlib,pathlib; print(hashlib.sha256(b"".join(pathlib.Path(p).read_bytes() for p in ["requirements.txt","intelligence/requirements.lock.txt"])).hexdigest())')"
+  if [[ "$(cat "$ROOT/.venv/.requirements-sha256" 2>/dev/null || true)" != "$fingerprint" ]]; then
     "$ROOT/.venv/bin/python" -m pip install -q -r "$ROOT/requirements.txt"
+    "$ROOT/.venv/bin/python" -m pip check
+    printf '%s\n' "$fingerprint" > "$ROOT/.venv/.requirements-sha256"
   fi
   # Legacy sidecar / B lockfile isolation only when explicitly requested.
   if [[ "${TEAM_INTEL_MODE:-embed}" == "sidecar" || "${DEMO_B_SIDECAR:-0}" == "1" ]]; then
@@ -82,37 +101,34 @@ pull_actions_state_if_configured() {
     return 1
   fi
   ensure_venvs
-  mkdir -p "$ROOT/intelligence/data"
-  log "pulling latest GitHub Actions intelligence snapshot into intelligence/data …"
+  mkdir -p "$DEMO_DIR/actions-mirror"
+  log "pulling verified Actions state into isolated .demo/actions-mirror …"
   if (
     cd "$ROOT"
-    PYTHONPATH="$ROOT/intelligence" \
+    PYTHONPATH="$ROOT/intelligence" ACTIONS_SYNC_TOKEN="$token" \
       "$ROOT/.venv/bin/python" "$ROOT/intelligence/deployment/actions_sync.py" pull \
-        --directory "$ROOT/intelligence/data" \
+        --directory "$DEMO_DIR/actions-mirror" \
         --repository "${ACTIONS_SYNC_REPOSITORY:-${GITHUB_REPOSITORY:-sijunxiaodeng/ai-sec-intel}}" \
-        --branch "${ACTIONS_SYNC_BRANCH:-main}" \
-        --token "$token"
+        --branch "${ACTIONS_SYNC_BRANCH:-main}"
   ); then
     log "Actions snapshot installed (skip synthetic seed)"
     return 0
   fi
-  log "Actions pull failed — will fall back to seed if needed"
+  log "Actions pull failed — previous verified mirror retained; no synthetic seed installed"
   return 1
 }
 
 seed_local_db() {
   ensure_venvs
-  mkdir -p "$ROOT/intelligence/data"
-  if pull_actions_state_if_configured; then
+  if [[ "$DEMO_ACTIONS_MODE" == "1" ]]; then
+    pull_actions_state_if_configured || die "Actions pull failed; retry delivery before starting the mirror"
     return 0
   fi
-  if [[ ! -f "$ROOT/intelligence/data/intelligence.db" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
-    log "seeding offline B demo DB (root .venv)"
-    (
-      cd "$ROOT/intelligence"
-      PYTHONPATH="$ROOT/intelligence" \
-        "$ROOT/.venv/bin/python" seed_demo_db.py --force
-    )
+  mkdir -p "$(dirname "$DEMO_B_DB")"
+  if [[ ! -f "$DEMO_B_DB" || "${DEMO_FORCE_SEED:-0}" == "1" ]]; then
+    log "seeding isolated offline B demo DB"
+    PYTHONPATH="$ROOT/intelligence" \
+      "$ROOT/.venv/bin/python" "$ROOT/intelligence/seed_demo_db.py" --db "$DEMO_B_DB" --force
   else
     log "B demo DB already present (set DEMO_FORCE_SEED=1 to recreate; ACTIONS_SYNC_PULL=1 to pull Actions)"
   fi

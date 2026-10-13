@@ -4,15 +4,25 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from functools import wraps
 
-from automation.schedule import ensure_state, _write_state
+from automation.schedule import ensure_state, _write_state, _STATE_LOCK
+
+
+def _state_transaction(function):
+    """Keep each read/modify/write atomic with scheduler state updates."""
+    @wraps(function)
+    def locked(*args, **kwargs):
+        with _STATE_LOCK:
+            return function(*args, **kwargs)
+    return locked
 
 # Product-level stages only. Internal collectors stay in code, not in UI checklist.
 STAGE_DEFS = [
     {
         "id": "monitoring",
         "title": "监测中",
-        "subtitle": "多方面来源一并抓取",
+        "subtitle": "同步多源已分类情报及变更",
     },
     {
         "id": "persist",
@@ -69,6 +79,7 @@ def empty_pipeline():
     }
 
 
+@_state_transaction
 def begin_pipeline():
     pipe = empty_pipeline()
     pipe["status"] = "running"
@@ -106,6 +117,7 @@ def _sync_stage_copy(pipe):
     return changed
 
 
+@_state_transaction
 def _load_pipeline():
     data = ensure_state()
     pipe = data.get("pipeline")
@@ -142,6 +154,7 @@ def _load_pipeline():
     return data, pipe
 
 
+@_state_transaction
 def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="", note="", phase=None):
     data, pipe = _load_pipeline()
     for stage in pipe.get("stages") or []:
@@ -173,6 +186,7 @@ def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="
     return pipe
 
 
+@_state_transaction
 def set_tech_detail(text):
     """Single optional technical note (e.g. 多方面来源摘要), not a stage checklist."""
     data, pipe = _load_pipeline()
@@ -182,6 +196,7 @@ def set_tech_detail(text):
     return pipe
 
 
+@_state_transaction
 def bump_metrics(**kwargs):
     data, pipe = _load_pipeline()
     metrics = pipe.setdefault("metrics", {})
@@ -223,6 +238,7 @@ def _recount(pipe):
         pipe["elapsed_sec"] = _elapsed_sec(pipe.get("started_at"))
 
 
+@_state_transaction
 def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     data, pipe = _load_pipeline()
     pipe["status"] = "done" if ok else "error"
@@ -232,6 +248,13 @@ def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
         pipe["metrics"].update({k: int(v) for k, v in metrics.items() if v is not None})
     if tech_detail is not None:
         pipe["tech_detail"] = (tech_detail or "")[:500]
+    # A finished cycle must not leave the UI showing a permanently running step.
+    for stage in pipe.get("stages") or []:
+        if stage.get("status") == "running":
+            stage["status"] = "ok" if ok else "error"
+        elif stage.get("status") == "pending":
+            stage["status"] = "skip"
+            stage["note"] = "本轮未执行此阶段"
     _recount(pipe)
     if summary:
         pipe["summary"] = summary
@@ -258,6 +281,7 @@ def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     return deepcopy(pipe)
 
 
+@_state_transaction
 def get_pipeline():
     _data, pipe = _load_pipeline()
     pipe = deepcopy(pipe)

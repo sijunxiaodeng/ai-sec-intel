@@ -23,13 +23,13 @@ INTELLIGENCE_DB_PATH=data/intelligence.db python run_intelligence_api_v6.py
 
 新增 GitHub Actions 定时任务，由 GitHub 的云端机器执行，每 15 分钟采集一轮，不依赖个人电脑开机。每轮恢复上一轮的 SQLite 数据库、增量游标和观察基线，采集后保存一致性快照，保留原始首次入库时间。状态缺失或损坏会明确失败，不以空数据库重置历史；成功上传后只保留最近八份状态快照。
 
-默认分支需要包含 `.github/workflows/intelligence-collect.yml`；该任务运行时读取 `feat/intelligence` 的 B 代码，不要求把 A/C 主应用一起部署。首次部署可迁移已有公开采集数据库；默认模型调用预算为 0。部署、迁移与查询最新云端结果见 [GitHub Actions 部署说明](deployment/ACTIONS.md)。
+默认分支需要包含 `.github/workflows/intelligence-collect.yml`；该任务固定读取该次 `main` 运行的代码 SHA。首次部署可迁移已有公开采集数据库；默认采集模型调用预算为 0。部署、迁移与查询最新云端结果见 [GitHub Actions 部署说明](deployment/ACTIONS.md)。正式数据共库与自动校验交付见 [正式数据部署与交付](../docs/正式数据部署与交付.md)。
 
-GitHub 定时任务可能排队或延迟，实际发布时间到首次入库的六小时时效继续如实统计。Actions 负责采集和持久化，不提供常驻网页或 HTTP API；本地 API 需要同步最新快照才能读取云端更新。电脑关机不会停止已启用的 GitHub 定时任务。
+GitHub 定时任务可能排队或延迟，实际发布时间到首次入库的六小时时效继续如实统计。Actions 负责采集和持久化，不提供常驻网页或 HTTP API；`docker-compose.actions.yml` 自动校验并交付最新快照到本地只读 API。电脑关机不会停止已启用的 GitHub 定时任务，但关机的电脑无法提供网页/API。
 
 ## 安装
 
-Python 3.10 或更新版本；此前本地验证使用 Python 3.12。B 的 FastAPI 版本与仓库根目录旧版本不同，使用独立虚拟环境，不覆盖队友的依赖环境。
+Python 3.10 或更新版本；此前本地验证使用 Python 3.12。A/B/C 已统一核心依赖：根 requirements.txt 引用本目录 requirements.lock.txt。同一个虚拟环境可以安装两份清单；生产环境也可分进程/容器隔离。
 
 在仓库根目录进入 `intelligence`，除容器命令外，后续命令均在此目录执行：
 
@@ -64,10 +64,11 @@ Windows PowerShell 将激活命令改为 `.venv\Scripts\Activate.ps1`；也可�
 
 来源定义在 `monitoring/source_registry.py`。各类已有真实入库证据，Ollama 厂商公告成功返回零条，不额外增加实际覆盖；最近 arXiv 请求失败，先前 318 条论文保留。这些结果不保证上游持续可达、接口长期兼容或采集范围完整。
 
-默认来源及 CISA 官方镜像需要以下 9 个 HTTPS 域名：
+默认来源及 CISA 官方镜像需要以下 10 个 HTTPS 域名：
 
 ```text
 services.nvd.nist.gov
+api.osv.dev
 api.github.com
 www.cisa.gov
 discuss.huggingface.co
@@ -164,11 +165,11 @@ API 不会启动监测。默认数据库为 `data/intelligence.db`；监测的 `
 团队 CVE 接口可用 `ai_only=false` 查询全部漏洞；`include_review=true` 显式纳入待复核正例，标记在 `raw_data.classification`。缺少的信息留空，不推断不存在的修复版本或 CVSS 版本。A 在根目录可以调用：
 
 ```python
-from collectors.intelligence import IntelligenceCollector
-items = IntelligenceCollector(keyword="ollama").collect()
+from agents.orchestrator import run_collect
+result = run_collect()  # 完整同步有效 AI 变更并提交持久游标
 ```
 
-该适配器读取 B 本地 HTTP 服务，返回团队已有模型格式。A 仍需将其注册到主监测/编排流程。非 CVE 文档 API 已实现，但主系统的数据模型、富化、索引和问答尚需 A/C 接入；CVE 卡片适配器不能自动完成该工作。保持独立进程，通过 HTTP 交接，避免在一个进程直接导入两套同名顶层 `collectors` 包。
+A 的编排已接入完整变更同步与数据库事务；文档、富化、索引通过独立游标和持久任务继续处理。API 可以内置或独立部署；采集子进程避免同名顶层 `collectors` 包冲突。
 
 ## 容器运行与运行证据
 
@@ -180,7 +181,7 @@ docker compose -f intelligence/compose.yml ps
 docker compose -f intelligence/compose.yml logs -f
 ```
 
-`intelligence/Dockerfile` 只构建 B，容器工作目录为 `/app`。Compose 的 `monitor` 和 `api` 服务分别运行默认 15 分钟多源监测和 8765 API，两者共享 `/app/data` 的 SQLite、状态和日志数据卷；宿主机 API 仅绑定 `127.0.0.1:8765`。该部署不启动团队主应用、不自动注册 A/C 适配器，也不提供尚未集成的非 CVE 问答。停止使用 `docker compose -f intelligence/compose.yml down`；保留数据卷，不使用 `down -v` 清除观测证据。
+`intelligence/Dockerfile` 只构建 B，容器工作目录为 `/app`。Compose 的 `monitor` 和 `api` 服务分别运行默认 15 分钟多源监测和 8765 API，两者共享 `/app/data` 的 SQLite、状态和日志数据卷；宿主机 API 仅绑定 `127.0.0.1:8765`。该 B 专用部署不启动团队主应用；完整系统使用根目录正式 Compose 配置。停止使用 `docker compose -f intelligence/compose.yml down`；保留数据卷，不使用 `down -v` 清除观测证据。
 
 可选 `.env` 的 Compose 写法需要 Docker Compose 2.24 或更新。当前云实例 Docker 构建网络存在 DNS 限制；使用相同锁定依赖的离线 wheel 构建验证容器运行，普通联网构建应在具备容器网络的部署机验证。当前实例实际持续服务使用 B 的独立虚拟环境，PID 和日志在 `data/api.pid`、`data/daemon.pid`、`data/api.log`、`data/daemon.log`；云实例关闭后需重新启动服务。
 
@@ -202,3 +203,7 @@ python -m pip check
 验收至少需要 `observed_ai_category_count >= 7` 的真实内容并逐类核对来源、可信精确时间的新漏洞实时样本、零严格六小时违约及可解释的未知时间记录，还需连续运行、失败恢复和漏采检查证据。文档的 AI 数量是来源采集器过滤出的主题候选，不能作为测得的分类准确率。配置八类、成功空轮询、无样本、历史回填或仅有日期都不能证明达标；已观察样本达标也不能保证未知、漏采、上游迟发布或未来内容的时效。
 
 更多赛题对照、团队责任及待验证项见 [赛题差距与交接.md](赛题差距与交接.md)。
+
+OSV 已合入 B 的来源目录：按明确 PyPI/Go 包查询全部分页，再一起入库；失败不会提交截断结果，不通过关键词猜 GitHub 包地址。OSV 属于漏洞数据库类，不增加来源类别数量。遇到提供方返回已撤回公告时，此源记录失败并等待审查，不把撤回公告作为新漏洞成功导入。
+
+OSV 公告同时保留稳定资料身份；没有 CVE 别名的公告也进入文档分类和变更流，不伪造 CVE。后续添加 CVE 时更新原资料关联。此目录数量是配置数量，实际七类覆盖和六小时时效仍需真实数据观察。

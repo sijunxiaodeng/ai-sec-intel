@@ -37,7 +37,7 @@ class SourceRegistryTests(unittest.TestCase):
 
     def test_default_catalog_has_all_eight_categories_with_independent_community(self):
         sources = get_sources()
-        self.assertEqual(12, len(sources))
+        self.assertEqual(13, len(sources))
         self.assertEqual(SOURCE_CATEGORIES, {source.category for source in sources})
         self.assertEqual('vulnerability_database', get_source('GITHUB_ADVISORY').category)
         community = get_source('HF_SECURITY_COMMUNITY')

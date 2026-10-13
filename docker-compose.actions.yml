@@ -1,0 +1,83 @@
+# Actions is the only collector; this deployment consumes verified artifacts.
+# No b-monitor or b-seed service exists here. Never combine with production.yml.
+name: ai-sec-intel-actions
+
+services:
+  b-mirror:
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile
+    image: ai-sec-intel-b:production
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env.production
+        required: false
+    environment:
+      GITHUB_REPOSITORY: sijunxiaodeng/ai-sec-intel
+    volumes:
+      - b-actions-mirror-data:/app/data
+    command: ["python", "deployment/actions_mirror.py", "--directory", "/app/data", "--interval-seconds", "60"]
+
+  b-api:
+    build:
+      context: ./intelligence
+      dockerfile: Dockerfile
+    image: ai-sec-intel-b:production
+    restart: unless-stopped
+    init: true
+    environment:
+      INTELLIGENCE_DB_PATH: /app/data/current/intelligence.db
+      PYTHONUTF8: "1"
+    volumes:
+      - b-actions-mirror-data:/app/data:ro
+    ports:
+      - "127.0.0.1:8765:8765"
+    command: ["python", "run_intelligence_api_v6.py", "--host", "0.0.0.0", "--port", "8765"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,json; assert json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/intelligence/health',timeout=5)).get('database_available') is True"]
+      interval: 15s
+      timeout: 8s
+      start_period: 45s
+      retries: 8
+
+  main-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-sec-intel-main:production
+    restart: unless-stopped
+    init: true
+    depends_on:
+      b-api:
+        condition: service_healthy
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8023"
+      TEAM_INTEL_MODE: sidecar
+      TEAM_INTEL_PROXY: "1"
+      TEAM_INTEL_UPSTREAM: http://b-api:8765
+      TEAM_INTEL_BASE_URL: http://b-api:8765
+      B_MONITOR_ENABLED: "0"
+      B_MONITOR_ON_REFRESH: "0"
+      MAIN_DATA_DIR: /app/data
+      MAIN_IMPORT_DEMO_CARDS: "0"
+      TEAM_ONLY_COLLECT: "1"
+      AUTO_INGEST_ON_COLLECT: "1"
+      MONITOR_INTERVAL_MINUTES: "15"
+      PUBLIC_LIBRARY_INTERVAL_HOURS: "6"
+      PYTHONUTF8: "1"
+    volumes:
+      - main-actions-data:/app/data
+    ports:
+      - "127.0.0.1:8023:8023"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8023/api/overview',timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      start_period: 25s
+      retries: 5
+
+volumes:
+  b-actions-mirror-data:
+  main-actions-data:

@@ -1,2 +1,2 @@
 -r requirements.txt
-httpx==0.24.1
+# HTTP test client is pinned by the shared B lock included above.

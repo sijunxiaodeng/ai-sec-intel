@@ -15,6 +15,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from ai_pipeline.store import ClassificationStore
+from ai_pipeline.documents import run_document_batch
 from api_v6.app import create_app
 from api_v6.repository import current_classifier_version
 from collectors.base import IntelligenceItem
@@ -95,10 +96,10 @@ class MultisourceTests(unittest.TestCase):
             result = run_cycle(ROOT, db_path=db, child_runner=worker)
             self.assertEqual(result['status'], 'partial')
             self.assertEqual(result['failed_sources'], 1)
-            self.assertEqual(len(calls), 12)
+            self.assertEqual(len(calls), 13)
             self.assertEqual(len({v['category'] for v in result['sources'].values()}), 8)
             with closing(sqlite3.connect(db)) as con, con:
-                self.assertEqual(con.execute('SELECT COUNT(*) FROM source_observation_baselines').fetchone()[0], 12)
+                self.assertEqual(con.execute('SELECT COUNT(*) FROM source_observation_baselines').fetchone()[0], 13)
             self.assertEqual(json.loads((db.parent / 'monitoring_status.json').read_text())['status'], 'partial')
 
     def test_timeout_records_failure_without_advancing_http_state(self):
@@ -169,9 +170,10 @@ class KnowledgeAPITests(unittest.TestCase):
             documents = SQLiteDocumentStore(db)
             selected = {}
             for spec in get_sources():
-                if spec.kind not in {'nvd', 'github', 'cisa'} and spec.category not in selected:
+                if spec.kind not in {'nvd', 'github', 'cisa', 'osv'} and spec.category not in selected:
                     selected[spec.category] = spec
                     documents.ingest(spec.name, spec.category, [document(spec)])
+            self.assertEqual(run_document_batch(db, version)["positive"], 6)
             with TestClient(create_app(ROOT, db)) as client:
                 data = client.get('/api/documents').json()
                 self.assertEqual(data['total'], 6)

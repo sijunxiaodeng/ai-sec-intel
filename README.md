@@ -2,9 +2,15 @@
 
 三人共用的仓库。目前支持 NVD/OSV 漏洞监测、关联资料抓取与证据入库、结构化富化与影响说明、登记资产版本匹配，以及带来源引用的检索问答。
 
+正式数据运行使用独立配置，避免演示种子覆盖采集历史。有持续在线机器时使用 `bash scripts/production-up.sh collector`；继续由 GitHub Actions 采集时使用 `bash scripts/production-up.sh actions` 自动校验交付云端快照。两种模式及数据迁移见 [正式数据部署与交付](docs/正式数据部署与交付.md)。
+
+本轮工程修复、验证结果及尚未完成的比赛验收见 [修复与验收说明](docs/修复与验收说明.md)。资料问答新增可选的 [跨资料证据推理](docs/通用证据推理.md)，默认仍展示原文摘录。
+
 ## 怎么打开系统（一键演示）
 
 默认只打开 **http://127.0.0.1:8023**。B 查询嵌入主应用，采集由独立子进程执行；`8765` 仅供显式启用的旧 HTTP 服务模式使用。
+
+首次安装依赖后，离线演示会自动生成隔离的 **5 条合成漏洞 + 7 份合成资料**，无需先连接 NVD 或配置模型密钥：
 
 ```bash
 ./scripts/demo-up.sh      # Bash：Docker Compose，或本地 embed 模式
@@ -13,12 +19,20 @@
 
 浏览器打开 http://127.0.0.1:8023 。停止：`./scripts/demo-down.sh`。详见 [INTEGRATION.md](INTEGRATION.md)。
 
-手动仅起主应用时：
+手动仅起主应用 / 离线演示时：
 
-```
+```bash
 python -m pip install -r requirements.txt
-python main.py
+python scripts/offline_demo.py
 ```
+
+浏览器打开 http://127.0.0.1:8023 ，保持终端运行，Ctrl+C 停止。数据保存在 `.demo/offline/`，重复启动保留它，正式数据不受影响。页面明确标注离线合成样例，程序阻止外部联网和模型调用。
+
+Docker 方式：`docker compose -f docker-compose.offline.yml up --build`。首次装包、拉基础镜像/构建仍需网络；依赖/镜像已准备后，演示运行无需境外网络。`./scripts/demo-up.sh` 默认使用这个离线流程；旧联网演示须显式设置 `DEMO_NETWORK=online`。
+
+真实采集只有 B 一套实现，入口为 `python intelligence/run_monitor.py`；A 通过 B 变更流入库，C 负责已有情报的原文富化和检索。常驻/Actions 两种正式部署见 [正式数据部署与交付](docs/正式数据部署与交付.md)。直接 `python main.py` 启动正式应用不会偷偷生成样例。
+
+A/B/C 共用 `intelligence/requirements.lock.txt` 的核心依赖版本，根 `requirements.txt` 引用该文件并追加资料解析库。同一个虚拟环境可以安装两份清单，不再混装 FastAPI/Pydantic 的互斥版本。
 
 页面里可以监测、查看富化、提问，并在「模型设置」里填写 DeepSeek 或通义千问的兼容接口。接口约定见 `接口说明.md`。
 
@@ -33,10 +47,10 @@ python main.py
 在本文件夹打开终端：
 
 ```
-python collect_nvd.py
+python intelligence/run_monitor.py --once
 ```
 
-需要能访问 NVD，第一次可能要等一分钟。这是保留的早期静态采集入口；当前主系统的数据准备与联调按 [部署与联调](验收包/部署与联调.md) 执行，网页使用 `python main.py` 启动。
+该命令使用 B 的来源目录进行真实多源采集，需要访问相应上游。旧 collect_nvd.py 只保留为 B→主库同步兼容命令；当前主系统的数据准备与联调按 [部署与联调](验收包/部署与联调.md) 执行，网页使用 `python main.py` 启动。
 
 ## 三人分工
 
@@ -82,7 +96,7 @@ python main.py
 python -m rag.ingest --cve CVE-2024-37032
 ```
 
-这一步从现有参考链接和对应 NVD 记录发现资料，自动提取正文、分块、保存来源快照，并增量更新已准备的本地向量索引。未准备模型时仍可使用 BM25；不会在抓取或提问时下载模型。监测与公开源富化完成后，自动处理本批前 3 条情报，每条最多 4 个来源；其他情报可在详情页逐条处理。
+这一步从现有参考链接和对应 NVD 记录发现资料，自动提取正文、分块、保存来源快照，并增量更新已准备的本地向量索引。未准备模型时仍可使用 BM25；不会在抓取或提问时下载模型。正式配置为全部有效情报建立持久富化与资料任务，每批默认处理 10 条，每条最多 5 个来源；失败任务自动退避重试，重启后继续处理。`/api/processing/status` 可查看积压和失败，`POST /api/processing/retry` 可重新排队已耗尽重试次数的任务。
 
 完整原文、数据库、运行报告和模型留在被忽略的 `data/` 中。仓库只提交源码、接口与运行说明、离线测试。关联规则、支持范围和失败处理见 [rag/README.md](rag/README.md#第三步自动关联资料与证据入库)。
 

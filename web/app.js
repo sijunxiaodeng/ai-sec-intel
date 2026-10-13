@@ -30,6 +30,8 @@ var monitorRefreshing = false;
 var monitorElapsedTimer = null;
 var monitorPollTimer = null;
 var monitorRefreshStartedAt = 0;
+var offlineDemo = false;
+var offlineModeKnown = false;
 
 function $(id) {
   return document.getElementById(id);
@@ -428,9 +430,57 @@ function renderItemRow(parent, item, onPick) {
   add(text, "div", "meta", when + " · " + labels.join("、") + product);
 }
 
+function renderPrompts() {
+  var promptBox = $("prompts");
+  if (!promptBox) return;
+  clear(promptBox);
+  prompts.forEach(function (text) {
+    var button = add(promptBox, "button", "", text);
+    button.type = "button";
+    button.addEventListener("click", function () {
+      $("question").value = text;
+    });
+  });
+}
+
+function setOfflineMode(enabled) {
+  if (offlineModeKnown && offlineDemo === !!enabled) return;
+  offlineModeKnown = true;
+  offlineDemo = !!enabled;
+  if ($("offline-demo-banner")) $("offline-demo-banner").hidden = !offlineDemo;
+  document.querySelectorAll("#library-sync, #enrich-btn, #sample-btn, #settings-form input, #settings-form button").forEach(function (control) {
+    control.disabled = offlineDemo;
+    control.title = offlineDemo ? "离线演示不调用外部服务；请使用已加载的样例证据。" : "";
+  });
+  if ($("settings-mode-hint")) $("settings-mode-hint").textContent = offlineDemo
+    ? "离线演示已停用模型调用，不需要填写密钥。"
+    : "真实密钥仅保存在当前环境，不会上传。";
+  if ($("monitor-intro")) $("monitor-intro").textContent = offlineDemo
+    ? "当前为合成样例，可浏览、筛选并按样例证据问答。手动刷新只同步本地样例。"
+    : "自动汇聚漏洞与安全资料；可立即刷新，或等待定时更新。";
+  if ($("enrich-status") && offlineDemo) $("enrich-status").textContent = "离线演示不查询外部风险源，可查看现有记录并评估演示资产。";
+  if ($("library-sync-public-status") && offlineDemo) $("library-sync-public-status").textContent = "离线演示使用已加载的合成资料。";
+  var reasoning = document.querySelector('#library-mode option[value="reasoning"]');
+  if (reasoning) reasoning.disabled = offlineDemo;
+  if (offlineDemo && $("library-mode") && $("library-mode").value === "reasoning") $("library-mode").value = "excerpt";
+  if (offlineDemo) {
+    prompts = [
+      "CVE-2099-90002 的受影响版本是什么？",
+      "CVE-2099-90003 的现有证据提到了什么风险？",
+      "比较 CVE-2099-90002 和 CVE-2099-90003 的 CVSS 与受影响版本",
+      "当前有哪些 vllm 相关的合成情报？"
+    ];
+    renderPrompts();
+  }
+  setPill(false);
+}
+
 function setPill(ready) {
   var pill = $("llm-pill");
-  pill.textContent = ready ? "大模型已配置" : "大模型未配置，问答先摘录原文";
+  if (!pill) return;
+  pill.textContent = offlineDemo
+    ? "离线演示 · 问答摘录样例证据"
+    : ready ? "大模型已配置" : "大模型未配置，问答先摘录原文";
 }
 
 function setView(name, opts) {
@@ -504,6 +554,8 @@ function renderCollectPipeline(pipeline, opts) {
   var stagesEl = $("pipeline-stages");
   var metricsEl = $("pipeline-metrics");
   var summaryEl = $("pipeline-summary");
+  var techEl = $("pipeline-tech");
+  var techBody = $("pipeline-tech-body");
   if (!box || !stagesEl) return;
   if (!pipeline || !(pipeline.stages || []).length) {
     if (!opts.forceShow) box.hidden = true;
@@ -577,6 +629,16 @@ function renderCollectPipeline(pipeline, opts) {
     }
     stagesEl.appendChild(li);
   });
+  if (techEl && techBody) {
+    var tech = pipeline.tech_detail || "";
+    if (tech) {
+      techEl.hidden = false;
+      techBody.textContent = tech;
+    } else {
+      techEl.hidden = true;
+      techBody.textContent = "";
+    }
+  }
 }
 
 function renderMonitorLive(data, opts) {
@@ -606,7 +668,8 @@ function renderMonitorLive(data, opts) {
   } else {
     stateEl.textContent = "空闲";
     if (phaseEl) {
-      phaseEl.textContent = data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
+      phaseEl.textContent = offlineDemo ? "离线样例已加载；手动刷新只同步本地样例。"
+        : data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
         : "约 " + intervalText + " 后自动刷新，也可立即刷新。";
     }
   }
@@ -615,10 +678,11 @@ function renderMonitorLive(data, opts) {
     var count = (data && data.last_count) || 0;
     lastEl.textContent = last
       ? (formatStamp(last) + (count ? " · 本轮新增 " + count + " 条" : " · 本轮新增 0"))
-      : "尚未刷新；可点「立即刷新一轮」";
+      : (offlineDemo ? "离线样例已就绪" : "尚未刷新；可点「立即刷新一轮」");
   }
   if (nextEl) {
     if (running) nextEl.textContent = "本轮进行中…";
+    else if (offlineDemo) nextEl.textContent = "离线演示不执行定时采集";
     else if (data && data.auto_enabled === false) nextEl.textContent = "自动监测已关闭";
     else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（等待约 " + intervalText + "）";
     else nextEl.textContent = "完成首轮后等待约 " + intervalText;
@@ -632,6 +696,7 @@ function renderMonitorLive(data, opts) {
 
 function loadMonitorStatus() {
   return api("/api/monitor/status").then(function (data) {
+    setOfflineMode(data.offline_demo);
     setTeamHealth(data.team);
     renderMonitorLive(data);
     if (monitorRefreshing) {
@@ -639,6 +704,7 @@ function loadMonitorStatus() {
       return data;
     }
     var bits = [];
+    if (offlineDemo) bits.push("离线样例，仅同步本地数据");
     if (data.running) bits.push("正在刷新：" + (data.run_phase || "进行中"));
     else if (data.last_run) {
       bits.push("最近更新 " + formatStamp(data.last_run));
@@ -671,6 +737,7 @@ function loadMonitorStatus() {
 
 function loadOverview() {
   api("/api/overview").then(function (data) {
+    setOfflineMode(data.offline_demo);
     setPill(data.llm_ready);
     var stats = $("stats");
     clear(stats);
@@ -683,13 +750,13 @@ function loadOverview() {
       " · 情报 " + data.items +
       " · 资料 " + ((data.library || {}).documents || 0) +
       (sourceNames.length ? " · 来源 " + sourceNames.join(" / ") : "") +
-      " · 模型 " + (data.llm_ready ? "已配置" : "未配置");
+      " · 模型 " + (offlineDemo ? "离线停用" : data.llm_ready ? "已配置" : "未配置");
     [
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
       [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源 CVE"],
-      [data.llm_ready ? "可用" : "未配置", "问答模型"]
+      [offlineDemo ? "离线摘录" : data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
       add(card, "b", "", pair[0]);
@@ -866,7 +933,9 @@ function renderMonitorFeed(data) {
         loadItems("monitor");
       });
     } else {
-      empty.textContent = "情报流还是空的。请点「立即刷新一轮」。若仍空，可能是未初始化演示库或外网不可达。";
+      empty.textContent = offlineDemo
+        ? "离线样例未加载，请检查离线启动结果。"
+        : "情报流还是空的。请点「立即刷新一轮」。若仍空，可能是未初始化演示库或外网不可达。";
     }
     return data;
   }
@@ -1304,6 +1373,8 @@ function renderDetail(item) {
   nvd.rel = "noopener";
   var fetchButton = add(panel, "button", "", "抓取关联资料");
   fetchButton.type = "button";
+  fetchButton.disabled = offlineDemo;
+  if (offlineDemo) fetchButton.textContent = "离线演示使用已加载的样例证据";
   var statusBox = add(panel, "div", "links");
   function showDocuments(rows) {
     clear(statusBox);
@@ -1324,6 +1395,7 @@ function renderDetail(item) {
   }
   showDocuments(item.documents);
   fetchButton.addEventListener("click", function () {
+    if (offlineDemo) return;
     fetchButton.disabled = true;
     fetchButton.textContent = "正在抓取关联资料…";
     clearError();
@@ -2370,7 +2442,7 @@ function renderLibrarySyncStatus(overview) {
   if (pubStatus) {
     pubStatus.textContent = publicSources.length
       ? ("最近公开同步：" + pub.ok + " 源正常" + (pub.bad ? "，" + pub.bad + " 源异常" : "") + (pub.last ? " · " + dateText(pub.last) : ""))
-      : "尚未同步公开资料。";
+      : (offlineDemo ? "离线演示使用已加载的合成资料，不连接公开源。" : "尚未同步公开资料。");
   }
   if (multiStatus) {
     multiStatus.textContent = multiSources.length
@@ -2597,7 +2669,10 @@ setView("overview");
 // Surface automatic monitor health early (no keyword required).
 loadMonitorStatus();
 api("/api/monitor/status").then(function (data) {
-  if (data && data.running) {
+  if (data) setOfflineMode(data.offline_demo);
+  if (offlineDemo) {
+    showToast("离线样例已加载；手动刷新只同步本地样例。", "ok");
+  } else if (data && data.running) {
     showToast("后台正在自动监测一轮宽范围 AI 安全情报…", "busy");
   } else if (data && data.last_run) {
     var statusLabel = {success: "成功", partial: "部分成功", failed: "失败"}[data.last_status] || "已结束";

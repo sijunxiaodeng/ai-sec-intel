@@ -25,15 +25,15 @@ def ingest_enabled() -> bool:
 
 
 def data_directory() -> Path:
-    from api.b_embed import DEFAULT_DB, db_path
+    from api.b_embed import INTEL_ROOT
 
-    configured = os.environ.get("INTELLIGENCE_DATA_DIR", "").strip()
-    if configured:
-        return Path(configured).resolve()
-    try:
-        return db_path().parent
-    except Exception:
-        return DEFAULT_DB.parent
+    # Never infer this from a collector DB or resolve current/ into a generation.
+    return Path(os.environ.get("ACTIONS_SYNC_DIRECTORY") or INTEL_ROOT / "actions-mirror").absolute()
+
+
+def expected_repository() -> str:
+    return (os.environ.get("ACTIONS_SYNC_REPOSITORY")
+            or os.environ.get("GITHUB_REPOSITORY") or "sijunxiaodeng/ai-sec-intel").strip()
 
 
 def _sync_module():
@@ -89,7 +89,14 @@ async def actions_sync_ingest(
             status_code=422,
             detail="X-Actions-Repository, X-Actions-Branch, X-Actions-Run-Id headers required",
         )
-    body = await request.body()
+    if repository != expected_repository() or branch != "main":
+        raise HTTPException(status_code=403, detail="Repository or branch is not the configured Actions lineage")
+    sync = _sync_module()
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > sync.MAX_SNAPSHOT_BYTES:
+            raise HTTPException(status_code=413, detail="Snapshot exceeds size limit")
+        body.extend(chunk)
     if not body:
         raise HTTPException(status_code=422, detail="Empty snapshot body")
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -99,22 +106,22 @@ async def actions_sync_ingest(
     sync = _sync_module()
     try:
         marker = sync.install_archive(
-            body,
+            bytes(body),
             data_directory(),
             repository=repository,
             branch=branch,
             run_id=int(run_id_raw),
             source="deploy-ingest",
         )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Snapshot rejected: %s" % exc) from None
+    except Exception:
+        raise HTTPException(status_code=400, detail="Snapshot rejected; previous verified generation retained") from None
 
     return JSONResponse(
         {
             "ok": True,
             "installed": marker,
-            "notice": "多源库已替换为 Actions 快照；若进程内连接仍缓存旧句柄，请重启主应用以彻底切换。",
-            "restart_recommended": True,
+            "notice": "已原子发布经校验的只读快照；使用 current/intelligence.db 的 API 在下一次查询读取新数据。",
+            "restart_recommended": False,
         }
     )
 

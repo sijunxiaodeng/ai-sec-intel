@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/assets/styles.css?v=20261012-product-ui" />
 </head>
 <body>
+  <p id="offline-demo-banner" class="hint" role="status" hidden>离线演示：当前为合成样例，可查看资料和证据问答；不进行真实采集或在线模型调用。</p>
   <div class="shell">
     <aside class="rail" aria-label="功能导航">
       <div class="rail-brand">
@@ -126,7 +127,7 @@
         <div class="ia-banner">
           <div>
             <h2 class="ia-title">情报监测</h2>
-            <p class="hint">自动汇聚漏洞与安全资料；可立即刷新，或等待定时更新。</p>
+            <p class="hint" id="monitor-intro">自动汇聚漏洞与安全资料；可立即刷新，或等待定时更新。</p>
           </div>
           <div class="ia-actions">
             <button type="button" class="primary" id="auto-monitor-btn">立即刷新一轮</button>
@@ -161,6 +162,10 @@
           </header>
           <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
           <ol class="pipeline-stages" id="pipeline-stages"></ol>
+          <details class="pipeline-tech" id="pipeline-tech" hidden>
+            <summary>技术明细</summary>
+            <p class="hint" id="pipeline-tech-body"></p>
+          </details>
         </div>
         <p id="team-health" class="hint team-health" hidden></p>
 
@@ -437,7 +442,7 @@
       <section id="settings" class="view" hidden>
         <form id="settings-form" class="panel settings">
           <h2>国产大模型接口</h2>
-          <p class="hint">真实密钥仅保存在当前环境，不会上传。</p>
+          <p class="hint" id="settings-mode-hint">真实密钥仅保存在当前环境，不会上传。</p>
           <label>API 地址
             <input id="base-url" placeholder="https://api.deepseek.com/v1" />
           </label>
@@ -457,6 +462,6 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261012-product-ui"></script>
+  <script src="/assets/app.js?v=20261013-merge-21-27"></script>
 </body>
 </html>

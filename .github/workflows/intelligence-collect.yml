@@ -44,6 +44,7 @@ jobs:
       CLASSIFY_V4_MAX_LLM_CALLS: '0'
       CLOUD_COLLECTION_STARTED_AT: '2026-10-09T12:05:16Z'
       DEEPSEEK_KEY_AVAILABLE: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+      DEPLOY_INGEST_CONFIGURED: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
       DEEPSEEK_REVIEW_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.deepseek_review }}
       DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-chat' }}
       DEPLOY_INGEST_AVAILABLE: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
@@ -55,7 +56,8 @@ jobs:
       - name: Check out collector
         uses: actions/checkout@v4
         with:
-          # Collect with the exact reviewed commit that owns this workflow.
+          # The job is gated to main; pin code to this exact main workflow run.
+          # The snapshot manifest records the same SHA for deployment delivery.
           ref: ${{ github.sha }}
           persist-credentials: false
       - name: Set up Python
@@ -108,7 +110,7 @@ jobs:
         # Real sync path: artifact alone never reaches a running 8023 DB.
         # When DEPLOY_INGEST_URL + DEPLOY_INGEST_TOKEN secrets are set, POST the
         # verified snapshot zip to the main app's /api/admin/actions-sync.
-        if: ${{ always() && steps.snapshot.outcome == 'success' && env.DEPLOY_INGEST_AVAILABLE == 'true' }}
+        if: ${{ always() && steps.upload.outcome == 'success' && env.DEPLOY_INGEST_CONFIGURED == 'true' }}
         env:
           DEPLOY_INGEST_URL: ${{ secrets.DEPLOY_INGEST_URL }}
           DEPLOY_INGEST_TOKEN: ${{ secrets.DEPLOY_INGEST_TOKEN }}

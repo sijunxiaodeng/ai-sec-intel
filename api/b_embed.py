@@ -24,6 +24,7 @@ INTEL_ROOT = ROOT / "intelligence"
 DEFAULT_DB = INTEL_ROOT / "data" / "intelligence.db"
 
 _b_app = None
+_b_app_path = None
 _PATH_LOCK = threading.RLock()
 _APP_LOCK = threading.Lock()
 
@@ -41,19 +42,36 @@ def sidecar_enabled() -> bool:
     return team_intel_mode() in {"sidecar", "proxy", "http"}
 
 
-def prefer_root_packages() -> None:
-    """Expose B-only query packages without evicting A's imported modules.
+def _purge_intelligence_collectors() -> None:
+    """Drop collectors.* if they were loaded from intelligence/ (name clash)."""
+    coll = sys.modules.get("collectors")
+    if coll is None:
+        return
+    origin = (getattr(coll, "__file__", "") or "").replace("\\", "/")
+    if "/intelligence/" not in origin and not origin.endswith("/intelligence/collectors/__init__.py"):
+        paths = [str(p).replace("\\", "/") for p in (getattr(coll, "__path__", None) or [])]
+        if not any("/intelligence/" in p for p in paths):
+            return
+    for key in list(sys.modules):
+        if key == "collectors" or key.startswith("collectors."):
+            sys.modules.pop(key, None)
 
-    Compatibility entry point for existing adapters. B collectors are isolated
-    in a worker, so requests never need a whole-cycle import lock.
-    """
+
+def prefer_root_packages() -> None:
+    """Keep ROOT before intelligence/ so A collectors.* import correctly."""
     with _PATH_LOCK:
         root = str(ROOT.resolve())
         intel = str(INTEL_ROOT.resolve())
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        if intel not in sys.path:
-            sys.path.append(intel)
+        for path in (intel, root):
+            while path in sys.path:
+                sys.path.remove(path)
+        sys.path.insert(0, root)
+        sys.path.insert(1, intel)
+        _purge_intelligence_collectors()
+        os.environ.setdefault(
+            "INTELLIGENCE_DB_PATH",
+            str(Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB).absolute()),
+        )
 
 
 def ensure_intelligence_path() -> Path:
@@ -67,23 +85,26 @@ def db_path() -> Path:
     target = Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB)
     if not target.is_absolute():
         target = INTEL_ROOT / target
-    return target.resolve()
+    return target.absolute()
 
 
 def get_b_app():
-    """Create B's query app once; no collector task holds this short lock."""
-    global _b_app
-    if _b_app is None:
-        with _APP_LOCK:
-            if _b_app is None:
-                ensure_intelligence_path()
-                from api_v6.app import create_app
-                _b_app = create_app(root=INTEL_ROOT, db_path=db_path())
-    return _b_app
+    """Lazy-create B FastAPI app inside this process; recreate if DB path changes."""
+    global _b_app, _b_app_path
+    target = db_path()
+    with _PATH_LOCK:
+        if _b_app is None or _b_app_path != target:
+            with _APP_LOCK:
+                if _b_app is None or _b_app_path != target:
+                    ensure_intelligence_path()
+                    from api_v6.app import create_app
+                    _b_app = create_app(root=INTEL_ROOT, db_path=target)
+                    _b_app_path = target
+        return _b_app
 
 
 def _is_b_http_path(method: str, path: str) -> bool:
-    if path.startswith("/api/intelligence"):
+    if path == "/api/team/changes" or path.startswith("/api/intelligence"):
         return True
     # A owns POST /api/documents (CVE ingest). B owns GET document query APIs.
     if method == "GET" and (path == "/api/documents" or path.startswith("/api/documents/")):
@@ -121,10 +142,9 @@ def inprocess_health() -> dict:
             "via_proxy": False,
             "database_available": False,
             "error": (
-                "缺少 intelligence.db（%s）。请先执行："
-                "cd intelligence && PYTHONPATH=. python seed_demo_db.py"
-                "；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；"
-                "再 ./scripts/demo-up.sh"
+                "缺少 intelligence.db（%s）。"
+                "配置正式 B 采集服务，或向独立 Actions 镜像交付数据，"
+                "并将 INTELLIGENCE_DB_PATH 指向镜像的 current/intelligence.db"
             ) % path,
         }
     try:
@@ -184,8 +204,29 @@ def list_team_page(keyword: str = "", *, limit: int = 100, offset: int = 0, ai_o
 
 
 def list_documents_page(q: str = "", *, limit: int = 40, offset: int = 0) -> dict:
-    """Read B documents while the separate collector process is running."""
-    ensure_intelligence_path()
+    """List B documents without reordering sys.path / purging collectors.
+
+    Safe to call while ``b_monitor`` holds the intelligence import scope — we
+    only ensure ``intelligence/`` is importable (append), never prefer it over
+    root ``collectors.*``.
+    """
+    intel = str(INTEL_ROOT.resolve())
+    if intel not in sys.path:
+        sys.path.append(intel)
     from api_v6.document_repository import DocumentRepository
-    docs = DocumentRepository(db_path(), INTEL_ROOT)
+
+    path = Path(os.environ.get("INTELLIGENCE_DB_PATH") or DEFAULT_DB)
+    if not path.is_absolute():
+        path = INTEL_ROOT / path
+    docs = DocumentRepository(path.absolute(), INTEL_ROOT)
     return docs.list_items(q=q or None, limit=limit, offset=offset, include_raw=False)
+
+
+def list_changes_page(*, kind="cve", cursor=0, through=None, epoch=None, limit=100) -> dict:
+    """Use the persistent B change feed without constructing a second ASGI app."""
+    ensure_intelligence_path()
+    from api_v6.repository import IntelligenceRepository
+    from api_v6.change_repository import ChangeRepository
+
+    return ChangeRepository(IntelligenceRepository(db_path(), INTEL_ROOT)).page(
+        kind=kind, cursor=cursor, through=through, epoch=epoch, limit=limit)

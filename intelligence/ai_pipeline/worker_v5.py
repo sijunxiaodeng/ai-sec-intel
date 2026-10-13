@@ -10,7 +10,7 @@ from .worker import _vulnerability_from_row
 
 
 def run_priority_batch(db_path: str | Path, version: str,
-                       max_items: int = 300, max_llm_calls: int = 2,
+                       max_items: int = 300, max_llm_calls: int = 0,
                        classifier=None, verbose: bool = True) -> dict:
     if max_items < 1 or max_llm_calls < 0 or not version.strip():
         raise ValueError("Bad max_items/max_llm_calls/version")

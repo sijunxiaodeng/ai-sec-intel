@@ -9,6 +9,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 MODE="${DEMO_MODE:-auto}"
+# Offline data is the default demo. Online collection remains explicit.
+if [[ "${DEMO_NETWORK:-offline}" == "offline" && "$DEMO_ACTIONS_MODE" == "0" ]]; then
+  if [[ "$MODE" != "local" ]] && have_docker; then
+    docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" up --build --detach --wait
+    printf '%s\n' offline-compose > "$DEMO_DIR/mode"
+    log "offline synthetic demo ready; external collection/model calls disabled"
+    exit 0
+  fi
+  ensure_venvs
+  printf '%s\n' offline-local > "$DEMO_DIR/mode"
+  printf '%s\n' "$$" > "$DEMO_DIR/main.pid"
+  exec "$ROOT/.venv/bin/python" "$SCRIPT_DIR/offline_demo.py" --data-directory "$DEMO_DIR/offline" --port "$MAIN_PORT"
+fi
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
 export AUTO_INGEST_ON_COLLECT
 export TEAM_INTEL_MODE="${TEAM_INTEL_MODE:-embed}"
@@ -28,6 +41,7 @@ if [[ "$TEAM_INTEL_MODE" == "sidecar" || "${DEMO_B_SIDECAR:-0}" == "1" ]]; then
 fi
 
 start_compose() {
+  [[ "$DEMO_ACTIONS_MODE" == "0" ]] || die "Use DEMO_MODE=local for an isolated local Actions mirror, or docker-compose.actions.yml for deployment"
   log "starting via docker compose (project=$COMPOSE_PROJECT, mode=$TEAM_INTEL_MODE)"
   docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" up -d --build
   wait_http "$MAIN_URL/api/overview" "main app" 90
@@ -64,7 +78,7 @@ start_local_sidecar() {
     log "starting B on $B_URL"
     (
       cd "$ROOT"
-      export INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db"
+      export INTELLIGENCE_DB_PATH="$DEMO_B_DB"
       nohup "$ROOT/intelligence/.venv/bin/python" \
         "$ROOT/intelligence/run_intelligence_api_v6.py" \
         --host 127.0.0.1 --port "$B_PORT" \
@@ -84,6 +98,8 @@ start_local_sidecar() {
       export TEAM_INTEL_BASE_URL="$TEAM_INTEL_UPSTREAM"
       export TEAM_INTEL_PROXY=1
       export AUTO_INGEST_ON_COLLECT
+      export MAIN_IMPORT_DEMO_CARDS="${MAIN_IMPORT_DEMO_CARDS:-1}"
+      export MAIN_DATA_DIR="$DEMO_MAIN_DATA_DIR"
       "$ROOT/.venv/bin/python" -m rag.prepare >/dev/null 2>&1 || true
       nohup "$ROOT/.venv/bin/python" main.py \
         >"$DEMO_DIR/main-api.log" 2>&1 &
@@ -112,7 +128,9 @@ start_local_embed() {
       cd "$ROOT"
       export APP_HOST=127.0.0.1 APP_PORT="$MAIN_PORT"
       export TEAM_INTEL_MODE=embed
-      export INTELLIGENCE_DB_PATH="$ROOT/intelligence/data/intelligence.db"
+      export INTELLIGENCE_DB_PATH="$DEMO_B_DB"
+      export MAIN_IMPORT_DEMO_CARDS="${MAIN_IMPORT_DEMO_CARDS:-1}"
+      export MAIN_DATA_DIR="$DEMO_MAIN_DATA_DIR"
       export B_MONITOR_ENABLED B_MONITOR_ON_REFRESH
       export B_MONITOR_SOURCE_TIMEOUT B_MONITOR_OVERALL_TIMEOUT
       export AUTO_INGEST_ON_COLLECT
@@ -169,7 +187,7 @@ case "$MODE" in
     start_local
     ;;
   auto|*)
-    if have_docker; then
+    if [[ "$DEMO_ACTIONS_MODE" == "0" ]] && have_docker; then
       start_compose
     else
       start_local

@@ -38,8 +38,14 @@ def _startup():
     start_schedule()
 
 
+@app.on_event("shutdown")
+def _shutdown():
+    from automation.schedule import stop
+    stop()
+
+
 class CollectBody(BaseModel):
-    # Broader AI-security default; comma-separated multi-keyword supported by monitor_agent.
+    # Keywords filter the displayed feed; synchronization always covers all valid AI records.
     keyword: str = "llm"
 
 
@@ -52,7 +58,7 @@ class MonitorRunBody(BaseModel):
 
 class AskBody(BaseModel):
     question: str = Field(..., max_length=4000)
-    cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
+    cve_id: str = Field("", pattern=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
     session_id: str = Field("", max_length=32)
 
 
@@ -77,7 +83,7 @@ class TeamLibrarySyncBody(BaseModel):
 
 class LibraryAskBody(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
-    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    document_ids: list[str] = Field(default_factory=list, max_length=4)
     document_type: str = ""
     use_model: bool = True
     mode: Literal["excerpts", "reasoning"] = "excerpts"
@@ -85,7 +91,7 @@ class LibraryAskBody(BaseModel):
 
 class RelationCandidatesBody(BaseModel):
     topic: str = "model_supply_chain"
-    document_ids: list[str] = Field(default_factory=list, max_items=4)
+    document_ids: list[str] = Field(default_factory=list, max_length=4)
     use_model: bool = True
 
 
@@ -100,7 +106,7 @@ class RelationReviewBody(BaseModel):
 class AssetObservationBody(BaseModel):
     provider: Literal["shodan", "fofa"]
     content: StrictStr = Field(..., min_length=1, max_length=1024 * 1024)
-    fields: list[StrictStr] = Field(default_factory=list, max_items=20)
+    fields: list[StrictStr] = Field(default_factory=list, max_length=20)
     is_demo: StrictBool = False
 
     class Config:
@@ -108,7 +114,7 @@ class AssetObservationBody(BaseModel):
 
 
 class AssetObservationPreviewBody(AssetObservationBody):
-    cve_id: str = Field("", regex=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
+    cve_id: str = Field("", pattern=r"^(?:CVE-\d{4}-\d{4,7})?$", max_length=20)
 
 
 class PoCCodeCollectBody(BaseModel):
@@ -480,7 +486,7 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     ]
 
     integration = [
-        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier · 对外只开 :8023"},
+        {"party": "A", "name": "本平台编排壳", "status": "接通", "detail": "monitor·enrich·qa·verifier"},
         {"party": "B", "name": "多源情报（同进程嵌入）", "status": b_status, "detail": b_detail},
         {"party": "C", "name": "富集/资料/检索（进程内）", "status": c_local, "detail": f"资料 {docs_n} 份 · 富化字段维度 {dim_n}"},
         {"party": "LLM", "name": "问答模型", "status": llm_status, "detail": "未配置则摘录原文" if not llm_ready else "已配置"},
@@ -544,6 +550,7 @@ def overview():
     llm_ready = configured()
     return {
         "project": "智能体驱动的 AI 安全知识情报系统",
+        "offline_demo": os.environ.get("OFFLINE_DEMO") == "1",
         "items": len(records),
         "source_count": len(names),
         "sources": names,
@@ -647,7 +654,8 @@ def _fetch_team_documents(q="", limit=48):
 
     from api.b_embed import embed_enabled, list_documents_page, prefer_root_packages
 
-    page_limit = min(max(limit * 3, 60), 120)
+    # B's HTTP contract caps document pages at 100 in both deployment modes.
+    page_limit = min(max(limit * 3, 60), 100)
     try:
         if embed_enabled():
             # list_documents_page reads api_v6 repos; avoids collectors.* clash.
@@ -1124,7 +1132,7 @@ def assets():
 @app.post("/api/assets/import")
 def assets_import(body: AssetImport):
     try:
-        return import_assets(body.dict())
+        return import_assets(body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -1139,7 +1147,7 @@ def assets_demo():
 @app.post("/api/assets/preview")
 def assets_preview(body: AssetPreview):
     report = _asset_assessment(body.cve_id)
-    return impact_report(report, [dict(r.dict(), inventory_source="preview") for r in body.assets], preview=True)
+    return impact_report(report, [dict(r.model_dump(), inventory_source="preview") for r in body.assets], preview=True)
 
 
 @app.get("/api/asset-impact/{cve_id}")
@@ -1282,8 +1290,12 @@ def monitor_status(light: int = 0):
     from automation.pipeline import get_pipeline
 
     pipeline = get_pipeline()
+    offline_demo = os.environ.get("OFFLINE_DEMO") == "1"
+    automatic_enabled = not offline_demo and os.environ.get("AUTO_MONITOR_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
     return {
         "mode": "automatic",
+        "offline_demo": offline_demo,
+        "automatic_enabled": automatic_enabled,
         "interval_hours": st.get("interval_hours"),
         "interval_minutes": st.get("interval_minutes"),
         "auto_on_start": st.get("auto_on_start"),
@@ -1292,17 +1304,19 @@ def monitor_status(light: int = 0):
         "run_phase": st.get("run_phase") or "",
         "run_started_at": st.get("run_started_at") or "",
         "last_run": st.get("last_run") or "",
-        "next_run": next_run_iso(st),
+        "next_run": next_run_iso(st) if automatic_enabled else "",
         "last_count": st.get("last_count") or 0,
         "last_error": st.get("last_error") or "",
         "last_status": st.get("last_status") or "",
         "last_warnings": st.get("last_warnings") or [],
+        "source_results": st.get("source_results") or [],
         "last_keyword": st.get("last_keyword") or "",
         "team": team,
         "pipeline": pipeline,
         "freshness_policy": {
             "cadence": "periodic",
             "interval_hours": st.get("interval_hours"),
+            "interval_minutes": st.get("interval_minutes"),
             "item_buckets": "published_at → 近7天 / 近30天 / 更早",
             "latency_sla": "需监测开始后新发布且可计 collected−published；间隔本身≠延迟达标",
             "realtime": False,
@@ -1311,11 +1325,33 @@ def monitor_status(light: int = 0):
     }
 
 
+@app.get("/api/processing/status")
+def processing_status():
+    from automation.processing import state
+    return state()
+
+
+@app.post("/api/processing/retry")
+def retry_processing():
+    from automation.processing import retry_failed
+    return {"requeued": retry_failed()}
+
+
+@app.get("/api/health")
+def health():
+    from automation.processing import state
+    team = _team_reachable_probe()
+    monitor = monitor_state()
+    available = bool(team.get("reachable") and team.get("database_available"))
+    return {"status": "ok" if available and monitor.get("last_status") != "failed" else "degraded",
+            "team_database_available": available, "monitor_status": monitor.get("last_status", "not_run"),
+            "processing": state(), "last_sync": monitor.get("last_run", "")}
+
+
 @app.post("/api/monitor/b-cycle")
 def monitor_b_cycle():
     """Run one isolated B collector cycle (partial/timeout OK)."""
     from api.b_monitor import run_b_monitor_cycle
-
     return run_b_monitor_cycle()
 
 
@@ -1336,11 +1372,8 @@ def _monitor_run(body: MonitorRunBody):
     from api.b_embed import embed_enabled
     from api.b_monitor import b_monitor_on_refresh, run_b_monitor_cycle
     from automation.pipeline import (
-        begin_pipeline,
-        bump_metrics,
-        finish_pipeline,
-        set_tech_detail,
-        update_stage,
+        begin_pipeline, bump_metrics, finish_pipeline, get_pipeline,
+        set_tech_detail, update_stage,
     )
     from automation.schedule import combine_monitor_outcome, library_outcome, mark_run, mark_running
 
@@ -1448,8 +1481,9 @@ def _monitor_run(body: MonitorRunBody):
                 warnings.append("已跳过资料摘要同步。")
             else:
                 try:
-                    from rag.library import sync_team
-                    library["team"] = sync_team(max_documents=body.max_documents)
+                    from rag.library import sync_team_drain
+
+                    library["team"] = sync_team_drain(max_documents=body.max_documents)
                 except ValueError as exc:
                     library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
@@ -1781,7 +1815,7 @@ def library_generate_candidates(body: RelationCandidatesBody):
 def library_review_candidate(candidate_id: str, body: RelationReviewBody):
     from enrichment.relation_candidates import review
     try:
-        return review(candidate_id, **body.dict())
+        return review(candidate_id, **body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -1826,7 +1860,7 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: SettingsBody):
-    save_settings(body.dict())
+    save_settings(body.model_dump())
     return public_settings()
 
 
@@ -1862,6 +1896,10 @@ from api.b_proxy import forward_async  # noqa: E402
 if embed_enabled():
     app.add_middleware(EmbedBMiddleware)
 elif sidecar_enabled():
+    @app.get("/api/team/changes")
+    async def _proxy_team_changes(request: Request):
+        return await forward_async(request, "/api/team/changes")
+
     @app.api_route("/api/intelligence", methods=["GET", "HEAD", "OPTIONS"])
     async def _proxy_intelligence_root(request: Request):
         return await forward_async(request, "/api/intelligence")

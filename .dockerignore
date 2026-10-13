@@ -10,6 +10,7 @@ data
 *.log
 .env
 **/.env
+.env.*
 config/local.json
 backups
 .demo

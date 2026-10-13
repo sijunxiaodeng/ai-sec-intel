@@ -1,5 +1,6 @@
 """Offline tests for collect pipeline state, cursors, and upsert round stats."""
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,6 +110,10 @@ class TestUpsertStats(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
+        environment = patch.dict(os.environ, {"MAIN_KB_DB_PATH": str(root / "knowledge.sqlite3"),
+                                             "MAIN_IMPORT_DEMO_CARDS": "0"})
+        environment.start()
+        self.addCleanup(environment.stop)
         self._paths = (
             store_mod.DATA,
             store_mod.KB_PATH,
@@ -143,6 +148,7 @@ class TestUpsertStats(unittest.TestCase):
             "sources": ["OSV"],
             "published_at": "2024-01-01T00:00:00Z",
             "collected_at": "2024-01-02T00:00:00Z",
+            "modified_at": "2024-02-01T00:00:00Z" if title == "again" else "2024-01-01T00:00:00Z",
             "product": "vllm",
         }))
 
@@ -154,6 +160,8 @@ class TestUpsertStats(unittest.TestCase):
         self.assertEqual(second["inserted"], 1)
         self.assertEqual(second["merged"], 1)
         self.assertEqual(second["total"], 2)
+        repeated = store_mod.upsert_stats([self._rec("CVE-2024-1", "again")])
+        self.assertEqual((repeated["inserted"], repeated["merged"], repeated["skipped_dup"]), (0, 0, 1))
 
 
 class TestPipelineState(unittest.TestCase):

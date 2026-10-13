@@ -1,4 +1,4 @@
-name: Offline regressions and container state
+name: System checks
 
 on:
   pull_request:
@@ -9,17 +9,27 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: system-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  AUTO_MONITOR_ON_START: '0'
+  AUTO_MONITOR_ENABLED: '0'
+  B_MONITOR_ENABLED: '0'
+  B_MONITOR_ON_REFRESH: '0'
+  AUTO_INGEST_ON_COLLECT: '0'
+  AUTO_CLASSIFY_V5: '0'
+  CLASSIFY_V5_MAX_LLM_CALLS: '0'
+  CLASSIFY_V4_MAX_LLM_CALLS: '0'
+  DEEPSEEK_REVIEW_ENABLED: 'false'
+  DEEPSEEK_API_KEY: ''
+
 jobs:
-  offline:
+  main-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      AUTO_MONITOR_ON_START: '0'
-      AUTO_MONITOR_ENABLED: '0'
-      B_MONITOR_ENABLED: '0'
-      AUTO_INGEST_ON_COLLECT: '0'
-      PYTHONDONTWRITEBYTECODE: '1'
-      PYTHONUTF8: '1'
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,22 +37,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+            intelligence/requirements.lock.txt
+      - name: Isolate test state from repository fixtures
+        run: |
+          printf '%s\n' "MAIN_KB_DB_PATH=${RUNNER_TEMP}/main-knowledge.sqlite3" "MAIN_DATA_DIR=${RUNNER_TEMP}/main-data" >> "$GITHUB_ENV"
+      - name: Install main application test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Verify dependency compatibility
+        run: python -m pip check
+      - name: Test A and C without public network or model credentials
+        run: python scripts/run_offline_tests.py --start-directory questions
+      - name: Test fixed-window and independent-label evidence calculations
+        run: python scripts/run_offline_tests.py --start-directory scripts/tests
+      - name: Start a fresh offline demo and verify real HTTP import
+        run: python scripts/check_offline_demo.py
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Validate workflow expressions
-        uses: docker://rhysd/actionlint:1.7.7
-      - name: Root application regressions
-        run: |
-          python -m venv .venv-ci
-          .venv-ci/bin/python -m pip install -r requirements-test.txt
-          .venv-ci/bin/python -m unittest discover -s questions -p 'test_*.py' -v
-      - name: B collector regressions in its own environment
-        run: |
-          python -m venv .venv-ci-b
-          .venv-ci-b/bin/python -m pip install -r intelligence/requirements.lock.txt
-          cd intelligence
-          ../.venv-ci-b/bin/python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Validate UI syntax and candidate detail interactions
         run: |
           node --check web/app.js
@@ -50,37 +66,95 @@ jobs:
           node questions/test_asset_observations_ui.js
           node questions/test_poc_sources_ui.js
 
-  container:
+  intelligence-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      AUTO_MONITOR_ON_START: '0'
-      AUTO_MONITOR_ENABLED: '0'
-      B_MONITOR_ENABLED: '0'
-      AUTO_INGEST_ON_COLLECT: '0'
-      COMPOSE_PROJECT_NAME: regression
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: intelligence
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Start the offline demonstration
-        run: docker compose up -d --build --wait --wait-timeout 120
-      - name: Exercise legacy volume ownership migration without deleting data
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: intelligence/requirements.lock.txt
+      - name: Isolate B test state
+        run: printf '%s\n' "INTELLIGENCE_DB_PATH=${RUNNER_TEMP}/intelligence.sqlite3" >> "$GITHUB_ENV"
+      - name: Install B locked dependencies in its separate job
+        run: python -m pip install -r requirements.lock.txt
+      - name: Verify dependency compatibility
+        run: python -m pip check
+      - name: Test collection, classification, storage, API and snapshot delivery
+        run: python ../scripts/run_offline_tests.py --start-directory tests
+
+  container-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: ai-sec-intel-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate separate demo, persistent collector and Actions-consumer configurations
         run: |
-          docker compose exec -T --user 0 main-app python -c "import os; from pathlib import Path; p=Path('/app/data/ci-legacy-owner'); p.write_text('preserve'); os.chown(p,10002,10002); os.chown(p.parent,10002,10002)"
-          docker compose exec -T --user 0 main-app python scripts/migrate_volume_owner.py --apply
-          docker compose exec -T main-app python -c "from pathlib import Path; p=Path('/app/data/ci-legacy-owner'); assert p.read_text()=='preserve'; assert p.stat().st_uid==10001; p.unlink()"
-      - name: Verify shared database write permission
-        run: docker compose exec -T -e CI_STATE_PROBE=1 main-app python scripts/check_container_state.py prepare
-      - name: Run the seed service again without resetting state
-        run: docker compose run --rm b-seed
-      - name: Recreate the application with its persisted data and settings
-        run: docker compose up -d --no-deps --force-recreate --wait --wait-timeout 90 main-app
-      - name: Verify state survives and the API remains responsive
-        run: docker compose exec -T -e CI_STATE_PROBE=1 main-app python scripts/check_container_state.py check
-      - name: Container diagnostics
-        if: ${{ failure() }}
-        run: docker compose logs --no-color
-      - name: Remove only this disposable CI stack
-        if: ${{ always() }}
-        run: docker compose down --volumes
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.production.yml config --quiet
+          docker compose -f docker-compose.actions.yml config --quiet
+          docker compose -f docker-compose.offline.yml config --quiet
+      - name: Disable public networking and automatic collection for synthetic integration
+        run: |
+          cat > "${RUNNER_TEMP}/compose-offline.yml" <<'YAML'
+          services:
+            main-app:
+              environment:
+                AUTO_MONITOR_ON_START: "0"
+                AUTO_MONITOR_ENABLED: "0"
+                B_MONITOR_ENABLED: "0"
+                B_MONITOR_ON_REFRESH: "0"
+                MAIN_IMPORT_DEMO_CARDS: "0"
+                AUTO_CLASSIFY_V5: "0"
+                CLASSIFY_V5_MAX_LLM_CALLS: "0"
+                DEEPSEEK_API_KEY: ""
+                AUTO_INGEST_ON_COLLECT: "0"
+                TEAM_ONLY_COLLECT: "1"
+          networks:
+            default:
+              internal: true
+          YAML
+      - name: Build and start the isolated demo containers
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" up --build --detach --wait --wait-timeout 180
+      - name: Verify actual B API, B-to-A records and B-to-C document synchronization
+        # An internal Docker network intentionally has no host port routing.
+        # Exercise the real listening HTTP app from inside its container.
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" exec -T main-app python scripts/check_container_integration.py
+      - name: Verify automatic offline bootstrap inside the built image
+        run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" exec -T main-app python scripts/check_offline_demo.py
+      - name: Verify the separate B API deployment bridge
+        run: |
+          cat > "${RUNNER_TEMP}/compose-sidecar.yml" <<'YAML'
+          services:
+            main-app:
+              environment:
+                TEAM_INTEL_MODE: sidecar
+                TEAM_INTEL_UPSTREAM: http://b-api:8765
+                TEAM_INTEL_BASE_URL: http://b-api:8765
+                TEAM_INTEL_PROXY: "1"
+              depends_on:
+                b-api:
+                  condition: service_healthy
+          YAML
+          docker compose --profile sidecar -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" -f "${RUNNER_TEMP}/compose-sidecar.yml" up --no-build --detach --wait --wait-timeout 180
+          docker compose --profile sidecar -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" -f "${RUNNER_TEMP}/compose-sidecar.yml" exec -T main-app python scripts/check_container_integration.py
+      - name: Save container logs on failure
+        if: failure()
+        run: docker compose --profile sidecar -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" logs --no-color
+      - name: Remove only this CI job's synthetic containers and volumes
+        if: always()
+        run: docker compose --profile sidecar -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" down --volumes --remove-orphans
+
+# These are development behavior checks. Passing them does not establish an
+# independent classification/enrichment/QA score or a six-hour collection SLA.

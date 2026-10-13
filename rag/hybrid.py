@@ -35,6 +35,40 @@ def _normal(vector):
     return [value / length for value in vector]
 
 
+class StaleEvidence(RuntimeError):
+    """Evidence changed while embeddings were being computed; retry the job."""
+
+
+def _fingerprints(rows):
+    return {(row["cve_id"], row["evidence_id"]): _digest(row) for row in rows}
+
+
+def _commit_embeddings(db_path, rows, changed, vectors, *, replace=False):
+    """Fence the slow model call with a short evidence-snapshot transaction.
+
+    Every evidence writer uses this SQLite database. Rechecking the complete
+    snapshot under its writer lock prevents both overwriting newer vectors and
+    reporting success after another writer added, removed or changed evidence.
+    """
+    expected = _fingerprints(rows)
+    with _connection(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        live = _fingerprints([json.loads(row[0]) for row in
+                              conn.execute("SELECT payload FROM evidence")])
+        if live != expected:
+            raise StaleEvidence("Evidence changed during embedding; retry from the current snapshot")
+        conn.execute("CREATE TABLE IF NOT EXISTS embeddings (cve_id TEXT, evidence_id TEXT, model TEXT, digest TEXT, vector TEXT, PRIMARY KEY(cve_id, evidence_id, model))")
+        if replace:
+            conn.execute("DELETE FROM embeddings WHERE model=?", (MODEL_NAME,))
+        else:
+            existing = conn.execute("SELECT cve_id,evidence_id FROM embeddings WHERE model=?", (MODEL_NAME,)).fetchall()
+            conn.executemany("DELETE FROM embeddings WHERE cve_id=? AND evidence_id=? AND model=?",
+                             [(cve, eid, MODEL_NAME) for cve, eid in existing if (cve, eid) not in live])
+        conn.executemany("INSERT OR REPLACE INTO embeddings VALUES (?, ?, ?, ?, ?)", [
+            (row["cve_id"], row["evidence_id"], MODEL_NAME, _digest(row), json.dumps(vector))
+            for row, vector in zip(changed, vectors)])
+
+
 def build_index(db_path=DEFAULT_DB, model_dir=None):
     rows = candidates("", db_path=db_path)
     if not rows:
@@ -44,13 +78,7 @@ def build_index(db_path=DEFAULT_DB, model_dir=None):
     vectors = [_normal(vector) for vector in model.passage_embed([row["text"] for row in rows])]
     if len(vectors) != len(rows):
         raise ValueError("嵌入数量与证据数量不一致")
-    with _connection(db_path) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS embeddings (cve_id TEXT, evidence_id TEXT, model TEXT, digest TEXT, vector TEXT, PRIMARY KEY(cve_id, evidence_id, model))")
-        conn.execute("DELETE FROM embeddings WHERE model = ?", (MODEL_NAME,))
-        conn.executemany("INSERT INTO embeddings VALUES (?, ?, ?, ?, ?)", [
-            (row["cve_id"], row["evidence_id"], MODEL_NAME, _digest(row), json.dumps(vector))
-            for row, vector in zip(rows, vectors)
-        ])
+    _commit_embeddings(db_path, rows, rows, vectors, replace=True)
     config_path(db_path).write_text(json.dumps({"model": MODEL_NAME, "cache_dir": cache_dir, "model_dir": str(Path(model_dir).resolve()) if model_dir else None, "enabled": True}, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"model": MODEL_NAME, "chunks": len(rows), "dimension": len(vectors[0])}
 
@@ -97,7 +125,6 @@ def update_index(db_path=DEFAULT_DB):
         with _connection(db_path) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS embeddings (cve_id TEXT, evidence_id TEXT, model TEXT, digest TEXT, vector TEXT, PRIMARY KEY(cve_id, evidence_id, model))")
             old = {(cve, eid): hash_ for cve, eid, hash_ in conn.execute("SELECT cve_id, evidence_id, digest FROM embeddings WHERE model=?", (MODEL_NAME,))}
-        live = {(row["cve_id"], row["evidence_id"]) for row in rows}
         changed = [row for row in rows if old.get((row["cve_id"], row["evidence_id"])) != _digest(row)]
         vectors = []
         if changed:
@@ -105,14 +132,11 @@ def update_index(db_path=DEFAULT_DB):
             vectors = [_normal(v) for v in model.passage_embed([row["text"] for row in changed])]
             if len(vectors) != len(changed):
                 raise ValueError("嵌入数量不一致")
-        with _connection(db_path) as conn:
-            conn.executemany("DELETE FROM embeddings WHERE cve_id=? AND evidence_id=? AND model=?", [(cve, eid, MODEL_NAME) for cve, eid in old if (cve, eid) not in live])
-            conn.executemany("INSERT OR REPLACE INTO embeddings VALUES (?, ?, ?, ?, ?)", [
-                (row["cve_id"], row["evidence_id"], MODEL_NAME, _digest(row), json.dumps(vector))
-                for row, vector in zip(changed, vectors)])
+        _commit_embeddings(db_path, rows, changed, vectors)
         return {"status": "ok", "updated": len(changed), "reused": len(rows) - len(changed), "chunks": len(rows)}
-    except Exception:
-        return {"status": "deferred", "detail": "向量更新未完成，检索会检查摘要并按需使用 BM25"}
+    except Exception as exc:
+        return {"status": "error", "error_type": type(exc).__name__,
+                "detail": "已配置的向量索引更新失败，任务可重试；当前使用 BM25"}
 
 
 def fuse(lexical, dense, top_k):

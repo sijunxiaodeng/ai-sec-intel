@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from storage.changefeed import ensure_changefeed
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -82,6 +84,7 @@ class ClassificationStore:
                     error_text TEXT
                 );
             """)
+            ensure_changefeed(con)
 
     def _select(self, sql: str, params: tuple) -> list[dict[str, Any]]:
         with self.connect() as con:
