@@ -19,7 +19,7 @@ def record(number):
 
 
 def monitor_result(*, nvd="skipped", osv="failed", aggregate="failed", items=None):
-    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "本机库"}
+    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "多源情报"}
     states = {"nvd": nvd, "osv": osv, "aggregate": aggregate}
     steps = [{"role": "监测", "action": "调用 " + labels[name] + (" 失败" if state == "failed" else ""),
               "detail": "Synthetic source result"} for name, state in states.items()]
@@ -106,7 +106,7 @@ class OrchestratorOutcomeTest(OutcomeFixture):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(len(result["records"]), 2)
         self.assertEqual(result["round_stats"]["inserted"], 1)
-        self.assertIn("本机库", result["error"])
+        self.assertIn("多源情报", result["error"])
         collector.commit_cursor.assert_called_once()
 
     def test_partial_package_failure_and_cursor_write_failure_are_visible(self):
@@ -167,7 +167,7 @@ class ManualOutcomeTest(OutcomeFixture):
         self.assertTrue(data["warnings"])
         self.assertEqual(data["pipeline"]["status"], "partial")
         self.assertEqual(schedule.state()["last_status"], "partial")
-        self.assertIn("本机库", schedule.state()["last_error"])
+        self.assertIn("多源情报", schedule.state()["last_error"])
 
     def test_collection_exception_still_runs_documents_and_returns_no_500(self):
         self.stack.enter_context(patch("api.app.run_collect", side_effect=TimeoutError("Synthetic outage")))
@@ -282,7 +282,7 @@ class ScheduledOutcomeTest(OutcomeFixture):
         public.assert_called_once()
         self.team_sync.assert_called_once_with(max_documents=30)
         self.assertEqual(state["last_status"], "partial")
-        self.assertIn("本机库资料同步", state["last_error"])
+        self.assertIn("资料摘要同步", state["last_error"])
         self.assertEqual(state["library_team_last_status"], "failed")
         self.assertTrue(state["library_team_last_error"])
         self.assertEqual(state["library_last_ok"], 2)

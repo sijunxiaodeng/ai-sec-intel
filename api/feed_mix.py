@@ -8,7 +8,7 @@ def doc_category_key(row):
     return (row.get("category") or row.get("content_type") or row.get("category_label") or "other").strip() or "other"
 
 
-def diversify_documents(rows, limit=48):
+def diversify_documents(rows, limit=72):
     """Round-robin across document categories so one type cannot fill the feed."""
     buckets = {}
     for row in rows:
@@ -97,7 +97,7 @@ def _cve_product_key(row):
     return product or "other"
 
 
-def diversify_cves_by_product(cve_items, per_product_limit=8, limit=80):
+def diversify_cves_by_product(cve_items, per_product_limit=10, limit=120):
     """Round-robin CVE cards by product so one component cannot monopolize the stream.
 
     Does not delete KB rows — only shapes the monitor feed window.

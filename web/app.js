@@ -14,7 +14,7 @@ var eyebrows = {
   library: "可检索原文与片段",
   assets: "EPSS / KEV / 论文 / 影响资产",
   ask: "先证据后回答",
-  settings: "本机模型接口"
+  settings: "模型接口"
 };
 
 var prompts = [
@@ -162,37 +162,59 @@ function setBusyButton(button, busy, busyLabel, idleLabel) {
   }
 }
 
-/** Origin family = where collected from (not content category). No A/B/C labels. */
+var INGEST_PATH_LABELS = {
+  "资料库": 1, "资料存档": 1, "资料库沉淀": 1, "资料沉淀": 1, "本地资料库沉淀": 1,
+  "LIBRARY": 1, "AGGREGATE": 1, "TEAM": 1, "INTELLIGENCE": 1,
+  "多源情报": 1, "多源情报资料": 1, "聚合库": 1
+};
+
+/** Origin family = where collected from (not ingest path, not content-only). */
 function sourceFamily(raw) {
   var s = String(raw || "").toUpperCase();
   if (!s) return "other";
+  if (INGEST_PATH_LABELS[s] || s.indexOf("资料库") >= 0 || s.indexOf("沉淀") >= 0
+      || s.indexOf("LIBRARY") >= 0 || s.indexOf("AGGREGATE") >= 0) return "other";
   if (s === "NVD" || s.indexOf("NVD") === 0) return "nvd";
   if (s === "OSV" || s.indexOf("OSV") === 0) return "osv";
   if (s.indexOf("CISA") >= 0 || s.indexOf("KEV") >= 0) return "kev";
   if (s.indexOf("GITHUB") >= 0 || s.indexOf("GHSA") >= 0) return "github";
-  if (s.indexOf("AGGREGATE") >= 0 || s.indexOf("TEAM") >= 0 || s.indexOf("INTELLIGENCE") >= 0) return "aggregate";
-  if (s.indexOf("LIBRARY") >= 0) return "library";
-  // Collector ids that land via our aggregate multi-collector DB.
-  if (s.indexOf("ARXIV") >= 0 || s.indexOf("TRAIL") >= 0 || s.indexOf("HF_") >= 0
-      || s.indexOf("VENDOR") >= 0 || s.indexOf("NIST") >= 0 || s.indexOf("FEDERAL") >= 0
-      || s.indexOf("ADVISORY") >= 0) return "aggregate";
+  if (s.indexOf("VLLM") >= 0 || s.indexOf("OLLAMA") >= 0 || s.indexOf("LANGCHAIN") >= 0
+      || s.indexOf("VENDOR") >= 0 || s.indexOf("厂商") >= 0) return "vendor";
+  if (s.indexOf("ARXIV") >= 0 || s.indexOf("论文") >= 0 || s.indexOf("学术") >= 0) return "paper";
+  if (s.indexOf("TRAIL") >= 0 || s.indexOf("BLOG") >= 0 || s.indexOf("博客") >= 0) return "blog";
+  if (s.indexOf("HF_") >= 0 || s.indexOf("HUGGING") >= 0 || s.indexOf("COMMUNITY") >= 0
+      || s.indexOf("社区") >= 0) return "community";
+  if (s.indexOf("NIST") >= 0 || s.indexOf("FEDERAL") >= 0 || s.indexOf("STANDARD") >= 0
+      || s.indexOf("POLICY") >= 0 || s.indexOf("标准") >= 0 || s.indexOf("政策") >= 0) return "standard";
   return "other";
 }
 
 function sourceLabel(raw) {
-  var map = {
-    nvd: "NVD",
-    osv: "OSV",
-    github: "GitHub Advisory",
-    kev: "CISA KEV",
-    aggregate: "本机库",
-    library: "资料库沉淀",
-    other: "其他"
-  };
-  var fam = sourceFamily(raw);
-  if (fam !== "other") return map[fam];
   var s = String(raw || "").trim();
-  return s || "来源未写明";
+  if (!s || INGEST_PATH_LABELS[s] || INGEST_PATH_LABELS[s.toUpperCase()]) return "来源未写明";
+  var specific = {
+    NVD: "NVD", OSV: "OSV",
+    "GITHUB ADVISORY": "GitHub Advisory", GITHUB_ADVISORY: "GitHub Advisory", GHSA: "GitHub Advisory",
+    "CISA KEV": "CISA KEV", CISA_KEV: "CISA KEV",
+    ARXIV: "arXiv", ARXIV_AI_SECURITY: "arXiv", "ARXIV FULL TEXT": "arXiv",
+    "TRAIL OF BITS": "Trail of Bits", TRAIL_OF_BITS_BLOG: "Trail of Bits", TRAIL_OF_BITS: "Trail of Bits",
+    "HUGGING FACE": "Hugging Face", HF_SECURITY_COMMUNITY: "Hugging Face",
+    VLLM: "vLLM", VLLM_VENDOR: "vLLM", OLLAMA: "Ollama", OLLAMA_VENDOR: "Ollama",
+    LANGCHAIN: "LangChain", LANGCHAIN_VENDOR: "LangChain",
+    NIST: "NIST", NIST_CSRC_AI_STANDARDS: "NIST",
+    "FEDERAL REGISTER": "Federal Register", FEDERAL_REGISTER_AI_POLICY: "Federal Register"
+  };
+  var key = s.toUpperCase().replace(/-/g, "_");
+  if (specific[key]) return specific[key];
+  if (specific[s.toUpperCase()]) return specific[s.toUpperCase()];
+  // Keep human publisher strings (arXiv, Trail of Bits, …)
+  if (s !== s.toUpperCase() || s.indexOf(" ") >= 0) return s;
+  var fam = sourceFamily(raw);
+  var map = {
+    nvd: "NVD", osv: "OSV", github: "GitHub Advisory", kev: "CISA KEV",
+    vendor: "厂商公告源", paper: "论文", blog: "博客", community: "社区", standard: "标准/政策"
+  };
+  return map[fam] || s;
 }
 
 /** Content category = what kind of intel (orthogonal to origin). */
@@ -211,22 +233,20 @@ function contentCategory(item) {
 
 function itemSourceLabels(item) {
   var raws = (item && item.sources) || [];
-  if (!raws.length && item) {
-    if (item.source) raws = [item.source];
-    else if (item.origin === "team_documents") raws = ["AGGREGATE"];
-    else if (item.origin === "library") raws = ["LIBRARY"];
-  }
+  if (!raws.length && item && item.source) raws = [item.source];
+  // origin/library/team_documents = ingest path only — never invent a 来源 chip from them.
   var labels = [];
   var seen = {};
   raws.forEach(function (r) {
     var label = sourceLabel(r);
+    if (label === "来源未写明") return;
     if (!seen[label]) { seen[label] = true; labels.push(label); }
   });
-  if (item && item.kind === "document" && item.origin === "team_documents" && !seen["本机库"]) {
-    labels.unshift("本机库");
-  }
-  if (item && item.kind === "document" && item.origin === "library" && !seen["资料库沉淀"]) {
-    labels.unshift("资料库沉淀");
+  // Documents with empty collector id: fall back to content-class origin, not ingest path.
+  if (!labels.length && item && item.kind === "document") {
+    var cat = contentCategory(item);
+    var byCat = {vendor: "厂商公告源", paper: "论文", community: "社区", standard: "标准/政策"};
+    if (byCat[cat]) labels.push(byCat[cat]);
   }
   return labels.length ? labels : ["来源未写明"];
 }
@@ -242,20 +262,29 @@ function itemMatchesCategoryFilter(item, filter) {
 
 function itemMatchesSourceFilter(item, filter) {
   if (!filter || filter === "all") return true;
-  // Legacy chip ids from older UI → map to origin families.
-  if (filter === "team") filter = "aggregate";
-  if (filter === "vendor" || filter === "paper" || filter === "community") {
-    // Old builds mixed category into source chips; keep working if bookmarked.
-    return itemMatchesCategoryFilter(item, filter);
-  }
-  if (item.origin === "team_documents" && filter === "aggregate") return true;
-  if (item.origin === "library" && filter === "library") return true;
+  // Legacy ingest-path chips removed from UI; do not match by origin=library/team.
+  if (filter === "library" || filter === "aggregate" || filter === "team") return false;
   var raws = (item.sources || []).concat(item.source ? [item.source] : []);
-  if (!raws.length && item.kind === "document") {
-    if (filter === "aggregate" && item.origin === "team_documents") return true;
-    if (filter === "library" && item.origin === "library") return true;
+  if (raws.some(function (r) { return sourceFamily(r) === filter; })) return true;
+  // Document chips (厂商/社区/论文/博客/标准) also accept content category when collector id is thin.
+  if (item.kind === "document") {
+    var cat = contentCategory(item);
+    if (filter === "vendor" && cat === "vendor") return true;
+    if (filter === "paper" && cat === "paper") return true;
+    if (filter === "standard" && cat === "standard") return true;
+    if (filter === "community" && cat === "community") {
+      // community chip excludes pure blog labels when a blog-specific chip exists
+      var blob = ((item.source || "") + " " + (item.sources || []).join(" ")).toLowerCase();
+      if (blob.indexOf("blog") >= 0 || blob.indexOf("博客") >= 0 || blob.indexOf("trail") >= 0) return false;
+      return true;
+    }
+    if (filter === "blog") {
+      var text = ((item.source || "") + " " + (item.sources || []).join(" ") + " " + (item.category || "")).toLowerCase();
+      return text.indexOf("blog") >= 0 || text.indexOf("博客") >= 0 || text.indexOf("trail") >= 0
+        || text.indexOf("research_article") >= 0 || text.indexOf("security_blog") >= 0;
+    }
   }
-  return raws.some(function (r) { return sourceFamily(r) === filter; });
+  return false;
 }
 
 function hideToast() {
@@ -376,8 +405,11 @@ function renderItemRow(parent, item, onPick) {
     else if (label === "OSV") fam = "osv";
     else if (label.indexOf("GitHub") === 0) fam = "gh";
     else if (label.indexOf("KEV") >= 0) fam = "kev";
-    else if (label.indexOf("本机库") >= 0 || label.indexOf("聚合") >= 0 || label.indexOf("多源") >= 0) fam = "team";
-    else if (label.indexOf("资料库") >= 0 || label.indexOf("沉淀") >= 0) fam = "lib";
+    else if (label.indexOf("厂商") >= 0) fam = "gh";
+    else if (label.indexOf("论文") >= 0 || label.indexOf("arXiv") >= 0) fam = "paper";
+    else if (label.indexOf("博客") >= 0 || label.indexOf("Trail") >= 0) fam = "comm";
+    else if (label.indexOf("社区") >= 0 || label.indexOf("Hugging") >= 0) fam = "comm";
+    else if (label.indexOf("标准") >= 0 || label.indexOf("政策") >= 0 || label.indexOf("NIST") >= 0) fam = "lib";
     add(srcWrap, "span", "src-tag src-" + fam, label);
   });
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
@@ -387,7 +419,13 @@ function renderItemRow(parent, item, onPick) {
   add(text, "div", "desc", (headline || "").slice(0, 140));
   var product = item.product ? (" · " + item.product) : "";
   var pub = dateText(item.published_at);
-  add(text, "div", "meta", "发布 " + pub + " · " + labels.join("、") + product);
+  var collected = dateText(item.collected_at);
+  var when = "发布 " + pub;
+  // 入库日 ≠ 发布日：避免把「原文昨天公开」误读成「监测停在昨天」。
+  if (item.collected_at && collected && collected !== pub && collected !== "未知") {
+    when += " · 入库 " + collected;
+  }
+  add(text, "div", "meta", when + " · " + labels.join("、") + product);
 }
 
 function setPill(ready) {
@@ -427,17 +465,9 @@ function setTeamHealth(team) {
   if (team && team.enabled !== false && team.reachable === false) {
     el.hidden = false;
     var err = team.error || "";
-    var hint;
-    if (/intelligence\.db missing|缺少 intelligence\.db/i.test(err)) {
-      hint = "请先生成本机库：cd intelligence && python seed_demo_db.py；或 ACTIONS_SYNC_PULL=1 ./scripts/demo-pull-actions.sh；然后再 ./scripts/demo-up.sh。";
-    } else if (/多源资料探测失败|聚合|Connection refused|8765/i.test(err)) {
-      hint = "嵌入模式下应直读本机库，无需第二端口。若刚升级代码请重启主应用；仍失败请检查 intelligence/data/intelligence.db。";
-    } else {
-      hint = "仍会抓取 NVD/OSV。可重启 ./scripts/demo-up.sh，或按上方错误检查本机库。";
-    }
-    el.textContent = "本机库暂不可用"
+    el.textContent = "部分情报来源暂不可用"
       + (err ? "：" + err : "")
-      + "。" + hint;
+      + "。仍可查看已有情报，并继续刷新 NVD / OSV。";
   } else {
     el.hidden = true;
     el.textContent = "";
@@ -474,8 +504,6 @@ function renderCollectPipeline(pipeline, opts) {
   var stagesEl = $("pipeline-stages");
   var metricsEl = $("pipeline-metrics");
   var summaryEl = $("pipeline-summary");
-  var techEl = $("pipeline-tech");
-  var techBody = $("pipeline-tech-body");
   if (!box || !stagesEl) return;
   if (!pipeline || !(pipeline.stages || []).length) {
     if (!opts.forceShow) box.hidden = true;
@@ -488,11 +516,11 @@ function renderCollectPipeline(pipeline, opts) {
     if (status === "running") {
       summaryEl.textContent = "监测刷新中"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
-        + "——多方面来源一并跑，看下方命中/新增/合并。";
+        + "…";
     } else if (pipeline.summary) {
       summaryEl.textContent = pipeline.summary;
     } else {
-      summaryEl.textContent = "本轮监测结果如下。0 新增时请看「命中 / 合并」——不等于没搜到。";
+      summaryEl.textContent = "本轮结果如下。无新增时请对照查询返回、水位后保留与合并。";
     }
   }
   if (metricsEl) {
@@ -500,12 +528,13 @@ function renderCollectPipeline(pipeline, opts) {
     if (pipeline.elapsed_sec != null && status !== "idle") {
       bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
     }
-    bits.push("命中 <strong>" + (metrics.hit || 0) + "</strong>");
+    bits.push("查询返回 <strong>" + (metrics.hit || 0) + "</strong>");
+    bits.push("水位后保留 <strong>" + (metrics.kept || 0) + "</strong>");
     bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
     bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
     bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
     if (metrics.external_fetches) {
-      bits.push("外部取回 <strong>" + metrics.external_fetches + "</strong>");
+      bits.push("外部请求 <strong>" + metrics.external_fetches + "</strong>");
     }
     metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
     metricsEl.hidden = false;
@@ -548,16 +577,6 @@ function renderCollectPipeline(pipeline, opts) {
     }
     stagesEl.appendChild(li);
   });
-  if (techEl && techBody) {
-    var tech = pipeline.tech_detail || "";
-    if (tech) {
-      techEl.hidden = false;
-      techBody.textContent = tech;
-    } else {
-      techEl.hidden = true;
-      techBody.textContent = "";
-    }
-  }
 }
 
 function renderMonitorLive(data, opts) {
@@ -582,13 +601,13 @@ function renderMonitorLive(data, opts) {
     if (phaseEl) {
       phaseEl.textContent = phase
         ? ("当前步骤：" + phase)
-        : "监测刷新中（多方面来源一并跑）…";
+        : "监测刷新中…";
     }
   } else {
     stateEl.textContent = "空闲";
     if (phaseEl) {
       phaseEl.textContent = data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
-        : "完成一轮后等待约 " + intervalText + " 自动刷新；也可点「立即刷新一轮」。非实时推流。";
+        : "约 " + intervalText + " 后自动刷新，也可立即刷新。";
     }
   }
   if (lastEl) {
@@ -625,7 +644,8 @@ function loadMonitorStatus() {
       bits.push("最近更新 " + formatStamp(data.last_run));
       bits.push("上次新增 " + (data.last_count || 0) + " 条");
       var pm = (data.pipeline && data.pipeline.metrics) || {};
-      if (pm.hit != null) bits.push("命中 " + (pm.hit || 0));
+      if (pm.hit != null) bits.push("查询返回 " + (pm.hit || 0));
+      if (pm.kept != null) bits.push("水位后保留 " + (pm.kept || 0));
       if (pm.merged != null) bits.push("合并 " + (pm.merged || 0));
     } else bits.push("尚未刷新；可点「立即刷新一轮」");
     if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
@@ -668,7 +688,7 @@ function loadOverview() {
       [String(data.items), "情报条目"],
       [String(data.source_count || 0), "漏洞来源数"],
       [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "本机库 CVE"],
+      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源 CVE"],
       [data.llm_ready ? "可用" : "未配置", "问答模型"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
@@ -711,9 +731,11 @@ var SOURCE_FILTER_LABELS = {
   osv: "OSV",
   github: "GitHub",
   kev: "CISA KEV",
-  aggregate: "本机库",
-  library: "资料库沉淀",
-  team: "本机库"
+  vendor: "厂商公告源",
+  community: "社区",
+  blog: "博客",
+  paper: "论文",
+  standard: "标准/政策"
 };
 
 function setMonitorScope(scope) {
@@ -783,7 +805,7 @@ function renderMonitorFeed(data) {
   } else if (teamMeta.reachable === false) {
     setTeamHealth({
       reachable: false,
-      error: teamMeta.error || "本机库资料探测失败",
+      error: teamMeta.error || "资料摘要探测失败",
     });
   }
   if (summary) {
@@ -794,11 +816,14 @@ function renderMonitorFeed(data) {
     if (monitorSourceFilter !== "all") {
       filterBits.push("来源「" + (SOURCE_FILTER_LABELS[monitorSourceFilter] || monitorSourceFilter) + "」");
     }
-    summary.textContent = "共漏洞 " + (counts.cve || 0)
+    var before = counts.cve_before_window;
+    summary.textContent = "展示窗：漏洞 " + (counts.cve || 0)
       + " · 资料 " + (counts.document || 0)
-      + (teamTotal ? "（本机库资料 " + teamTotal + "）" : "")
+      + (before != null && before > (counts.cve || 0)
+        ? "（知识库侧匹配漏洞 " + before + "，流内按组件截断）" : "")
+      + (teamTotal ? "（资料摘要 " + teamTotal + "）" : "")
       + (filterBits.length ? " · " + filterBits.join(" + ") + " → 显示 " + items.length + " 条" : "")
-      + "。类型/分类与来源是两维；监测是否最新看上方「最近更新」。";
+      + "。条目「发布」= 原文日；监测是否在跑看上方「最近更新」。";
   }
   var mixEl = $("monitor-mix");
     if (mixEl) {
@@ -816,7 +841,13 @@ function renderMonitorFeed(data) {
     if (catBits.length) parts.push("分类：" + catBits.join("、"));
     if (prodBits.length) parts.push("组件：" + prodBits.join("、"));
     if (ollamaShare != null) parts.push("提及 Ollama 约 " + ollamaShare + "%");
+    if (data.window_note) parts.push(data.window_note);
     if (data.mix_note) parts.push(data.mix_note);
+    var fresh = data.freshness || {};
+    if (fresh.newest_published_at) {
+      parts.push("流内最新发布 " + dateText(fresh.newest_published_at)
+        + (fresh.newest_collected_at ? " · 最新入库 " + dateText(fresh.newest_collected_at) : ""));
+    }
     mixEl.textContent = parts.join(" · ");
     mixEl.hidden = !parts.length;
   }
@@ -889,13 +920,12 @@ function openMonitorDetail(item) {
     clear(panel);
     add(panel, "h2", "", (item.category_label || "资料") + (item.demo ? "（演示）" : ""));
     add(panel, "p", "desc", item.title || "");
-    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见资料库沉淀）");
+    add(panel, "p", "desc", item.description || "（列表摘要；完整正文见资料存档）");
     var fields = add(panel, "div", "fields");
     [
-      ["类型", "非 CVE · " + (item.category_label || item.category || "资料")],
+      ["类型", item.category_label || item.category || "资料"],
       ["来源", itemSourceLabels(item).join("、")],
-      ["入库路径", item.origin === "team_documents" ? "本机库（监测读本地情报）" : "资料库沉淀"],
-      ["记录类型", item.demo ? "演示合成" : "联网/入库资料"]
+      ["记录类型", item.demo ? "演示合成" : "联网采集"]
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
@@ -905,7 +935,7 @@ function openMonitorDetail(item) {
       var link = add(panel, "a", "meta", item.url);
       link.href = item.url; link.target = "_blank"; link.rel = "noopener";
     }
-    var goLib = add(panel, "button", "ghost", "打开资料库沉淀");
+    var goLib = add(panel, "button", "ghost", "打开资料存档");
     goLib.type = "button";
     goLib.addEventListener("click", function () { setView("library"); });
     return;
@@ -1057,7 +1087,7 @@ function renderArticleCandidates(panel, cveId) {
         add(block, "summary", "", (row.category === "paper" ? "论文 · " : "分析文章 · ") + row.title);
         add(block, "span", "tag", row.explicit_cve_mention ? "完整编号提及 · 未审核候选" : "机制 / CWE 关联候选 · 未审核");
         add(block, "p", "meta", row.association_notice);
-        var scopes = {abstract: "论文摘要", full_text_html: "HTML 提取正文", article_body: "文章提取正文", team_summary: "团队接口摘要（非原始全文）"};
+        var scopes = {abstract: "论文摘要", full_text_html: "HTML 提取正文", article_body: "文章提取正文", team_summary: "接口摘要（非原始全文）"};
         add(block, "p", "meta", "资料范围：" + (scopes[row.content_scope] || missingText(row.content_scope, "未写明")) + " · 获取于 " + dateText(row.retrieved_at));
         if (row.retained_previous) add(block, "p", "meta", "最近更新失败，沿用上述日期的成功存档。");
         (row.match_basis || []).forEach(function (basis) { add(block, "p", "meta", basis.label + "（" + basis.term + "） · " + basis.citation_id); });
@@ -1225,7 +1255,7 @@ function renderDetail(item) {
     ["CISA KEV", kevText(item.kev)],
     ["公开利用链接", item.poc_count ? item.poc_count + " 条链接" : "未见 Exploit 标记"],
     ["论文", item.paper_count ? item.paper_count + " 篇" : "尚未关联"],
-    ["记录类型", isDemoItem(item) ? "演示合成（非比赛监测证据）" : "联网/入库情报"]
+    ["记录类型", isDemoItem(item) ? "演示数据" : "联网/入库情报"]
   ].forEach(function (pair) {
     var field = add(fields, "div", "field");
     add(field, "span", "", pair[0]);
@@ -1712,23 +1742,25 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   }
   srcLine("NVD", diag.nvd);
   srcLine("OSV", diag.osv);
-  srcLine("本机库", diag.b_team || (team.enabled === false ? {status: "已禁用"} : team.reachable === false ? { status: "不可达" } : null));
-  srcLine("本机库刷新", diag.b_monitor);
+  srcLine("多源情报", diag.b_team || (team.enabled === false ? {status: "已禁用"} : team.reachable === false ? { status: "不可达" } : null));
+  srcLine("多源情报刷新", diag.b_monitor);
   srcLine("资料同步", diag.c_library_sync);
 
   var rs = (runData && runData.round_stats) || {};
   if ((diag.written === 0 || (runData && runData.count === 0)) && (rs.inserted === 0 || rs.inserted == null)) {
     bits.push("本轮 CVE 新增 0"
-      + (rs.hit != null ? "（命中 " + rs.hit + "，合并 " + (rs.merged || 0) + "）" : ""));
+      + (rs.hit != null
+        ? "（查询返回 " + rs.hit + "，水位后保留 " + (rs.kept || 0) + "，合并 " + (rs.merged || 0) + "）"
+        : ""));
   }
   if (rs.hit > 0 && (rs.inserted || 0) === 0) {
-    bits.push("已查到来源数据但无新编号——多半是增量游标之后无更新，或 CVE 已在库中");
+    bits.push("本轮无新增编号；已有情报仍可浏览");
   }
   if (team.enabled !== false && team.reachable === false) {
-    bits.push("本机库不可用时仍应有 NVD/OSV 与本地资料");
+    bits.push("部分来源暂不可用，仍可查看 NVD / OSV 与已有资料");
   }
   if (teamDocs.enabled !== false && teamDocs.reachable === false) {
-    bits.push("本机库资料不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : "（请确认已 seed 且主应用为 embed）"));
+    bits.push("资料摘要暂不可读" + (teamDocs.error ? "（" + teamDocs.error + "）" : ""));
   }
   if (keyword) {
     bits.push("当前关键词「" + keyword + "」可能过窄—可清除");
@@ -1743,7 +1775,7 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
     bits.push("来源筛选=" + monitorSourceFilter);
   }
   if (!bits.length) {
-    bits.push("请确认已运行 ./scripts/demo-up.sh");
+    bits.push("可再点「立即刷新一轮」，或稍后再试");
   }
   return bits.join("；");
 }
@@ -1808,7 +1840,7 @@ function runMonitorRefresh(options) {
   clearError();
   var busyBase = keyword
     ? ("正在按「" + keyword + "」监测刷新，")
-    : "监测刷新中（多方面来源一并跑，可能需数十秒），";
+    : "监测刷新中（可能需数十秒），";
   startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",
@@ -1822,11 +1854,12 @@ function runMonitorRefresh(options) {
     var rs = data.round_stats || {};
     var outcomeLabel = {success: "采集成功", partial: "采集部分成功", failed: "采集失败"}[data.status] || "本轮完成";
     if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
-    var roundLine = "本轮命中 " + (rs.hit != null ? rs.hit : "—")
+    var roundLine = "查询返回 " + (rs.hit != null ? rs.hit : "—")
+      + " · 水位后保留 " + (rs.kept != null ? rs.kept : "—")
       + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
       + " · 合并 " + (rs.merged != null ? rs.merged : "—");
     setMonitorStatus(outcomeLabel + "：" + roundLine
-      + (bmon.status ? "；本机库刷新 " + bmon.status : "")
+      + (bmon.status ? "；多源情报刷新 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
       + "。正在刷新情报流…");
     showToast(outcomeLabel + "：" + roundLine, "busy");
@@ -1836,7 +1869,7 @@ function runMonitorRefresh(options) {
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
       if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
-        done += " 已查到来源数据但无新 CVE 编号（增量位点之后无更新，或已在库中合并）。";
+        done += " 本轮无新增编号；可查看查询返回与水位后保留。";
       }
       if (data.status === "failed") done += " 采集未成功，当前显示保留的已有记录。";
       setMonitorStatus(done);
@@ -2041,7 +2074,7 @@ on("new-session", "click", function () {
   $("question").value = "";
   ["answer", "evidence", "ask-steps"].forEach(function (id) { clear($(id)); });
   $("verdict").textContent = "";
-  $("conversation-context").textContent = "已开始新会话，请先指定漏洞。会话在本机进程内保留，空闲两小时或服务重启后失效。";
+  $("conversation-context").textContent = "已开始新会话，请先指定漏洞。会话在当前服务内保留，空闲两小时或重启后失效。";
   clearError();
 });
 
@@ -2144,7 +2177,7 @@ on("test-llm", "click", function () {
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
-var libraryScopes = {team_summary: "本机库接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
+var libraryScopes = {team_summary: "接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
 
@@ -2311,8 +2344,8 @@ function renderLibrarySyncStatus(overview) {
   if (!sourcesEl) return;
   clear(sourcesEl);
   var sources = overview.sources || [];
-  var publicSources = sources.filter(function (s) { return (s.category || "") !== "team" && s.source_id !== "team_documents" && s.name !== "多源情报资料" && s.name !== "本机库资料"; });
-  var multiSources = sources.filter(function (s) { return (s.category || "") === "team" || s.source_id === "team_documents" || s.name === "多源情报资料" || s.name === "本机库资料"; });
+  var publicSources = sources.filter(function (s) { return (s.category || "") !== "team" && s.source_id !== "team_documents" && s.name !== "多源情报资料" && s.name !== "资料摘要"; });
+  var multiSources = sources.filter(function (s) { return (s.category || "") === "team" || s.source_id === "team_documents" || s.name === "多源情报资料" || s.name === "资料摘要"; });
 
   function statusLabel(st) {
     if (st === "ok") return "正常";
@@ -2341,18 +2374,18 @@ function renderLibrarySyncStatus(overview) {
   }
   if (multiStatus) {
     multiStatus.textContent = multiSources.length
-      ? ("最近本机库摘要：" + statusLabel(multiSources[0].status) + (multiSources[0].discovered != null ? " · 窗口 " + multiSources[0].discovered + " 份" : "") + (multiSources[0].checked_at ? " · " + dateText(multiSources[0].checked_at) : ""))
-      : "尚未同步本机库摘要。";
+      ? ("最近资料摘要：" + statusLabel(multiSources[0].status) + (multiSources[0].discovered != null ? " · 窗口 " + multiSources[0].discovered + " 份" : "") + (multiSources[0].checked_at ? " · " + dateText(multiSources[0].checked_at) : ""))
+      : "尚未同步资料摘要。";
   }
 
   var line = add(sourcesEl, "p", "meta", "同步概览：公开源 " + pub.ok + "/" + Math.max(publicSources.length, 1) + " 正常"
-    + (multiSources.length ? " · 本机库摘要 " + statusLabel(multiSources[0].status) : " · 本机库摘要未跑")
+    + (multiSources.length ? " · 资料摘要 " + statusLabel(multiSources[0].status) : " · 资料摘要未跑")
     + "。下方按类型分组浏览。");
 
   var detail = add(sourcesEl, "details", "library-status-detail");
   add(detail, "summary", "", "查看来源同步明细（" + sources.length + "）");
   publicSources.concat(multiSources).forEach(function (source) {
-    var kind = ((source.category || "") === "team" || source.name === "多源情报资料") ? "本机库摘要" : "公开";
+    var kind = ((source.category || "") === "team" || source.name === "多源情报资料") ? "资料摘要" : "公开";
     var text = "【" + kind + "】" + source.name + " · " + statusLabel(source.status)
       + (source.discovered != null ? " · 发现 " + source.discovered + " 份" : "")
       + (source.checked_at ? " · " + dateText(source.checked_at) : "");
@@ -2376,7 +2409,7 @@ function renderLibrarySyncStatus(overview) {
   });
   add(failBox, "summary", "", "同步问题 " + (realFails.length + (moduleCount ? 1 : 0)) + " 条（已折叠，不影响已入库资料）");
   if (moduleCount) {
-    add(failBox, "p", "hint", "本机库摘要同步曾暂不可用；已保留上次成功入库的资料，可稍后重试「同步本机库摘要」。");
+    add(failBox, "p", "hint", "资料摘要同步曾暂不可用；已保留上次成功入库的资料，可稍后重试「同步资料摘要」。");
   }
   realFails.slice(0, 12).forEach(function (row) {
     var block = add(failBox, "div", "meta");
@@ -2391,7 +2424,7 @@ function renderLibrarySyncStatus(overview) {
 function loadLibrary() {
   return api("/api/library?document_type=" + encodeURIComponent($("library-type").value)).then(function (data) {
     var counts = data.overview.types;
-    $("library-summary").textContent = "本机已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段存档内容；标准 / 风险框架 " + (counts.standard || 0) + "、政策法规 " + (counts.policy || 0) + "。";
+    $("library-summary").textContent = "已收录 " + data.overview.documents + " 份资料、" + data.overview.chunks + " 段存档内容；标准 / 风险框架 " + (counts.standard || 0) + "、政策法规 " + (counts.policy || 0) + "。";
     renderLibrarySyncStatus(data.overview || {});
     var target = $("library-list"); clear(target);
     if (!data.items.length) {
@@ -2430,10 +2463,10 @@ function renderLibraryDocRow(target, doc, allItems) {
     api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
   });
   add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
-  var discoveryLabels = {team_api: "本机库存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
+  var discoveryLabels = {team_api: "资料存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
   add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
   if (doc.version) add(block, "p", "meta", "版本：" + doc.version);
-  if (doc.team_document_id) add(block, "p", "meta", "本机库记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
+  if (doc.team_document_id) add(block, "p", "meta", "资料记录：" + doc.team_document_id + " · 更新于 " + dateText(doc.team_content_updated_at));
   if (doc.effective_at) add(block, "p", "meta", "原文实施 / 施行日期：" + doc.effective_at);
   if (doc.extraction_notice) add(block, "p", "hint", doc.extraction_notice);
   var selection = add(block, "label", "library-selection");
@@ -2538,25 +2571,25 @@ on("library-sync", "click", function () {
 
 on("library-team-sync", "click", function () {
   var button = $("library-team-sync");
-  var idle = "同步本机库摘要";
+  var idle = "同步资料摘要";
   setBusyButton(button, true, "正在同步…", idle);
   clearError();
-  showToast("正在同步本机库摘要（题名/描述窗口）…", "busy");
+  showToast("正在同步资料摘要（题名/描述窗口）…", "busy");
   api("/api/library/team-sync", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({max_documents: 30})}).then(function (data) {
     if (data.status === "skipped" || data.enabled === false) {
-      showToast("本机库摘要同步按配置已跳过，已有资料和选择保留。", "busy");
+      showToast("资料摘要同步按配置已跳过，已有资料和选择保留。", "busy");
       return;
     }
     var msg = data.status === "error"
-      ? "本机库摘要暂不可用，已有资料仍可使用"
-      : ("本机库摘要同步完成：" + data.ok + "/" + data.attempted + " 份");
+      ? "资料摘要暂不可用，已有资料仍可使用"
+      : ("资料摘要同步完成：" + data.ok + "/" + data.attempted + " 份");
     showToast(msg, data.status === "error" ? "error" : "ok");
     librarySelectedDocs = []; clear($("library-evidence")); clear($("library-relations"));
-    $("library-answer").textContent = data.status === "error" ? "本机库摘要暂不可用，已有资料可继续使用。" : "本机库摘要已同步，请重新选择资料并提问。";
+    $("library-answer").textContent = data.status === "error" ? "资料摘要暂不可用，已有资料可继续使用。" : "资料摘要已同步，请重新选择资料并提问。";
     return loadLibrary();
   }).catch(function (error) {
     showError(error);
-    showToast("本机库摘要同步失败：" + (error.message || "请求失败"), "error");
+    showToast("资料摘要同步失败：" + (error.message || "请求失败"), "error");
   }).then(function () { setBusyButton(button, false, null, idle); });
 });
 

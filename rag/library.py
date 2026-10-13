@@ -481,7 +481,7 @@ def full_text(document_id, db_path=LIBRARY_DB, fetcher=fetch):
     doc = detail(document_id, db_path)
     if doc and doc["content_scope"] == "team_summary" and doc["document_type"] in ("research_article", "vendor_advisory"):
         if doc["integrity_status"] != "ok":
-            raise ValueError("团队描述存档完整性未通过检查")
+            raise ValueError("资料描述存档完整性未通过检查")
         candidate = {"url": doc["url"], "document_type": doc["document_type"],
                      "source_name": doc["publisher"], "source_id": "team_source_text",
                      "parent_document_id": document_id, "discovery": "explicit_source_text"}
@@ -574,7 +574,7 @@ def _skipped_team_sync():
             "changed": 0, "documents": [],
             "source": {"source_id": "team_documents", "name": "多源情报资料",
                        "category": "team", "status": "skipped", "enabled": False},
-            "notice": "按配置跳过本机库资料同步，已有资料保留。"}
+            "notice": "按配置跳过资料摘要同步，已有资料保留。"}
 
 
 def sync_team(db_path=LIBRARY_DB, *, max_documents=30, base_url=None, collector=None):

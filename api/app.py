@@ -425,9 +425,9 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
         },
         {
             "id": "library",
-            "title": "资料库沉淀",
+            "title": "资料存档",
             "position": "管线 03 · 可检索原文",
-            "duty": "沉淀可检索原文与片段；监测是流，这里是存档与问答底座。",
+            "duty": "存档可检索原文与片段；监测是流，这里是资料存档与问答底座。来源仍是论文/博客/厂商等，不是「资料库沉淀」。",
             "standard": {
                 "level": "可演示" if docs_n >= 1 else "缺口",
                 "summary": f"文档 {docs_n} · 片段 {chunks_n} · 类别 {lib_cats}",
@@ -679,14 +679,21 @@ def _fetch_team_documents(q="", limit=48):
         desc = row.get("description") or ""
         if not _text_match(q, title, desc, category, row.get("source") or "", row.get("url") or ""):
             continue
+        origin_name = _document_origin_name({
+            "publisher": row.get("source") or "",
+            "source": row.get("source") or "",
+            "discovery_source_id": row.get("source") or "",
+            "document_type": category or row.get("content_type") or "",
+            "source_category": category,
+        })
         out.append({
             "kind": "document",
             "id": row.get("document_id") or row.get("id") or title,
             "document_id": row.get("document_id") or "",
             "title": title,
             "description": desc,
-            "source": row.get("source") or "",
-            "sources": [row.get("source")] if row.get("source") else [],
+            "source": origin_name,
+            "sources": [origin_name] if origin_name else [],
             "category": category,
             "category_label": _CATEGORY_LABELS.get(category, category or "资料"),
             "content_type": row.get("content_type") or "",
@@ -694,7 +701,8 @@ def _fetch_team_documents(q="", limit=48):
             "published_at": row.get("published_at") or row.get("first_seen_at") or "",
             "demo": bool((row.get("raw_data") or {}).get("demo_fixture"))
                 or title.startswith("【演示】") or desc.startswith("演示用"),
-            "origin": "team_documents",
+            "origin": "team_documents",  # ingest path, not product 来源
+            "ingest_path": "multisource_db",
         })
         if len(out) >= limit:
             break
@@ -703,6 +711,85 @@ def _fetch_team_documents(q="", limit=48):
         "total": payload.get("total", len(out)),
         "mode": "embed" if embed_enabled() else "sidecar",
     }
+
+
+_INGEST_PATH_LABELS = frozenset({
+    "资料库", "资料存档", "资料库沉淀", "资料沉淀", "本地资料库沉淀",
+    "library", "team_documents", "多源情报资料", "多源情报", "聚合库",
+})
+
+_DISCOVERY_SOURCE_LABELS = {
+    "arxiv": "arXiv",
+    "arxiv_full_text": "arXiv",
+    "arxiv_ai_security": "arXiv",
+    "trail_of_bits": "Trail of Bits",
+    "trail_of_bits_blog": "Trail of Bits",
+    "hf_security_community": "Hugging Face",
+    "huggingface": "Hugging Face",
+    "vllm_vendor": "vLLM",
+    "ollama_vendor": "Ollama",
+    "langchain_vendor": "LangChain",
+    "nist_csrc_ai_standards": "NIST",
+    "nist": "NIST",
+    "federal_register_ai_policy": "Federal Register",
+    "federal_register": "Federal Register",
+    "nvd": "NVD",
+    "github_advisory": "GitHub Advisory",
+    "github": "GitHub Advisory",
+    "cisa_kev": "CISA KEV",
+    "cisa": "CISA KEV",
+    "team_source_text": "",  # not a product 来源
+    "team_documents": "",
+}
+
+_TYPE_ORIGIN_FALLBACK = {
+    "academic_paper": "学术论文源",
+    "academic": "学术论文源",
+    "security_blog": "安全博客源",
+    "research_article": "安全研究/博客源",
+    "research": "安全研究/博客源",
+    "security_community": "安全社区源",
+    "vendor_advisory": "厂商公告源",
+    "vendor": "厂商公告源",
+    "vendor_guidance": "厂商公告源",
+    "technical_standard": "技术标准源",
+    "standard": "技术标准源",
+    "policy_regulation": "政策法规源",
+    "policy": "政策法规源",
+    "government_alert": "政府告警源",
+    "vulnerability_database": "漏洞数据库",
+}
+
+
+def _map_collector_label(raw):
+    text = (raw or "").strip()
+    if not text or text in _INGEST_PATH_LABELS:
+        return ""
+    key = text.lower().replace("-", "_").replace(" ", "_")
+    if key in _DISCOVERY_SOURCE_LABELS:
+        return _DISCOVERY_SOURCE_LABELS[key]
+    for mid, label in _DISCOVERY_SOURCE_LABELS.items():
+        if label and mid and mid in key:
+            return label
+    # Human publisher names (not SCREAMING_COLLECTOR_IDS)
+    if not text.isupper() or "_" not in text:
+        return text
+    return ""
+
+
+def _document_origin_name(row):
+    """Product「来源」= publisher / collector, never an ingest-path brand."""
+    for candidate in (
+        row.get("publisher"),
+        row.get("source"),
+        row.get("discovery_source_id"),
+        row.get("source_id"),
+    ):
+        mapped = _map_collector_label(candidate)
+        if mapped:
+            return mapped
+    dtype = (row.get("document_type") or row.get("source_category") or row.get("category") or "").strip()
+    return _TYPE_ORIGIN_FALLBACK.get(dtype, "")
 
 
 def _library_documents(q="", limit=40):
@@ -715,21 +802,23 @@ def _library_documents(q="", limit=40):
         dtype = row.get("document_type") or ""
         if not _text_match(q, title, dtype, row.get("publisher") or "", row.get("url") or "", row.get("summary") or ""):
             continue
+        origin_name = _document_origin_name(row)
         out.append({
             "kind": "document",
             "id": row.get("document_id") or title,
             "document_id": row.get("document_id") or "",
             "title": title,
             "description": row.get("summary") or row.get("description") or "",
-            "source": row.get("publisher") or row.get("source_id") or "",
-            "sources": [row.get("publisher") or row.get("source_id") or "资料库"],
+            "source": origin_name,
+            "sources": [origin_name] if origin_name else [],
             "category": dtype,
             "category_label": _CATEGORY_LABELS.get(dtype, dtype or "资料"),
             "content_type": dtype,
             "url": row.get("url") or "",
             "published_at": row.get("published_at") or row.get("retrieved_at") or "",
             "demo": title.startswith("【演示】"),
-            "origin": "library",
+            "origin": "library",  # ingest path (技术细节), not product 来源
+            "ingest_path": "library_sync",
         })
         if len(out) >= limit:
             break
@@ -763,8 +852,8 @@ def monitor_feed(q: str = "", kind: str = "all"):
     doc_items = []
     team_meta = {"reachable": False, "total": 0}
     if kind in {"all", "document", "demo", "live"}:
-        team_docs, team_meta = _fetch_team_documents(q=q, limit=48)
-        lib_docs = _library_documents(q=q, limit=48)
+        team_docs, team_meta = _fetch_team_documents(q=q, limit=72)
+        lib_docs = _library_documents(q=q, limit=72)
         # Prefer team docs; add library docs not already present by URL/title.
         seen = set()
         merged_docs = []
@@ -775,7 +864,7 @@ def monitor_feed(q: str = "", kind: str = "all"):
             seen.add(key)
             merged_docs.append(row)
         # Category round-robin so blogs/papers/vendor are not starved by one lane.
-        doc_items = _diversify_documents(merged_docs, limit=48)
+        doc_items = _diversify_documents(merged_docs, limit=72)
 
     if kind == "demo":
         cve_items = [row for row in cve_items if row.get("demo")]
@@ -789,8 +878,10 @@ def monitor_feed(q: str = "", kind: str = "all"):
         cve_items = []
 
     # Soft product balance for the monitor stream (KB still holds the full set).
+    # Wider window so feed counts are less often mistaken for「知识库只有几十条」.
+    cve_before_window = len(cve_items)
     if kind in {"all", "cve", "demo", "live"} and cve_items:
-        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=6, limit=60)
+        cve_items = _diversify_cves_by_product(cve_items, per_product_limit=10, limit=120)
 
     def _pub_ts(row):
         raw = (row.get("published_at") or "").strip()
@@ -851,21 +942,43 @@ def monitor_feed(q: str = "", kind: str = "all"):
 
     composition = _feed_composition(feed_items)
 
+    newest_pub = ""
+    newest_collected = ""
+    for row in feed_items:
+        pub = (row.get("published_at") or "").strip()
+        col = (row.get("collected_at") or "").strip()
+        if pub and pub > newest_pub:
+            newest_pub = pub
+        if col and col > newest_collected:
+            newest_collected = col
+
+    freshness["newest_published_at"] = newest_pub
+    freshness["newest_collected_at"] = newest_collected
+    freshness["clock_note"] = (
+        "条目「发布」= 原文公开日（常为昨天/更早）；监测是否在跑看上方「最近更新」。"
+        "两者不是同一时钟。"
+    )
+
     return {
         "kind": kind,
         "counts": {
             "cve": len(cve_items),
             "document": len(doc_items),
             "total": len(cve_items) + len(doc_items),
+            "cve_before_window": cve_before_window if kind in {"all", "cve", "demo", "live"} else len(cve_items),
         },
         "composition": composition,
         "freshness": freshness,
         "team_documents": team_meta,
         "items": feed_items,
         "sort": "mixed_recency" if kind in {"all", "demo", "live"} and doc_items else "published_at_desc",
+        "window_note": (
+            "下方条数是情报流展示窗（按组件穿插截断），不是知识库全量；"
+            "全量以总览「情报条目」/ 入库「库内共」为准。"
+        ),
         "mix_note": (
             "情报流混排漏洞与已入库资料（博客/论文/厂商公告/社区等）；"
-            "类型/分类与来源分两维看；本机库=监测读本地情报，不是第二套监测/端口。"
+            "类型/分类与来源分两维看；多源情报=监测一并读入的多源 CVE，不是第二套监测/端口。"
             if doc_items else
             "当前几乎只有漏洞条目——请先监测刷新或同步资料库，资料类才会进入监测流。"
         ),
@@ -1087,9 +1200,10 @@ def asset_observation_impact(cve_id: str):
 
 
 # Built-in AI-security scope for one-click auto monitor (comma-separated).
+# NVD uses concrete product terms (not only the leading llm); OSV expands packages.
 AUTO_MONITOR_KEYWORDS = (
     "llm,vllm,transformers,langchain,llama-index,huggingface,openai,ollama,"
-    "adversarial,jailbreak,prompt injection"
+    "open-webui,open webui,adversarial,jailbreak,prompt injection"
 )
 
 
@@ -1259,7 +1373,7 @@ def _monitor_run(body: MonitorRunBody):
     team = _team_reachable_probe()
     warnings = []
     if team.get("enabled") is not False and not team.get("reachable"):
-        warnings.append("本机情报库暂不可用，本轮仍继续其它来源与资料刷新。")
+        warnings.append("多源情报暂不可用，本轮仍继续其它来源与资料刷新。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
         warnings.append(
             "部分来源刷新%s（%s）；监测仍继续。"
@@ -1288,7 +1402,7 @@ def _monitor_run(body: MonitorRunBody):
         tech = result.get("tech_detail") or ""
         if b_cycle and b_cycle.get("status") in {"success", "partial"}:
             tech = (
-                "本轮曾刷新本机情报库（%s，%s/%s）；%s"
+                "本轮曾刷新多源情报（%s，%s/%s）；%s"
                 % (
                     b_cycle.get("status"),
                     b_cycle.get("success_sources"),
@@ -1313,7 +1427,7 @@ def _monitor_run(body: MonitorRunBody):
             update_stage(
                 "library_sync",
                 status="running",
-                did="同步公开资料与本机库摘要",
+                did="同步公开资料与资料摘要",
                 phase="资料同步",
             )
             # Public library sync brings research / vendor / paper into the monitor
@@ -1331,7 +1445,7 @@ def _monitor_run(body: MonitorRunBody):
                 library["team"] = {"status": "skipped", "enabled": False}
             elif not team.get("reachable"):
                 library["team"] = {"status": "skipped", "error": "team unreachable"}
-                warnings.append("已跳过本机库资料同步。")
+                warnings.append("已跳过资料摘要同步。")
             else:
                 try:
                     from rag.library import sync_team
@@ -1340,7 +1454,7 @@ def _monitor_run(body: MonitorRunBody):
                     library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
                     library["team"] = {"status": "error", "error": type(exc).__name__}
-                    warnings.append("本机库资料同步失败，CVE/公开源结果仍已刷新。")
+                    warnings.append("资料摘要同步失败，CVE/公开源结果仍已刷新。")
             # Backward-compatible top-level fields for older UI.
             pub_st = library_outcome(library.get("public"))
             team_st = library_outcome(library.get("team"))
@@ -1351,7 +1465,7 @@ def _monitor_run(body: MonitorRunBody):
                 "library_sync",
                 status="error" if lib_bad else "ok",
                 did="同步资料到资料库",
-                got="公开 %s；本机库摘要 %s" % (pub_st, team_st),
+                got="公开 %s；资料摘要 %s" % (pub_st, team_st),
                 produced="资料可供监测流展示",
                 impact="无 CVE 资料进入情报流",
                 note="失败不回滚已入库 CVE",
@@ -1367,7 +1481,7 @@ def _monitor_run(body: MonitorRunBody):
                 impact="本轮以 CVE 监测结果为主",
                 phase="资料同步",
             )
-        libraries = (("公开资料同步", library.get("public")), ("本机库资料同步", library.get("team"))) if library else ()
+        libraries = (("公开资料同步", library.get("public")), ("资料摘要同步", library.get("team"))) if library else ()
         outcome = combine_monitor_outcome(result, b_cycle=b_cycle, libraries=libraries)
         if outcome["status"] == "failed":
             update_stage("monitoring", status="error", note=outcome["error"])
@@ -1402,12 +1516,17 @@ def _monitor_run(body: MonitorRunBody):
         raise HTTPException(status_code=502, detail="自动监测没有完成：%s" % exc)
     steps = result.get("steps") or []
     team_failed = any(
-        ("本机库" in (s.get("action") or "") or "聚合库" in (s.get("action") or "") or "多源情报" in (s.get("action") or "") or "团队情报" in (s.get("action") or ""))
+        (
+            "多源情报" in (s.get("action") or "")
+            or "聚合库" in (s.get("action") or "")
+            or "本机库" in (s.get("action") or "")  # 旧步骤名兼容
+            or "团队情报" in (s.get("action") or "")
+        )
         and "失败" in (s.get("action") or "")
         for s in steps
     )
-    if team_failed and "本机库" not in " ".join(warnings) and "聚合库" not in " ".join(warnings):
-        warnings.append("本机库本轮失败或跳过；NVD/OSV 与本地库仍继续。")
+    if team_failed and "多源情报" not in " ".join(warnings) and "聚合库" not in " ".join(warnings):
+        warnings.append("多源情报本轮失败或跳过；NVD/OSV 与已有资料仍继续。")
 
     def _step_status(name):
         for step in steps:
@@ -1425,15 +1544,15 @@ def _monitor_run(body: MonitorRunBody):
     if (result.get("source_outcomes") or {}).get("nvd") == "skipped":
         nvd["status"] = "跳过"
     osv = _step_status("OSV")
-    b_step = _step_status("本机库")
+    b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
         b_step = _step_status("聚合库")
     if b_step["status"] == "未跑":
-        b_step = _step_status("多源情报")
+        b_step = _step_status("本机库")  # 旧步骤名兼容
     if b_step["status"] == "未跑":
         b_step = _step_status("团队情报")
     if team.get("enabled") is False:
-        b_src = {"status": "跳过", "detail": "本机库已按配置禁用"}
+        b_src = {"status": "跳过", "detail": "多源情报已按配置禁用"}
     elif not team.get("reachable"):
         b_src = {
             "status": "不可达",
@@ -1455,14 +1574,14 @@ def _monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") == "partial":
         c_sync = {"status": "部分", "detail": "已保留成功同步资料，未完成来源可重试"}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步公开/本机库资料到资料库"}
+        c_sync = {"status": "成功", "detail": "已尽力同步公开/资料摘要到资料库"}
 
     if b_cycle is None:
-        b_mon = {"status": "未请求", "detail": "本轮未另刷本机库"}
+        b_mon = {"status": "未请求", "detail": "本轮未另刷多源情报"}
     elif b_cycle.get("status") in {"success", "partial"}:
         b_mon = {
             "status": "成功" if b_cycle.get("status") == "success" else "部分",
-            "detail": "本机库刷新 %s/%s 路成功"
+            "detail": "多源情报刷新 %s/%s 路成功"
             % (b_cycle.get("success_sources"), b_cycle.get("configured_sources")),
         }
     elif b_cycle.get("status") == "skipped":
@@ -1470,7 +1589,7 @@ def _monitor_run(body: MonitorRunBody):
     elif b_cycle.get("status") == "timeout":
         b_mon = {"status": "超时", "detail": b_cycle.get("error") or "overall timeout"}
     elif b_cycle.get("status") == "disabled":
-        b_mon = {"status": "禁用", "detail": "本机库刷新已关闭"}
+        b_mon = {"status": "禁用", "detail": "多源情报刷新已关闭"}
     else:
         b_mon = {"status": "失败", "detail": b_cycle.get("error") or b_cycle.get("status")}
 
@@ -1505,7 +1624,7 @@ def _monitor_run(body: MonitorRunBody):
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],
-        "notice": "本轮监测刷新：命中/新增/合并见 round_stats；count=本轮新增 CVE，不是整库条数。",
+        "notice": "本轮监测刷新：round_stats.hit=查询返回（水位前原始行），kept=水位后保留，inserted/merged=新增/合并；count=本轮新增 CVE，不是整库条数。",
     }
 
 

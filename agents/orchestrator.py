@@ -42,7 +42,7 @@ def run_documents(record):
 def _monitor_outcome(monitored):
     """A successful empty poll is different from unavailable collection sources."""
     stats = monitored.get("stats") or {}
-    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "本机库"}
+    labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "多源情报"}
     sources, warnings = {}, []
     for name, label in labels.items():
         if name == "nvd" and stats.get("nvd_disabled_duplicate"):
@@ -69,7 +69,7 @@ def _monitor_outcome(monitored):
         if sources.get("nvd") == "success":
             sources["nvd"] = "partial"
     if stats.get("aggregate_partial") or any("部分关键词失败" in (s.get("detail") or "") for s in monitored.get("steps", [])):
-        warnings.append("本机库部分关键词查询失败")
+        warnings.append("多源情报部分关键词查询失败")
         if sources.get("aggregate") == "success":
             sources["aggregate"] = "partial"
     status = "failed" if failed else "partial" if warnings else "success"
@@ -113,10 +113,10 @@ def _run_collect(keyword="llm", *, on_phase=None):
         "monitoring",
         status="error" if all_failed else "ok",
         did="多方面来源抓取已完成",
-        got="命中 %d，保留 %d" % (stats.get("hit", 0), stats.get("kept", 0)),
+        got="查询返回 %d，水位后保留 %d" % (stats.get("hit", 0), stats.get("kept", 0)),
         produced="进入整理入库 %d 条" % len(monitored.get("items") or []),
         impact="本轮监测结果将规范化并写入知识库",
-        note=outcome["error"] or "多方面来源已尽力查询（成功空轮也会保留查询状态）",
+        note=outcome["error"] or "多方面来源已尽力查询（查询返回含水位前历史；成功空轮也会保留查询状态）",
         phase="监测刷新中",
     )
     # Compact tech line for optional UI disclosure (not a stage checklist).
@@ -170,7 +170,7 @@ def _run_collect(keyword="llm", *, on_phase=None):
         produced="新增 %d · 合并 %d · 库内共 %d"
         % (write.get("inserted", 0), write.get("merged", 0), write.get("total", len(saved))),
         impact="情报流将反映最新合并结果",
-        note="0 新增时请看命中/合并——不等于没搜到",
+        note="0 新增时请看查询返回/水位后保留/合并——不等于没搜到",
         phase="整理入库",
     )
 

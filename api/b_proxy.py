@@ -75,7 +75,7 @@ def forward(request: Request, path: str) -> Response:
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise HTTPException(
             status_code=502,
-            detail="团队情报服务暂不可达（经 8023 反代 → %s）：%s" % (upstream, exc),
+            detail="情报接口暂不可达（经 8023 反代 → %s）：%s" % (upstream, exc),
         ) from exc
 
 
@@ -109,5 +109,5 @@ async def forward_async(request: Request, path: str) -> Response:
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise HTTPException(
             status_code=502,
-            detail="团队情报服务暂不可达（经 8023 反代 → %s）：%s" % (upstream, exc),
+            detail="情报接口暂不可达（经 8023 反代 → %s）：%s" % (upstream, exc),
         ) from exc

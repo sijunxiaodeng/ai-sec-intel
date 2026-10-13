@@ -42,13 +42,15 @@ class MonitorAuthorityTests(unittest.TestCase):
 
     def test_standalone_mode_keeps_the_direct_collector(self):
         result, constructor, team = self.run_monitor({'TEAM_INTEL_MODE': 'off'})
-        constructor.assert_called_once()
+        # Broad llm expands to multiple NVD product keywords (capped).
+        self.assertGreaterEqual(constructor.call_count, 2)
         team.assert_not_called()
         self.assertFalse(result['stats']['nvd_disabled_duplicate'])
+        self.assertIn('open webui', result['keywords']['nvd'])
 
     def test_explicit_fallback_can_poll_when_the_team_mode_is_enabled(self):
         result, constructor, team = self.run_monitor({'TEAM_INTEL_MODE': 'embed', 'ROOT_NVD_ENABLED': '1'})
-        constructor.assert_called_once()
+        self.assertGreaterEqual(constructor.call_count, 2)
         team.assert_called_once()
         self.assertFalse(result['stats']['nvd_disabled_duplicate'])
 
@@ -56,11 +58,12 @@ class MonitorAuthorityTests(unittest.TestCase):
         for mode in ('off', 'disabled', '0', 'false', 'no'):
             with self.subTest(mode=mode):
                 result, nvd, team = self.run_monitor({'TEAM_INTEL_MODE': mode})
-                nvd.assert_called_once()
+                self.assertGreaterEqual(nvd.call_count, 2)
                 team.assert_not_called()
                 self.assertTrue(result['stats']['aggregate_disabled'])
                 self.assertFalse(result['stats']['aggregate_ok'])
-                self.assertEqual(result['stats']['external_fetches'], 2)
+                # Multi-keyword NVD + one OSV round.
+                self.assertGreaterEqual(result['stats']['external_fetches'], 3)
                 self.assertIn('跳过', result['steps'][-1]['action'])
                 outcome = orchestrator._monitor_outcome(result)
                 self.assertEqual(outcome['status'], 'success')
@@ -68,7 +71,7 @@ class MonitorAuthorityTests(unittest.TestCase):
 
     def test_disabled_team_does_not_rescue_two_failed_external_sources(self):
         result, nvd, team = self.run_monitor({'TEAM_INTEL_MODE': 'off'}, nvd_error=True, osv_error=True)
-        nvd.assert_called_once()
+        self.assertGreaterEqual(nvd.call_count, 2)
         team.assert_not_called()
         outcome = orchestrator._monitor_outcome(result)
         self.assertEqual(outcome['status'], 'failed')

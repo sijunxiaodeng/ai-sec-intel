@@ -1,5 +1,5 @@
 # Coarse collect pipeline state for monitor refresh UI.
-# Product: one 监测 action — NOT per-source stage rows (NVD/OSV/本机库).
+# Product: one 监测 action — NOT per-source stage rows (NVD/OSV/多源情报).
 # Honest job state on disk; UI polls.
 
 from copy import deepcopy
@@ -22,7 +22,7 @@ STAGE_DEFS = [
     {
         "id": "library_sync",
         "title": "资料同步",
-        "subtitle": "公开与本机库摘要（可选）",
+        "subtitle": "公开与资料摘要（可选）",
     },
 ]
 
@@ -238,10 +238,12 @@ def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     else:
         m = pipe.get("metrics") or {}
         pipe["summary"] = (
-            "本轮监测：命中 %(hit)s，新增 %(inserted)s，合并 %(merged)s；"
-            "外部取回 %(external_fetches)s，失败 %(failures)s。"
+            "本轮监测：查询返回 %(hit)s，水位后保留 %(kept)s，"
+            "新增 %(inserted)s，合并 %(merged)s；"
+            "外部请求 %(external_fetches)s，失败 %(failures)s。"
             % {
                 "hit": m.get("hit", 0),
+                "kept": m.get("kept", 0),
                 "inserted": m.get("inserted", 0),
                 "merged": m.get("merged", 0),
                 "external_fetches": m.get("external_fetches", 0),

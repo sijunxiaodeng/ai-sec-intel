@@ -25,30 +25,30 @@ def team_id(document_id):
 def parse_record(body):
     row = json.loads(body)
     if not isinstance(row, dict):
-        raise ValueError("团队资料详情不是对象")
+        raise ValueError("资料摘要详情不是对象")
     for key in ("document_id", "source", "source_category", "title", "url"):
         if not isinstance(row.get(key), str) or not row[key].strip():
-            raise ValueError("团队资料缺少字段：" + key)
+            raise ValueError("资料摘要缺少字段：" + key)
     if not re.fullmatch(r"doc-[0-9a-f]{64}", row["document_id"]):
-        raise ValueError("团队资料标识不符合约定")
+        raise ValueError("资料摘要标识不符合约定")
     if row["source_category"] not in TYPE_MAP:
-        raise ValueError("尚不支持该团队资料类别")
+        raise ValueError("尚不支持该资料摘要类别")
     if not isinstance(row.get("description"), str) or not row["description"].strip():
-        raise ValueError("团队资料没有可引用的描述字段")
+        raise ValueError("资料摘要没有可引用的描述字段")
     url = urllib.parse.urlsplit(row["url"])
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.port not in (None, 443):
-        raise ValueError("团队资料来源需要公开 HTTPS 地址")
+        raise ValueError("资料摘要来源需要公开 HTTPS 地址")
     if url.hostname == "localhost":
-        raise ValueError("团队资料来源不是公开地址")
+        raise ValueError("资料摘要来源不是公开地址")
     try:
         address = ipaddress.ip_address(url.hostname)
     except ValueError:
         address = None
     if address is not None and not address.is_global:
-        raise ValueError("团队资料来源不是公开地址")
+        raise ValueError("资料摘要来源不是公开地址")
     for key in ("published_at", "modified_at", "first_seen_at", "content_updated_at"):
         if row.get(key) is not None and not isinstance(row[key], str):
-            raise ValueError("团队资料时间字段无效")
+            raise ValueError("资料摘要时间字段无效")
     return row
 
 
@@ -106,7 +106,7 @@ class TeamDocumentCollector:
 
     def get(self, path):
         if self.disabled:
-            raise ValueError("本机库资料同步已按配置禁用")
+            raise ValueError("资料摘要同步已按配置禁用")
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 raise ValueError("团队 API 不接受重定向")
@@ -132,21 +132,21 @@ class TeamDocumentCollector:
                 include_raw=True,
             )
             if type(page.get("total")) is not int or page["total"] < 0 or not isinstance(page.get("items"), list):
-                raise ValueError("团队资料分页无效")
+                raise ValueError("资料摘要分页无效")
             if total is not None and page["total"] != total:
-                raise ValueError("团队资料总数在分页期间改变，请重试")
+                raise ValueError("资料摘要总数在分页期间改变，请重试")
             total = page["total"]
             rows = page["items"]
             if not rows and len(records) < min(total, self.max_documents):
                 break
             records.extend(rows)
         if any(not isinstance(row, dict) or not re.fullmatch(r"doc-[0-9a-f]{64}", str(row.get("document_id", ""))) for row in records):
-            raise ValueError("团队资料列表标识无效")
+            raise ValueError("资料摘要列表标识无效")
         candidates, errors = [], []
         for current in records:
             try:
                 if current["source_category"] not in TYPE_MAP:
-                    raise ValueError("尚不支持该团队资料类别")
+                    raise ValueError("尚不支持该资料摘要类别")
                 body = json.dumps(current, ensure_ascii=False).encode("utf-8")
                 response = {
                     "body": body,
@@ -184,7 +184,7 @@ class TeamDocumentCollector:
         if self.disabled:
             return {"status": "skipped", "enabled": False, "candidates": [], "errors": [],
                     "total": None, "selected": 0, "remaining": None,
-                    "coverage": "按配置跳过本机库资料同步；未查询当前总量"}
+                    "coverage": "按配置跳过资料摘要同步；未查询当前总量"}
         if self.embed:
             return self._collect_embed()
         records, total = [], None
@@ -193,28 +193,28 @@ class TeamDocumentCollector:
                                            "offset": len(records)})
             page = json.loads(self.get("/api/documents?" + query)["body"])
             if not isinstance(page, dict) or type(page.get("total")) is not int or page["total"] < 0 or not isinstance(page.get("items"), list):
-                raise ValueError("团队资料分页无效")
+                raise ValueError("资料摘要分页无效")
             if total is not None and page["total"] != total:
-                raise ValueError("团队资料总数在分页期间改变，请重试")
+                raise ValueError("资料摘要总数在分页期间改变，请重试")
             total = page["total"]
             rows = page["items"]
             if not rows and len(records) < min(total, self.max_documents):
-                raise ValueError("团队资料分页提前结束")
+                raise ValueError("资料摘要分页提前结束")
             if len(rows) > min(100, self.max_documents - len(records)) or len(records) + len(rows) > total:
-                raise ValueError("团队资料分页数量矛盾")
+                raise ValueError("资料摘要分页数量矛盾")
             records.extend(rows)
         if any(not isinstance(row, dict) or not re.fullmatch(r"doc-[0-9a-f]{64}", str(row.get("document_id", ""))) for row in records):
-            raise ValueError("团队资料列表标识无效")
+            raise ValueError("资料摘要列表标识无效")
         identifiers = [row["document_id"] for row in records]
         if len(set(identifiers)) != len(identifiers):
-            raise ValueError("团队资料分页出现重复标识，请重试")
+            raise ValueError("资料摘要分页出现重复标识，请重试")
         candidates, errors = [], []
         for row in records:
             try:
                 response = self.get("/api/documents/" + urllib.parse.quote(row["document_id"], safe=""))
                 current = parse_record(response["body"])
                 if current["document_id"] != row["document_id"] or current["source"] != row["source"] or canonical(current["url"]) != canonical(row["url"]):
-                    raise ValueError("团队资料详情与列表身份不一致")
+                    raise ValueError("资料摘要详情与列表身份不一致")
                 candidates.append({"url": current["url"], "document_type": TYPE_MAP[current["source_category"]],
                     "source_name": current["source"], "source_id": "team_documents", "discovery": "team_api",
                     "team_document_id": current["document_id"], "discovered_at": now(),
