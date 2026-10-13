@@ -20,6 +20,12 @@ WEB = os.path.join(ROOT, "web")
 app = FastAPI(title="AI 安全知识情报")
 
 
+@app.get("/api/admin/actions-consumption", tags=["actions-sync"])
+def actions_consumption_status():
+    from api.delivery_status import consumption_status
+    return consumption_status()
+
+
 @app.on_event("startup")
 def _startup():
     # Optional: pull latest Actions intelligence snapshot before the monitor loop.

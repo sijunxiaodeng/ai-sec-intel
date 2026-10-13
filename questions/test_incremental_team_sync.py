@@ -103,7 +103,7 @@ class IncrementalSyncTests(unittest.TestCase):
         self.assertEqual(sync_team(self.db, collector=fixture)["status"], "error")
         self.assertIsNone(self.state())
         fixture.fail = False
-        fixture.events[0]["item"]["description"] = ""
+        fixture.events[0]["item"]["description"] = None
         result = sync_team(self.db, collector=fixture)
         self.assertEqual(result["status"], "partial")
         self.assertFalse(result["source"]["cursor_committed"])
@@ -172,7 +172,7 @@ class IncrementalSyncTests(unittest.TestCase):
         sync_team(self.db, collector=fixture)
         identity = fixture.events[0]["entity_id"]
         bad = record(number=900)
-        bad["description"] = ""
+        bad["description"] = None
         fixture.events.extend([
             {"seq": 2, "entity_id": identity, "operation": "retract", "item": None},
             {"seq": 3, "entity_id": bad["document_id"], "operation": "upsert", "item": bad},

@@ -167,12 +167,48 @@ class TeamDocumentsTest(unittest.TestCase):
     def test_invalid_record_urls_and_field_types_rejected(self):
         for update in ({"url": "https://127.0.0.1/private"}, {"url": "javascript:alert(1)"},
                        {"url": "https://user:password@example.org/a"}, {"published_at": 123},
-                       {"description": ""}, {"document_id": "../unsafe"}):
+                       {"description": None}, {"description": 123}, {"title": ""},
+                       {"document_id": "../unsafe"}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 parse_record(json.dumps(dict(self.rows[0], **update)).encode())
         for base in ("https://example.org", "http://localhost", "http://127.0.0.1/other"):
             with self.assertRaises(ValueError):
                 TeamDocumentCollector(base_url=base)
+
+    def test_title_only_document_change_commits_cursor_without_inventing_description(self):
+        row = dict(self.rows[2], description="")
+        collector = TeamDocumentCollector(base_url="http://127.0.0.1:8765", use_changefeed=True)
+        pages = [
+            {"epoch": "title-only-epoch", "reset": False, "cursor": 0, "next_cursor": 1,
+             "through": 1, "has_more": False, "changes": [
+                {"seq": 1, "entity_id": row["document_id"], "operation": "upsert", "item": row}]},
+            {"epoch": "title-only-epoch", "reset": False, "cursor": 1, "next_cursor": 1,
+             "through": 1, "has_more": False, "changes": []},
+        ]
+        responses = [{"body": json.dumps(page).encode(), "retrieved_at": "2026-10-09T02:00:00Z"}
+                     for page in pages]
+        with patch.object(collector, "get", side_effect=responses) as get:
+            first = sync_team(self.db, collector=collector)
+            self.assertEqual(first["status"], "ok")
+            self.assertEqual(first["ok"], 1)
+            self.assertTrue(first["source"]["cursor_committed"])
+            self.assertEqual(first["source"]["cursor"]["seq"], 1)
+            doc = detail(team_id(row["document_id"]), self.db)
+            self.assertEqual(doc["integrity_status"], "ok")
+            self.assertEqual(doc["content_scope"], "team_summary")
+            self.assertEqual(doc["team_summary_fields"], ["title"])
+            self.assertEqual([evidence["text"] for evidence in doc["evidence"]], [row["title"]])
+            self.assertIn("仅包含来源题名", doc["extraction_notice"])
+            with _connection(self.db) as conn:
+                snapshot = json.loads(conn.execute("SELECT body FROM library_snapshots").fetchone()[0])
+            self.assertEqual(snapshot["description"], "")
+            restart = sync_team(self.db, collector=collector)
+            self.assertEqual(restart["attempted"], 0)
+            self.assertEqual(restart["status"], "ok")
+            self.assertIn("cursor=1", get.call_args.args[0])
+        with patch("agents.library_qa.configured", return_value=True), patch("agents.library_qa.chat") as model:
+            run("这份标准的安全要求是什么", document_ids=[doc["document_id"]], db_path=self.db)
+            model.assert_not_called()
 
     def test_team_summary_qa_keeps_scope_and_never_attempts_model(self):
         self.sync()

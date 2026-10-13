@@ -21,10 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from .actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive
+    from .actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
     from .state_role import claim_role
 except ImportError:  # Direct script invocation in the B container.
-    from actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive
+    from actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
     from state_role import claim_role
 
 
@@ -118,6 +118,7 @@ def install_snapshot(payload, directory, *, repository, branch, run_id,
             staged = Path(temporary) / "state"
             manifest = restore_archive(payload, staged, repository=repository,
                                        branch=branch, run_id=run_id)
+            validate_deployment_state(staged, manifest=manifest)
             if (manifest.get("workflow") != workflow
                     or not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("collector_commit", "")))
                     or type(manifest.get("run_number")) is not int
@@ -206,12 +207,13 @@ def main(argv=None):
             while True:
                 try:
                     result = deliver_latest(client, directory, workflow=args.workflow)
-                    record_status(directory, status="ready", **result)
+                    record_status(directory, status="ready", poll_interval_seconds=args.interval_seconds, **result)
                     print(f"Verified Actions delivery: run {result['run_id']}; changed={result['changed']}", flush=True)
                     failed = False
                 except (StateError, ValueError, KeyError, sqlite3.DatabaseError, OSError, zipfile.BadZipFile):
                     # No response bodies, token-bearing URLs or exception details.
                     record_status(directory, status="degraded", reason="delivery_validation_or_network_failed",
+                                  poll_interval_seconds=args.interval_seconds,
                                   serving_previous=bool((directory / "current/intelligence.db").is_file()))
                     print("Actions delivery failed; previous verified generation retained", flush=True)
                     failed = True

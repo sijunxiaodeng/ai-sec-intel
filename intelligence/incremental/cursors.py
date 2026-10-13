@@ -31,6 +31,15 @@ class CursorStore:
                 window_end_at TEXT NOT NULL,
                 recorded_at TEXT NOT NULL
             )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS incremental_window_hints(
+                source TEXT PRIMARY KEY,
+                window_seconds REAL NOT NULL CHECK(window_seconds > 0)
+            )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS incremental_replay_cursors(
+                source TEXT PRIMARY KEY,
+                checkpoint_at TEXT NOT NULL,
+                replay_end_at TEXT NOT NULL
+            )''')
 
     @contextmanager
     def _connect(self):
@@ -75,3 +84,38 @@ class CursorStore:
                   window_end_at=excluded.window_end_at,
                   recorded_at=excluded.recorded_at''',
                 (source, stamp, now))
+
+    def get_window_seconds(self, source: str) -> float | None:
+        """Resume density adaptation across bounded collection cycles."""
+        with self._connect() as conn:
+            row = conn.execute('SELECT window_seconds FROM incremental_window_hints WHERE source=?',
+                               (source,)).fetchone()
+        return float(row['window_seconds']) if row else None
+
+    def save_window_seconds(self, source: str, seconds: float) -> None:
+        if not source.strip() or not 0 < seconds <= 119 * 86400:
+            raise ValueError('Invalid window hint')
+        with self._connect() as conn:
+            conn.execute('''INSERT INTO incremental_window_hints VALUES (?,?)
+                ON CONFLICT(source) DO UPDATE SET window_seconds=excluded.window_seconds''',
+                         (source, seconds))
+
+    def get_replay_end(self, source: str, checkpoint: datetime) -> datetime | None:
+        with self._connect() as conn:
+            row = conn.execute('SELECT checkpoint_at,replay_end_at FROM incremental_replay_cursors WHERE source=?',
+                               (source,)).fetchone()
+        if row and as_utc(row['checkpoint_at']) == checkpoint:
+            end = as_utc(row['replay_end_at'])
+            if end <= checkpoint:
+                return end
+        return None
+
+    def save_replay_end(self, source: str, checkpoint: datetime, end: datetime) -> None:
+        """Only replayed, fully committed slices may bypass the next replay."""
+        if not source.strip() or end > checkpoint:
+            raise ValueError('Replay progress cannot exceed the forward checkpoint')
+        with self._connect() as conn:
+            conn.execute('''INSERT INTO incremental_replay_cursors VALUES (?,?,?)
+                ON CONFLICT(source) DO UPDATE SET checkpoint_at=excluded.checkpoint_at,
+                replay_end_at=excluded.replay_end_at''',
+                         (source, iso_utc(checkpoint), iso_utc(end)))

@@ -202,6 +202,36 @@ class ActionsReportTests(unittest.TestCase):
         self.assertEqual(report["sources"]["observation_scope"], "previous_run")
         self.assertIn("上一轮完整结果，不能冒充本轮", render_summary(report, run_id=42))
 
+    def test_real_committed_backfill_lag_is_retained_and_reported_without_raw_errors(self):
+        status_path = self.directory / "monitoring_status.json"
+        status = json.loads(status_path.read_text())
+        status["sources"]["NVD"]["backfill"] = {
+            "cursor_start_at": "2026-10-04T12:00:00Z", "cursor_end_at": "2026-10-06T12:00:00Z",
+            "target_end_at": "2026-10-13T11:55:00Z", "lag_seconds": 604500,
+            "pending_reason": "request_or_time_budget", "requests": 2, "windows": 2,
+            "raw_error": SECRET,
+        }
+        status_path.write_text(json.dumps(status))
+        report = self.report()
+        self.assertEqual(report["sources"]["by_source"]["NVD"]["backfill"]["lag_seconds"], 604500)
+        summary = render_summary(report, run_id=42)
+        self.assertIn("2026-10-06T12:00:00+00:00", summary)
+        self.assertIn("167.92", summary)
+        self.assertIn("request_or_time_budget", summary)
+        self.assertNotIn(SECRET, json.dumps(report) + summary)
+
+    def test_current_push_receipt_is_distinct_from_pull_and_consumption_evidence(self):
+        report = self.report()
+        for status in ("disabled", "blocked", "failed", "verified"):
+            summary = render_summary(report, run_id=42, delivery={"run_id": "42", "status": status,
+                                    "raw_response": SECRET})
+            self.assertIn("本轮部署推送：" + status, summary)
+            self.assertIn("自动拉取镜像运行状态：unverified", summary)
+            self.assertIn("部署消费：unverified", summary)
+            self.assertNotIn(SECRET, summary)
+        summary = render_summary(report, run_id=42, delivery={"run_id": "41", "status": "verified"})
+        self.assertIn("本轮部署推送：unknown", summary)
+
     def test_notice_control_escaping_and_allowlisted_states_prevent_command_injection(self):
         self.assertEqual(escape_workflow_data("a%\r\n\x00\x1b"), "a%25%0D%0A%00%1B")
         report = self.report()

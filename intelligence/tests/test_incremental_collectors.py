@@ -5,6 +5,7 @@ from contextlib import closing
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import requests
 from collectors.cisa_kev import CISAKEVCollector
 from collectors.github_advisory import GitHubAdvisoryCollector
-from collectors.http import _get
+from collectors.http import _get, CollectionBudgetExceeded, RequestBudget
 from collectors.nvd import NVDCollector
 from incremental.api_collectors import (
     GithubModifiedCollector, NVDModifiedCollector, _api_timestamp, _iso_timestamp,
@@ -23,6 +24,7 @@ from incremental.api_collectors import (
 )
 from incremental.cursors import CursorStore
 from incremental.engine import ingest_incremental_source
+from incremental.limits import WindowPageLimitExceeded
 
 
 class Response:
@@ -106,6 +108,20 @@ class IncrementalCollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'max_pages'):
             collector.collect_window(self.start, self.end)
 
+    def test_nvd_dense_window_is_detected_after_first_page(self):
+        collector = self.nvd(Response(nvd_document(0, 10000, 'CVE-2026-1001')), max_pages=4)
+        with self.assertRaises(WindowPageLimitExceeded):
+            collector.collect_window(self.start, self.end)
+        self.assertEqual(collector.session.get.call_count, 1)
+
+    def test_nvd_http_attempt_budget_never_returns_incomplete_window(self):
+        collector = self.nvd(Response(nvd_document(0, 2, 'CVE-2026-1001')),
+                             Response(nvd_document(1, 2, 'CVE-2026-1002')))
+        collector.request_budget = RequestBudget(max_requests=1, deadline=time.monotonic() + 60)
+        with self.assertRaises(CollectionBudgetExceeded):
+            collector.collect_window(self.start, self.end)
+        self.assertEqual(collector.session.get.call_count, 1)
+
     def test_github_preserves_advisory_without_cve_and_raw_evidence(self):
         raw = {'ghsa_id': 'GHSA-aaaa-bbbb-cccc', 'cve_id': None, 'summary': 'Prompt injection',
                'references': ['https://example.org/source']}
@@ -165,6 +181,24 @@ class IncrementalCollectorTests(unittest.TestCase):
 
 
 class RequestRetryTests(unittest.TestCase):
+    @patch('collectors.http.time.sleep')
+    def test_retry_wait_cannot_overrun_source_deadline(self, sleep):
+        session = session_for(Response({}, status=429, headers={'Retry-After': '120'}), Response({}))
+        budget = RequestBudget(max_requests=4, deadline=time.monotonic() + 5)
+        with self.assertRaises(CollectionBudgetExceeded):
+            _get(session, 'https://example.org', budget=budget)
+        sleep.assert_not_called()
+        self.assertEqual(session.get.call_count, 1)
+
+    @patch('collectors.http.time.sleep')
+    def test_retry_attempts_consume_the_same_request_budget(self, sleep):
+        session = session_for(requests.Timeout(), Response({}))
+        budget = RequestBudget(max_requests=1, deadline=time.monotonic() + 60)
+        with self.assertRaises(CollectionBudgetExceeded):
+            _get(session, 'https://example.org', budget=budget)
+        self.assertEqual(session.get.call_count, 1)
+        self.assertEqual(budget.requests, 1)
+
     @patch('collectors.http.time.sleep')
     def test_transient_retry_honors_retry_after_and_rates_every_attempt(self, sleep):
         limited = Response({}, status=429, headers={'Retry-After': '7'})
@@ -299,6 +333,91 @@ class WindowAndCursorTests(unittest.TestCase):
                 with self.assertRaises(Exception):
                     ingest_incremental_source(**args)
                 cursors.advance.assert_not_called()
+
+    def test_dense_modified_window_splits_and_continues_without_skipping_ranges(self):
+        cursor = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        args, collector, _, cursors = self.ingest(cursor=cursor, window_hours=24,
+                                                 max_windows=16,
+                                                 now=cursor + timedelta(days=2))
+        completed = []
+        def collect(start, end):
+            if end - start > timedelta(hours=6):
+                raise WindowPageLimitExceeded('max_pages')
+            completed.append((start, end))
+            return []
+        collector.collect_window.side_effect = collect
+        result = ingest_incremental_source(**args)
+        self.assertFalse(result['pending'])
+        self.assertGreater(result['split_windows'], 0)
+        self.assertEqual(completed[0][0], cursor - timedelta(minutes=30))
+        self.assertEqual(completed[-1][1], args['now'])
+        for previous, following in zip(completed, completed[1:]):
+            self.assertEqual(previous[1], following[0])
+        self.assertEqual(cursors.advance.call_args.args[1], args['now'])
+
+    def test_density_can_split_inside_overlap_without_moving_checkpoint_backwards(self):
+        cursor = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        args, collector, _, cursors = self.ingest(cursor=cursor, window_hours=1,
+                                                 max_windows=1, overlap_minutes=120,
+                                                 now=cursor + timedelta(hours=1))
+        collector.collect_window.side_effect = lambda start, end: (
+            [] if end - start <= timedelta(minutes=30) else
+            (_ for _ in ()).throw(WindowPageLimitExceeded('max_pages')))
+        result = ingest_incremental_source(**args)
+        self.assertTrue(result['pending'])
+        self.assertGreater(result['replayed_windows'], 0)
+        self.assertEqual(result['windows'], 1)
+        for call in cursors.advance.call_args_list:
+            self.assertGreater(call.args[1], cursor)
+
+    def test_dense_large_overlap_resumes_replay_and_density_across_request_limited_cycles(self):
+        cursor = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        class Collector:
+            max_pages = 4
+            page_size = 1
+            def collect_window(self, start, end):
+                self.request_budget.acquire()
+                if end - start > timedelta(hours=1):
+                    raise WindowPageLimitExceeded('max_pages')
+                return []
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'cursor.db'
+            cursors = CursorStore(path)
+            cursors.advance('NVD', cursor)
+            store = Mock()
+            store.ingest_batch.return_value = dict(fetched=0, inserted=0, updated=0, unchanged=0)
+            collector = Collector()
+            for _ in range(16):
+                collector.request_budget = RequestBudget(max_requests=3, deadline=time.monotonic() + 60)
+                ingest_incremental_source(name='NVD', collector=collector, store=store, cursors=cursors,
+                                          now=cursor + timedelta(hours=1), window_hours=24, max_windows=1,
+                                          settle_minutes=0, overlap_minutes=6 * 60, log=lambda _: None)
+                if cursors.get('NVD') > cursor:
+                    break
+            self.assertGreater(cursors.get('NVD'), cursor)
+            self.assertIsNotNone(cursors.get_window_seconds('NVD'))
+            # A previous checkpoint's replay mark is never used after advance.
+            self.assertIsNone(cursors.get_replay_end('NVD', cursors.get('NVD')))
+
+    def test_budget_exhaustion_reports_only_committed_progress_and_replay_is_safe(self):
+        cursor = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        args, collector, _, cursors = self.ingest(cursor=cursor, window_hours=24,
+                                                 max_windows=16)
+        collector.collect_window.side_effect = [[], CollectionBudgetExceeded('request budget')]
+        result = ingest_incremental_source(**args)
+        self.assertTrue(result['pending'])
+        self.assertEqual(result['windows'], 1)
+        self.assertEqual(result['pending_reason'], 'request_or_time_budget')
+        self.assertEqual(result['cursor_end_at'], (cursor + timedelta(days=1)).isoformat())
+        self.assertEqual(result['lag_seconds'], 4 * 86400)
+        cursors.advance.assert_called_once_with('NVD', cursor + timedelta(days=1))
+
+    def test_failed_dense_minimum_window_never_advances_checkpoint(self):
+        args, collector, _, cursors = self.ingest(window_hours=1, adaptive_min_window_minutes=15)
+        collector.collect_window.side_effect = WindowPageLimitExceeded('max_pages')
+        with self.assertRaises(WindowPageLimitExceeded):
+            ingest_incremental_source(**args)
+        cursors.advance.assert_not_called()
 
     def test_cursor_does_not_move_backwards_with_legacy_timezone_or_fraction(self):
         with tempfile.TemporaryDirectory() as directory:

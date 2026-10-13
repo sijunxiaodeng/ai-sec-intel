@@ -22,11 +22,16 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from .snapshot_contract import database_contract
+except ImportError:
+    from snapshot_contract import database_contract
+
 ARTIFACT_PREFIX = "intelligence-state-"
 BOOTSTRAP_ASSET = "intelligence-bootstrap-state.zip"
 COLLECTION_STEP = "Collect public intelligence"
 STATE_FILES = {"intelligence.db", "monitoring_baseline.json", "monitoring_status.json", "classification_status.json",
-               "deepseek_status.json", "actions_report.json"}
+               "deepseek_status.json", "actions_report.json", "migration_status.json"}
 REQUIRED_FILES = {"intelligence.db", "monitoring_baseline.json"}
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 
@@ -170,6 +175,22 @@ def validate_baseline(path):
         raise StateError("Monitoring baseline must have a timezone")
 
 
+def validate_deployment_state(directory, *, manifest=None):
+    """A restorable old collector snapshot is not necessarily deployable."""
+    directory = Path(directory)
+    contract = database_contract(directory / "intelligence.db")
+    if not contract["ready"]:
+        raise StateError("Snapshot is incompatible with this runtime; migrate the collector state first: "
+                         + ",".join(contract["problems"]))
+    manifest_path = directory / "manifest.json"
+    if manifest is None and manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest is not None:
+        if manifest.get("compatibility") != contract:
+            raise StateError("Snapshot compatibility contract is absent or does not match its database/runtime")
+    return contract
+
+
 def save_state(source, destination, *, repository, branch, run_id, workflow=None,
                collector_commit=None, run_number=None):
     source, destination = Path(source), Path(destination)
@@ -197,6 +218,7 @@ def save_state(source, destination, *, repository, branch, run_id, workflow=None
         "format_version": 1, "repository": repository, "branch": branch, "run_id": int(run_id),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": {p.name: {"sha256": _sha256(p), "bytes": p.stat().st_size} for p in sorted(destination.iterdir())},
+        "compatibility": database_contract(destination / "intelligence.db"),
     }
     # Deployment mirrors additionally bind the data to the exact main-branch
     # workflow and code revision. Legacy snapshots remain restorable by the
@@ -343,7 +365,7 @@ def prune_states(client, *, workflow, branch, run_id, uploaded_artifact_id, keep
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("restore", "restore-file", "save", "prune"))
+    parser.add_argument("command", choices=("restore", "restore-file", "save", "check", "prune"))
     parser.add_argument("--directory", required=True)
     parser.add_argument("--source")
     parser.add_argument("--archive")
@@ -359,10 +381,13 @@ def main(argv=None):
     parser.add_argument("--bootstrap-release-tag", default=os.getenv("INTELLIGENCE_BOOTSTRAP_RELEASE_TAG"))
     parser.add_argument("--bootstrap-state-commit", default=os.getenv("INTELLIGENCE_BOOTSTRAP_STATE_COMMIT"))
     args = parser.parse_args(argv)
-    if not args.repository or not args.branch or not args.run_id:
+    if args.command != "check" and (not args.repository or not args.branch or not args.run_id):
         parser.error("Repository, branch and run ID are required")
     try:
-        if args.command == "save":
+        if args.command == "check":
+            validate_deployment_state(args.directory)
+            print("Snapshot classification/runtime and complete changefeed verified", flush=True)
+        elif args.command == "save":
             if not args.source:
                 parser.error("--source is required for save")
             save_state(args.source, args.directory, repository=args.repository, branch=args.branch, run_id=args.run_id,
@@ -381,10 +406,15 @@ def main(argv=None):
             if not args.run_number:
                 parser.error("--run-number is required for restore")
             client = GitHubClient(os.getenv("GITHUB_TOKEN"), args.repository, os.getenv("GITHUB_API_URL", "https://api.github.com"))
-            restore_latest(client, args.directory, workflow=args.workflow, branch=args.branch,
-                           run_id=args.run_id, run_number=args.run_number, run_attempt=args.run_attempt,
-                           bootstrap_release_tag=args.bootstrap_release_tag,
-                           bootstrap_state_commit=args.bootstrap_state_commit)
+            manifest = restore_latest(client, args.directory, workflow=args.workflow, branch=args.branch,
+                                      run_id=args.run_id, run_number=args.run_number, run_attempt=args.run_attempt,
+                                      bootstrap_release_tag=args.bootstrap_release_tag,
+                                      bootstrap_state_commit=args.bootstrap_state_commit)
+            # Only successful lineage validation may authorize first creation.
+            # A deleted/lost old snapshot fails above and cannot emit this flag.
+            if os.getenv("GITHUB_OUTPUT"):
+                with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+                    output.write("initial_deployment=" + ("true" if manifest is None else "false") + "\n")
         else:
             if not args.uploaded_artifact_id:
                 parser.error("--uploaded-artifact-id is required for prune")

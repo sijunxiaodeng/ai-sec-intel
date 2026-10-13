@@ -11,6 +11,8 @@ from api_v6.repository import IntelligenceRepository
 from deployment.actions_mirror import deliver_latest
 from deployment.actions_state import StateError, save_state
 from deployment.state_role import claim_role
+from deployment.snapshot_contract import runtime_classifier_version
+from storage.changefeed import ensure_changefeed
 
 REPOSITORY = "team/public-repo"
 WORKFLOW = "intelligence-collect.yml"
@@ -58,14 +60,21 @@ class ActionsMirrorTests(unittest.TestCase):
         with sqlite3.connect(self.source / "intelligence.db") as db:
             db.executescript("""
                 CREATE TABLE source_items(source TEXT,source_id TEXT,first_seen_at TEXT);
-                CREATE TABLE unified_vulnerabilities(cve_id TEXT,first_seen_at TEXT);
+                CREATE TABLE unified_vulnerabilities(cve_id TEXT,first_seen_at TEXT,content_sha256 TEXT);
                 CREATE TABLE source_observation_baselines(source TEXT,started_at TEXT);
-                CREATE TABLE knowledge_documents(document_id TEXT,first_seen_at TEXT);
+                CREATE TABLE knowledge_documents(document_id TEXT,first_seen_at TEXT,content_sha256 TEXT);
+                CREATE TABLE ai_classifications(cve_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
+                CREATE TABLE document_ai_classifications(document_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
             """)
             db.execute("INSERT INTO source_items VALUES (?,?,?)", ("NVD", "CVE-2026-10001", FIRST_SEEN))
-            db.execute("INSERT INTO unified_vulnerabilities VALUES (?,?)", ("CVE-2026-10001", FIRST_SEEN))
+            db.execute("INSERT INTO unified_vulnerabilities VALUES (?,?,?)", ("CVE-2026-10001", FIRST_SEEN, "hash-1"))
             db.execute("INSERT INTO source_observation_baselines VALUES (?,?)", ("NVD", BASELINE))
-            db.execute("INSERT INTO knowledge_documents VALUES (?,?)", ("blog-1", FIRST_SEEN))
+            db.execute("INSERT INTO knowledge_documents VALUES (?,?,?)", ("blog-1", FIRST_SEEN, "doc-hash-1"))
+            db.execute("INSERT INTO ai_classifications VALUES (?,?,?,?,?)",
+                       ("CVE-2026-10001", "hash-1", runtime_classifier_version(), "classified", 1))
+            db.execute("INSERT INTO document_ai_classifications VALUES (?,?,?,?,?)",
+                       ("blog-1", "doc-hash-1", runtime_classifier_version(), "classified", 1))
+            ensure_changefeed(db)
         (self.source / "monitoring_baseline.json").write_text(json.dumps({"started_at": BASELINE}))
         self.mirror = self.root / "mirror"
 
@@ -189,6 +198,52 @@ class ActionsMirrorTests(unittest.TestCase):
         claim_role(other, "actions-mirror")
         with self.assertRaisesRegex(RuntimeError, "different writer"):
             claim_role(other, "collector")
+
+    def test_incompatible_old_classifier_or_missing_feed_keeps_previous_generation(self):
+        self.deliver(self.client())
+        with sqlite3.connect(self.source / "intelligence.db") as db:
+            db.execute("UPDATE ai_classifications SET classifier_version='old-classifier'")
+        with self.assertRaisesRegex(StateError, "classifier_version_stale"):
+            self.deliver(self.client(2, 43))
+        self.assertEqual((self.mirror / "current").resolve().name, "42")
+        with sqlite3.connect(self.source / "intelligence.db") as db:
+            db.execute("UPDATE ai_classifications SET classifier_version=?", (runtime_classifier_version(),))
+            db.execute("DROP TRIGGER team_feed_knowledge_documents_update")
+        with self.assertRaisesRegex(StateError, "missing_changefeed_triggers"):
+            self.deliver(self.client(3, 44))
+        self.assertEqual((self.mirror / "current").resolve().name, "42")
+
+    def test_normal_new_content_classification_backlog_can_be_delivered(self):
+        self.deliver(self.client())
+        with sqlite3.connect(self.source / "intelligence.db") as db:
+            db.execute("UPDATE unified_vulnerabilities SET content_sha256='updated-content'")
+            db.execute("INSERT INTO knowledge_documents VALUES (?,?,?)", ("blog-2", FIRST_SEEN, "new-document"))
+        self.assertTrue(self.deliver(self.client(2, 43))["changed"])
+        contract = json.loads((self.mirror / "current/manifest.json").read_text())["compatibility"]
+        self.assertTrue(contract["ready"])
+        self.assertEqual(contract["classification"]["cve"]["content_stale"], 1)
+        self.assertEqual(contract["classification"]["document"]["missing"], 1)
+
+    def test_missing_or_forged_manifest_contract_cannot_be_published(self):
+        self.deliver(self.client())
+        for run_id, contract in ((43, None), (44, {"ready": True})):
+            incoming = self.client(run_id - 41, run_id)
+            with zipfile.ZipFile(io.BytesIO(incoming.payload)) as archive:
+                contents = {name: archive.read(name) for name in archive.namelist()}
+            manifest = json.loads(contents["manifest.json"])
+            if contract is None:
+                manifest.pop("compatibility")
+            else:
+                manifest["compatibility"] = contract
+            contents["manifest.json"] = json.dumps(manifest).encode()
+            rewritten = io.BytesIO()
+            with zipfile.ZipFile(rewritten, "w") as archive:
+                for name, payload in contents.items():
+                    archive.writestr(name, payload)
+            incoming.payload = rewritten.getvalue()
+            with self.assertRaisesRegex(StateError, "contract"):
+                self.deliver(incoming)
+            self.assertEqual((self.mirror / "current").resolve().name, "42")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from typing import Any
 import requests
 from collectors.base import IntelligenceItem
 from collectors.http import _get, github_next_url, nvd_page
+from incremental.limits import WindowPageLimitExceeded
 
 
 NVD_URL = 'https://services.nvd.nist.gov/rest/json/cves/2.0'
@@ -95,6 +96,7 @@ class NVDModifiedCollector:
         if isinstance(page_size, bool) or not isinstance(page_size, int) or not 1 <= page_size <= 2000:
             raise ValueError('NVD page_size must be 1..2000')
         self._last_call = None
+        self.request_budget = None
 
     def _rate_limit(self):
         # NVD without a key: default 5 requests/30 seconds (space by 6.5s).
@@ -102,7 +104,10 @@ class NVDModifiedCollector:
         if self._last_call is not None:
             pause = interval - (time.monotonic() - self._last_call)
             if pause > 0:
-                time.sleep(pause)
+                if self.request_budget:
+                    self.request_budget.sleep(pause)
+                else:
+                    time.sleep(pause)
         self._last_call = time.monotonic()
 
     def collect_window(self, start: datetime, end: datetime):
@@ -128,14 +133,18 @@ class NVDModifiedCollector:
         total = None
         while True:
             if page >= self.max_pages:
-                raise RuntimeError(f'NVD reached max_pages={self.max_pages}; cursor will NOT advance')
+                raise WindowPageLimitExceeded(f'NVD reached max_pages={self.max_pages}; cursor will NOT advance')
             r = _get(self.session, NVD_URL, headers=headers, params={
                 f'{field}StartDate': _api_timestamp(start),
                 f'{field}EndDate': _api_timestamp(end),
                 'resultsPerPage': self.page_size,
                 'startIndex': start_index,
-            }, before_request=self._rate_limit)
+            }, before_request=self._rate_limit, budget=self.request_budget)
             vulnerabilities, total = nvd_page(r.json(), start_index, total)
+            # Reject dense ranges after one page instead of spending the whole
+            # source budget downloading a window that cannot be checkpointed.
+            if total > self.max_pages * self.page_size:
+                raise WindowPageLimitExceeded(f'NVD exceeds max_pages={self.max_pages}; split window')
             for row in vulnerabilities:
                 raw = row.get('cve') if isinstance(row, dict) else None
                 if not isinstance(raw, dict) or not raw.get('id'):
@@ -158,6 +167,7 @@ class GithubModifiedCollector:
         self.session = session or requests.Session()
         self.token = token if token is not None else (os.getenv('GITHUB_TOKEN') or os.getenv('GH_TOKEN', ''))
         self.max_pages = max_pages
+        self.request_budget = None
         if max_pages <= 0:
             raise ValueError('max_pages must be positive')
 
@@ -197,11 +207,11 @@ class GithubModifiedCollector:
         pages = 0
         while url:
             if pages >= self.max_pages:
-                raise RuntimeError(f'GitHub reached max_pages={self.max_pages}; cursor will NOT advance')
+                raise WindowPageLimitExceeded(f'GitHub reached max_pages={self.max_pages}; cursor will NOT advance')
             if url in seen_urls:
                 raise RuntimeError('GitHub pagination loop, refusing checkpoint')
             seen_urls.add(url)
-            r = _get(self.session, url, headers=headers, params=params)
+            r = _get(self.session, url, headers=headers, params=params, budget=self.request_budget)
             docs = r.json()
             if not isinstance(docs, list):
                 raise ValueError('GitHub advisories API did not return a list')

@@ -42,6 +42,7 @@ MODEL_REASONS = frozenset({
 STEP_OUTCOMES = frozenset({"success", "failure", "cancelled", "skipped", "unknown"})
 SOURCE_STATUSES = frozenset({"success", "partial", "failed", "skipped"})
 SOURCE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
+BACKFILL_REASONS = frozenset({"attempt_budget", "request_or_time_budget", "window_budget", "source_failure"})
 
 
 def _number(value):
@@ -51,6 +52,10 @@ def _number(value):
 def _timestamp(value):
     stamp = parse_timestamp(value)
     return stamp.isoformat() if stamp else None
+
+
+def _backfill_reason(value):
+    return value if isinstance(value, str) and value in BACKFILL_REASONS else None
 
 
 def _json(path):
@@ -259,6 +264,18 @@ def source_facts(directory, specs, coverage, schedule):
             continue
         item = raw_sources.get(spec.name)
         item = item if isinstance(item, dict) else {}
+        raw_backfill = item.get("backfill") if isinstance(item.get("backfill"), dict) else {}
+        lag = raw_backfill.get("lag_seconds")
+        lag = lag if isinstance(lag, (int, float)) and not isinstance(lag, bool) and 0 <= lag < float("inf") else None
+        backfill = {
+            "cursor_start_at": _timestamp(raw_backfill.get("cursor_start_at")),
+            "cursor_end_at": _timestamp(raw_backfill.get("cursor_end_at")),
+            "target_end_at": _timestamp(raw_backfill.get("target_end_at")),
+            "lag_seconds": lag,
+            "pending_reason": _backfill_reason(raw_backfill.get("pending_reason")),
+            "requests": _number(raw_backfill.get("requests")),
+            "windows": _number(raw_backfill.get("windows")),
+        }
         values[spec.name] = {
             "category": spec.category,
             "status": item.get("status") if item.get("status") in SOURCE_STATUSES else "unknown",
@@ -266,6 +283,7 @@ def source_facts(directory, specs, coverage, schedule):
             "pending_backfill": item.get("pending") if isinstance(item.get("pending"), bool) else None,
             "source_records": (coverage.get("counts_by_source", {}).get(spec.name) or {}).get("source_records"),
             "ai_candidate_records": (coverage.get("counts_by_source", {}).get(spec.name) or {}).get("ai_records"),
+            "backfill": backfill,
         }
     return {"status": status.get("status") if status.get("status") in SOURCE_STATUSES else "unknown",
             "observation_scope": scope, "started_at": _timestamp(status.get("started_at")), "finished_at": finished,
@@ -371,10 +389,31 @@ def notice_line(report):
     return "::notice title=B cloud facts::" + escape_workflow_data(message)
 
 
-def render_summary(report, *, run_id, collection_outcome="unknown", snapshot_outcome="unknown"):
+def delivery_summary(delivery, *, run_id):
+    if not isinstance(delivery, dict) or str(delivery.get("run_id")) != str(run_id):
+        return "本轮部署推送：unknown；未获得本轮交付记录。自动拉取镜像运行状态：unverified；部署消费：unverified。"
+    status = delivery.get("status")
+    status = status if status in {"disabled", "blocked", "failed", "verified", "unknown"} else "unknown"
+    detail = {
+        "disabled": "部署 ingest 地址或 token 未配置，推送未启用",
+        "blocked": "本轮没有通过兼容性检查并成功上传的快照，禁止推送",
+        "failed": "部署没有返回经过校验的对应代安装回执",
+        "verified": "部署返回的安装回执与本轮 run、代码 SHA、运行编号及仓库一致",
+        "unknown": "本轮缺少可验证的部署安装回执",
+    }[status]
+    return (f"本轮部署推送：{status}；{detail}。自动拉取镜像运行状态：unverified；部署消费：unverified。"
+            "快照上传或安装回执不能证明常驻镜像正在运行、B API 正在提供该代数据，或主应用增量消费已完成；需在部署端核对 /api/intelligence/delivery 并验证消费游标。")
+
+
+def render_summary(report, *, run_id, collection_outcome="unknown", snapshot_outcome="unknown",
+                   migration_outcome="unknown", compatibility_outcome="unknown", delivery=None):
     collection = collection_outcome if collection_outcome in STEP_OUTCOMES else "unknown"
     snapshot = snapshot_outcome if snapshot_outcome in STEP_OUTCOMES else "unknown"
     lines = ["## B 云端事实报告", f"采集步骤：{collection}；状态备份：{snapshot}。"]
+    migration = migration_outcome if migration_outcome in STEP_OUTCOMES else "unknown"
+    compatibility = compatibility_outcome if compatibility_outcome in STEP_OUTCOMES else "unknown"
+    lines.append(f"恢复状态迁移：{migration}；发布前兼容性校验：{compatibility}。")
+    lines.append(delivery_summary(delivery, run_id=run_id))
     if (not isinstance(report, dict) or report.get("format_version") != 1
             or str(report.get("run_id")) != str(run_id)):
         lines.append("当前运行的事实报告缺失、无效或属于旧运行；本轮时效、分类和模型执行均为未知，未复用上一轮结果。")
@@ -419,6 +458,18 @@ def render_summary(report, *, run_id, collection_outcome="unknown", snapshot_out
         rows.append(f"| {name} | {source_status} | {boolean(item.get('recent_success'))} | {boolean(item.get('pending_backfill'))} |")
     lines.append("\n".join(rows))
     lines.append("NVD/GitHub 的 partial + 近期发布成功 + 回填待处理，表示近期采集已完成而历史补采尚未完成，不能直接解释为新漏洞采集失败。")
+    backlog_rows = ["| 历史更新来源 | 本轮游标起点（UTC） | 已提交游标（UTC） | 目标（UTC） | 剩余积压（小时） | 未完成原因 |",
+                    "|---|---|---|---|---:|---|"]
+    for name in ("NVD", "GITHUB_ADVISORY"):
+        backfill = ((sources.get("by_source") or {}).get(name) or {}).get("backfill") or {}
+        if not isinstance(backfill, dict):
+            backfill = {}
+        lag = backfill.get("lag_seconds")
+        hours = f"{lag / 3600:.2f}" if isinstance(lag, (int, float)) and not isinstance(lag, bool) and 0 <= lag < float("inf") else "未知"
+        reason = _backfill_reason(backfill.get("pending_reason")) or "未知/已完成"
+        backlog_rows.append(f"| {name} | {_timestamp(backfill.get('cursor_start_at')) or '未知'} | {_timestamp(backfill.get('cursor_end_at')) or '未知'} | {_timestamp(backfill.get('target_end_at')) or '未知'} | {hours} | {reason} |")
+    lines.append("\n".join(backlog_rows))
+    lines.append("历史更新积压按已持久提交的更新游标与本轮目标计算；快照生成时间或近期发布采集成功不能代替旧漏洞修订及漏采历史窗口补齐。报告属于上一轮时，这些游标也仅代表上一轮。")
     schedule = report.get("schedule") or {}
     current, previous = schedule.get("current_run") or {}, schedule.get("previous_completed_run") or {}
     gap = schedule.get("creation_interval_seconds")
@@ -458,9 +509,16 @@ def main(argv=None):
         report = _json(directory / REPORT_FILE)
     except (OSError, ValueError, TypeError):
         report = None
+    try:
+        delivery = _json(Path(os.getenv("DELIVERY_STATUS_FILE", str(directory / "delivery_status.json"))))
+    except (OSError, ValueError, TypeError):
+        delivery = None
     summary = render_summary(report, run_id=args.run_id,
                              collection_outcome=os.getenv("COLLECTION_OUTCOME", "unknown"),
-                             snapshot_outcome=os.getenv("SNAPSHOT_OUTCOME", "unknown"))
+                             snapshot_outcome=os.getenv("SNAPSHOT_OUTCOME", "unknown"),
+                             migration_outcome=os.getenv("MIGRATION_OUTCOME", "unknown"),
+                             compatibility_outcome=os.getenv("COMPATIBILITY_OUTCOME", "unknown"),
+                             delivery=delivery)
     destination = os.getenv("GITHUB_STEP_SUMMARY")
     if destination:
         with open(destination, "a", encoding="utf-8") as output:

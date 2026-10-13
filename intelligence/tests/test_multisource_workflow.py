@@ -38,6 +38,125 @@ def document(spec, identity='one', published='2026-10-08T01:00:00Z'):
 
 
 class MultisourceTests(unittest.TestCase):
+    def test_default_catchup_covers_nine_day_gap_and_old_cve_revisions(self):
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        cursor = now - timedelta(days=9)
+        modified = now - timedelta(days=3)
+        settings = {'BACKFILL_WINDOW_HOURS': '24', 'BACKFILL_MAX_WINDOWS': '16',
+                    'INCREMENTAL_SETTLE_MINUTES': '5', 'BACKFILL_MAX_REQUESTS': '12'}
+        for source in ('NVD', 'GITHUB_ADVISORY'):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory, \
+                    redirect_stdout(io.StringIO()), patch.dict(os.environ, settings):
+                spec = next(spec for spec in get_sources() if spec.name == source)
+                db = Path(directory) / 'intel.db'
+                store = SQLiteIntelligenceStore(db)
+                identifier = 'CVE-2026-10001' if source == 'NVD' else 'GHSA-aaaa-bbbb-cccc'
+                old = IntelligenceItem(source, identifier, 'CVE-2026-10001', 'Old CVE',
+                                       'Old description', None, '2026-01-01T00:00:00Z',
+                                       '2026-01-01T00:00:00Z', None, raw_data={'revision': 1})
+                revised = IntelligenceItem(source, identifier, 'CVE-2026-10001', 'Old CVE',
+                                           'Ollama revised description', None, '2026-01-01T00:00:00Z',
+                                           modified.isoformat(), None, raw_data={'revision': 2})
+                store.ingest_batch(source, [old])
+                def recorded_first_seen():
+                    with closing(sqlite3.connect(db)) as con:
+                        return con.execute('SELECT first_seen_at FROM unified_vulnerabilities WHERE cve_id=?',
+                                           ('CVE-2026-10001',)).fetchone()[0]
+                first_seen = recorded_first_seen()
+                CursorStore(db).advance(source, cursor)
+                class Collector:
+                    max_pages = 4
+                    def __init__(self):
+                        self.modified_windows = []
+                    def collect_published_window(self, start, end):
+                        return []  # The old CVE is outside the publication lane.
+                    def collect_window(self, start, end):
+                        self.request_budget.acquire()
+                        self.modified_windows.append((start, end))
+                        return [revised] if start <= modified <= end else []
+                collector = Collector()
+                result = collect_source(spec, db, now=now, collector=collector)
+                target = now - timedelta(minutes=5)
+                self.assertEqual(result['status'], 'success')
+                self.assertFalse(result['pending'])
+                self.assertEqual(CursorStore(db).get(source), target)
+                self.assertEqual(result['backfill']['lag_seconds'], 0)
+                self.assertGreater(len(collector.modified_windows), 1)
+                self.assertLessEqual(result['backfill']['requests'], 12)
+                record = store.get_vulnerability('CVE-2026-10001')
+                self.assertIn('Ollama revised', record['description'])
+                self.assertEqual(recorded_first_seen(), first_seen)
+                replay = collect_source(spec, db, now=now, collector=collector)
+                self.assertFalse(replay['pending'])
+                self.assertEqual(store.stats()['unified_cves'], 1)
+                self.assertEqual(recorded_first_seen(), first_seen)
+
+    def test_failed_publication_lane_still_catches_up_modified_history(self):
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        spec = get_sources()[0]
+        class Collector:
+            max_pages = 4
+            def collect_published_window(self, start, end):
+                raise RuntimeError('publication request failed')
+            def collect_window(self, start, end):
+                return []
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            db = Path(directory) / 'intel.db'
+            CursorStore(db).advance('NVD', now - timedelta(days=9))
+            result = collect_source(spec, db, now=now, collector=Collector())
+            self.assertEqual(result['status'], 'partial')
+            self.assertFalse(result['recent_success'])
+            self.assertFalse(result['pending'])
+            self.assertEqual(result['backfill']['lag_seconds'], 0)
+            self.assertEqual(CursorStore(db).get('NVD'), now - timedelta(minutes=5))
+            with closing(sqlite3.connect(db)) as con:
+                latest_status = con.execute('SELECT status FROM collector_runs ORDER BY id DESC LIMIT 1').fetchone()[0]
+            self.assertEqual(latest_status, 'failed')
+
+    def test_backfill_request_budget_reports_remaining_real_gap(self):
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        cursor = now - timedelta(days=9)
+        spec = get_sources()[0]
+        class Collector:
+            max_pages = 4
+            def collect_published_window(self, start, end):
+                return []
+            def collect_window(self, start, end):
+                self.request_budget.acquire()
+                return []
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), \
+                patch.dict(os.environ, {'BACKFILL_MAX_REQUESTS': '2'}):
+            db = Path(directory) / 'intel.db'
+            CursorStore(db).advance('NVD', cursor)
+            result = collect_source(spec, db, now=now, collector=Collector())
+            self.assertEqual(result['status'], 'partial')
+            self.assertTrue(result['pending'])
+            self.assertEqual(result['backfill']['pending_reason'], 'request_or_time_budget')
+            self.assertEqual(result['backfill']['requests'], 2)
+            self.assertEqual(CursorStore(db).get('NVD'), cursor + timedelta(days=2))
+            self.assertEqual(result['backfill']['lag_seconds'], 7 * 86400 - 300)
+
+    def test_source_network_deadline_reserves_database_commit_and_result_time(self):
+        now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
+        deadlines = []
+        class Collector:
+            max_pages = 4
+            def collect_published_window(self, start, end):
+                deadlines.append(self.request_budget.deadline)
+                return []
+            def collect_window(self, start, end):
+                deadlines.append(self.request_budget.deadline)
+                return []
+        settings = {'INTELLIGENCE_CHILD_TIMEOUT_SECONDS': '120',
+                    'VULNERABILITY_SOURCE_BUDGET_SECONDS': '100', 'RECENT_BUDGET_SECONDS': '35'}
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), \
+                patch.dict(os.environ, settings), patch('monitoring.multisource.time.monotonic', return_value=1000):
+            db = Path(directory) / 'intel.db'
+            CursorStore(db).advance('NVD', now - timedelta(hours=1))
+            result = collect_source(get_sources()[0], db, now=now, collector=Collector())
+            self.assertEqual(result['status'], 'success')
+            self.assertEqual(deadlines, [1035, 1085])
+
     def test_recent_phase_commits_before_failing_backfill_and_cursor_stays_put(self):
         spec = get_sources()[0]
         now = datetime.now(timezone.utc)

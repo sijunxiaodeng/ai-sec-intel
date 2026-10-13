@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import sqlite3
 import sys
@@ -35,20 +36,34 @@ class ActionsSyncInstallTest(unittest.TestCase):
         self.source.mkdir()
         self.destination = self.root / "mirror"
         self.archive_counter = 0
+        self.save_state, self.sync = _load_sync()
+        from deployment.snapshot_contract import runtime_classifier_version
+        # The main app and B service both have collectors.* namespaces. Load
+        # the standalone fixture schema helper without importing B storage's
+        # collector-dependent package initializer into the A test process.
+        spec = importlib.util.spec_from_file_location("_b_test_changefeed", INTEL / "storage/changefeed.py")
+        changefeed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(changefeed)
         with sqlite3.connect(self.source / "intelligence.db") as db:
             db.executescript("""
                 CREATE TABLE source_items(source TEXT, source_id TEXT, first_seen_at TEXT);
-                CREATE TABLE unified_vulnerabilities(cve_id TEXT, first_seen_at TEXT);
+                CREATE TABLE unified_vulnerabilities(cve_id TEXT, first_seen_at TEXT, content_sha256 TEXT);
                 CREATE TABLE source_observation_baselines(source TEXT, started_at TEXT);
-                CREATE TABLE knowledge_documents(document_id TEXT, first_seen_at TEXT);
+                CREATE TABLE knowledge_documents(document_id TEXT, first_seen_at TEXT, content_sha256 TEXT);
+                CREATE TABLE ai_classifications(cve_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
+                CREATE TABLE document_ai_classifications(document_id TEXT,content_sha256 TEXT,classifier_version TEXT,state TEXT,ai_related INTEGER);
             """)
             db.execute("INSERT INTO source_items VALUES (?,?,?)", ("NVD", "CVE-2026-10001", FIRST_SEEN))
-            db.execute("INSERT INTO unified_vulnerabilities VALUES (?,?)", ("CVE-2026-10001", FIRST_SEEN))
+            db.execute("INSERT INTO unified_vulnerabilities VALUES (?,?,?)", ("CVE-2026-10001", FIRST_SEEN, "hash-1"))
             db.execute("INSERT INTO source_observation_baselines VALUES (?,?)", ("NVD", BASELINE))
-            db.execute("INSERT INTO knowledge_documents VALUES (?,?)", ("blog-1", FIRST_SEEN))
+            db.execute("INSERT INTO knowledge_documents VALUES (?,?,?)", ("blog-1", FIRST_SEEN, "doc-hash-1"))
+            db.execute("INSERT INTO ai_classifications VALUES (?,?,?,?,?)",
+                       ("CVE-2026-10001", "hash-1", runtime_classifier_version(), "classified", 1))
+            db.execute("INSERT INTO document_ai_classifications VALUES (?,?,?,?,?)",
+                       ("blog-1", "doc-hash-1", runtime_classifier_version(), "classified", 1))
+            changefeed.ensure_changefeed(db)
         (self.source / "monitoring_baseline.json").write_text(
             json.dumps({"started_at": BASELINE}), encoding="utf-8")
-        self.save_state, self.sync = _load_sync()
 
     def tearDown(self):
         # Published generations intentionally have read-only directory modes.

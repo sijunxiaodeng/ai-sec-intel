@@ -9,6 +9,41 @@ from urllib.parse import urlparse
 import requests
 
 
+class CollectionBudgetExceeded(RuntimeError):
+    """A bounded collection may resume its uncommitted window next cycle."""
+
+
+class RequestBudget:
+    """Count every HTTP attempt and stop before exceeding a source deadline."""
+
+    def __init__(self, *, max_requests, deadline):
+        if max_requests <= 0:
+            raise ValueError('max_requests must be positive')
+        self.max_requests = max_requests
+        self.deadline = deadline
+        self.requests = 0
+
+    def remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise CollectionBudgetExceeded('Collection time budget exhausted')
+        return remaining
+
+    def check(self):
+        self.remaining()
+        if self.requests >= self.max_requests:
+            raise CollectionBudgetExceeded('Collection request budget exhausted')
+
+    def acquire(self):
+        self.check()
+        self.requests += 1
+
+    def sleep(self, seconds):
+        if seconds >= self.remaining():
+            raise CollectionBudgetExceeded('Collection wait exceeds remaining time budget')
+        time.sleep(seconds)
+
+
 def _retry_delay(response, attempt):
     delay = min(2 ** (attempt + 1), 30)
     retry_after = response.headers.get('Retry-After')
@@ -33,19 +68,26 @@ def _retry_delay(response, attempt):
 
 
 def _get(session, url, *, headers=None, params=None, timeout=35, retries=4,
-         before_request=None):
+         before_request=None, budget=None):
     """Retry transient failures only; never disable TLS or expose headers."""
     if retries < 1:
         raise ValueError('retries must be positive')
     for attempt in range(retries):
+        if budget:
+            budget.check()
         if before_request:
             before_request()
+        request_timeout = timeout
+        if budget:
+            budget.acquire()
+            request_timeout = min(timeout, budget.remaining())
         try:
-            response = session.get(url, headers=headers, params=params, timeout=timeout)
+            response = session.get(url, headers=headers, params=params, timeout=request_timeout)
         except requests.RequestException:
             if attempt == retries - 1:
                 raise
-            time.sleep(min(2 ** (attempt + 1), 25))
+            delay = min(2 ** (attempt + 1), 25)
+            budget.sleep(delay) if budget else time.sleep(delay)
             continue
         retryable = response.status_code in {429, 500, 502, 503, 504} or (
             response.status_code == 403 and (
@@ -56,7 +98,7 @@ def _get(session, url, *, headers=None, params=None, timeout=35, retries=4,
         if retryable and attempt < retries - 1:
             delay = _retry_delay(response, attempt)
             response.close()
-            time.sleep(delay)
+            budget.sleep(delay) if budget else time.sleep(delay)
             continue
         response.raise_for_status()
         return response

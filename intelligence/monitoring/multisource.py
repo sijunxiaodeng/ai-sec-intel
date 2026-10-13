@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,8 +18,10 @@ from collectors.cisa_kev import CISAKEVCollector
 from collectors.osv import OSVCollector
 from collectors.documents import ArxivCollector, FeedCollector, GitHubVendorAdvisoryCollector
 from collectors.official_documents import FederalRegisterPolicyCollector, NISTStandardCollector
+from collectors.http import RequestBudget
 from incremental.api_collectors import GithubModifiedCollector, NVDModifiedCollector
 from incremental.cursors import CursorStore
+from incremental.cursors import iso_utc
 from incremental.engine import ingest_incremental_source
 from monitoring.lock import AlreadyRunning, ProcessFileLock
 from monitoring.service import atomic_json, utc_now
@@ -70,6 +73,7 @@ def document_collector(spec, now):
 def collect_source(spec, db_path, *, now=None, collector=None):
     """One independently retryable source; usable recent CVEs are stored first."""
     now = now or datetime.now(timezone.utc)
+    source_started = time.monotonic()
     db_path = Path(db_path).resolve()
     store = SQLiteIntelligenceStore(db_path)
     documents = SQLiteDocumentStore(db_path)
@@ -95,31 +99,69 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             if settle >= min(360, lookback * 60):
                 raise ValueError('Settlement must be below 6 hours and the recent lookback window')
             safe_end = now - timedelta(minutes=settle)
+            source_seconds = _integer('VULNERABILITY_SOURCE_BUDGET_SECONDS', 100, 1)
+            child_seconds = float(os.getenv('INTELLIGENCE_CHILD_TIMEOUT_SECONDS', '120'))
+            if child_seconds <= 0:
+                raise ValueError('Child timeout must be positive')
+            # Leave room for SQLite's 30-second busy timeout and result-file
+            # bookkeeping before the parent terminates this child process.
+            network_seconds = min(source_seconds, max(child_seconds / 2, child_seconds - 35))
+            deadline = source_started + network_seconds
             # Publication must not wait behind bulk edits of old records.
             recent_method = getattr(collector, 'collect_published_window', collector.collect_window)
-            recent = recent_method(now - timedelta(hours=lookback), safe_end)
-            recent_counts = store.ingest_batch(spec.name, recent, started_at=started)
+            recent_counts = dict(fetched=0, inserted=0, updated=0, unchanged=0)
+            recent_error = None
+            try:
+                collector.request_budget = RequestBudget(
+                    max_requests=_integer('RECENT_MAX_REQUESTS', 6, 1),
+                    deadline=min(deadline, time.monotonic() + _integer('RECENT_BUDGET_SECONDS', 35, 1)),
+                )
+                recent = recent_method(now - timedelta(hours=lookback), safe_end)
+                recent_counts = store.ingest_batch(spec.name, recent, started_at=started)
+            except Exception as exc:
+                recent_error = safe_error(exc)
             # Catch-up has its own monotonic cursor. Failure cannot erase the
             # already committed recent phase or falsely advance its checkpoint.
+            # A publication failure must also not starve historical revisions.
+            cursors = CursorStore(db_path)
+            initial_checkpoint = cursors.get(spec.name)
             try:
                 collector.max_pages = _integer('BACKFILL_MAX_PAGES', 4, 1)
+                collector.request_budget = RequestBudget(
+                    max_requests=_integer('BACKFILL_MAX_REQUESTS', 12, 1), deadline=deadline,
+                )
                 backlog = ingest_incremental_source(
                     name=spec.name, collector=collector, store=store,
-                    cursors=CursorStore(db_path), now=now,
+                    cursors=cursors, now=now,
                     bootstrap_days=_integer('VULNERABILITY_BOOTSTRAP_DAYS', 7, 1),
                     overlap_minutes=_integer('INCREMENTAL_OVERLAP_MINUTES', 30),
                     settle_minutes=settle,
                     window_days=_integer('INCREMENTAL_WINDOW_DAYS', 7, 1),
-                    window_hours=_integer('BACKFILL_WINDOW_HOURS', 1, 1),
-                    max_windows=_integer('BACKFILL_MAX_WINDOWS', 1, 1),
+                    window_hours=_integer('BACKFILL_WINDOW_HOURS', 24, 1),
+                    max_windows=_integer('BACKFILL_MAX_WINDOWS', 16, 1),
+                    adaptive_min_window_minutes=_integer('BACKFILL_MIN_WINDOW_MINUTES', 15, 1),
+                    max_attempts=_integer('BACKFILL_MAX_ATTEMPTS', 32, 1),
                 )
             except Exception as exc:
                 store.record_failure(spec.name, safe_error(exc), started)
-                return {'source': spec.name, 'category': spec.category, 'status': 'partial',
-                        **recent_counts, 'recent_success': True, 'pending': True, 'error': safe_error(exc)}
+                checkpoint = cursors.get(spec.name)
+                progressed = checkpoint is not None and (initial_checkpoint is None or checkpoint > initial_checkpoint)
+                progress = {'cursor_end_at': iso_utc(checkpoint) if checkpoint else None,
+                            'cursor_start_at': iso_utc(initial_checkpoint) if initial_checkpoint else None,
+                            'target_end_at': iso_utc(safe_end), 'pending': True,
+                            'pending_reason': 'source_failure',
+                            'lag_seconds': max(0, (safe_end - checkpoint).total_seconds()) if checkpoint else None}
+                return {'source': spec.name, 'category': spec.category,
+                        'status': 'partial' if recent_error is None or progressed else 'failed',
+                        **recent_counts, 'recent_success': recent_error is None, 'pending': True,
+                        'recent_error': recent_error, 'backfill': progress, 'error': safe_error(exc)}
+            backlog['requests'] = collector.request_budget.requests
+            if recent_error:
+                store.record_failure(spec.name, recent_error, started)
             return {'source': spec.name, 'category': spec.category,
-                    'status': 'partial' if backlog['pending'] else 'success',
-                    **recent_counts, 'recent_success': True, 'pending': backlog['pending'], 'backfill': backlog}
+                    'status': 'partial' if backlog['pending'] or recent_error else 'success',
+                    **recent_counts, 'recent_success': recent_error is None,
+                    'recent_error': recent_error, 'pending': backlog['pending'], 'backfill': backlog}
         if spec.kind in ('cisa', 'osv'):
             collector = collector or (CISAKEVCollector() if spec.kind == 'cisa' else OSVCollector(**spec.options))
             rows = collector.collect()
@@ -177,7 +219,8 @@ def _run_child(root, spec, db_path, config_path, timeout_seconds):
         if config_path:
             args.extend(['--config', str(Path(config_path).resolve())])
         env = os.environ.copy()
-        env.update({'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'})
+        env.update({'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1',
+                    'INTELLIGENCE_CHILD_TIMEOUT_SECONDS': str(timeout_seconds)})
         with log_path.open('w', encoding='utf-8') as stream:
             completed = subprocess.run(args, cwd=root, env=env, stdout=stream, stderr=subprocess.STDOUT,
                                        timeout=timeout_seconds, check=False)

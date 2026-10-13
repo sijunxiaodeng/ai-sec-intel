@@ -1,6 +1,7 @@
 """Offline tests exercise durable history, lost snapshots and credential isolation."""
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from deployment.actions_state import (
-    ARTIFACT_PREFIX, BOOTSTRAP_ASSET, GitHubClient, SafeRedirect, StateError, prune_states, restore_archive, restore_latest, save_state,
+    ARTIFACT_PREFIX, BOOTSTRAP_ASSET, GitHubClient, SafeRedirect, StateError, main, prune_states, restore_archive, restore_latest, save_state,
 )
 
 REPOSITORY = 'team/public-repo'
@@ -126,6 +127,28 @@ class ActionsStateTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT state FROM ai_classifications').fetchone()[0], 'classified')
         restored_baseline = json.loads((self.root / 'restored/monitoring_baseline.json').read_text())
         self.assertEqual(restored_baseline['started_at'], BASELINE)
+
+    def test_only_verified_initial_restore_emits_permission_to_initialize_new_state(self):
+        for number, runs, artifacts, expected in (
+            (1, [], {}, 'true'),
+            (2, [run()], {42: [artifact()]}, 'false'),
+            (3, [], {}, None),
+        ):
+            destination = self.root / f'initial-state-{number}'
+            output = self.root / f'github-output-{number}'
+            client = FakeClient(self.payload, runs=runs, artifacts=artifacts)
+            with patch('deployment.actions_state.GitHubClient', return_value=client), \
+                 patch.dict(os.environ, {'GITHUB_OUTPUT': str(output),
+                                         'INTELLIGENCE_BOOTSTRAP_RELEASE_TAG': '',
+                                         'INTELLIGENCE_BOOTSTRAP_STATE_COMMIT': ''}):
+                status = main(['restore', '--directory', str(destination), '--repository', REPOSITORY,
+                               '--branch', BRANCH, '--run-id', '100', '--run-number', str(number)])
+            if expected is None:
+                self.assertEqual(status, 1)
+                self.assertFalse(output.exists())
+            else:
+                self.assertEqual(status, 0)
+                self.assertEqual(output.read_text(), f'initial_deployment={expected}\n')
 
     def test_production_backup_and_restore_close_owned_database_connections(self):
         connections, connect = [], sqlite3.connect

@@ -103,14 +103,19 @@ NVD/GitHub 先采集最近 12 小时新发布窗口并落库，再通过修改�
 | `--interval-minutes` / `MONITOR_INTERVAL_MINUTES` | 15 | 轮询周期，必须大于 0 且小于 360 分钟 |
 | `--workers` / `MONITOR_WORKERS` | 4 | 独立来源并行数，1–16 |
 | `--source-timeout` / `SOURCE_TIMEOUT_SECONDS` | 120 | 单源总超时，必须大于 0 且小于 21600 秒 |
-| `RECENT_LOOKBACK_HOURS` | 12 | NVD/GitHub 近期修改窗口 |
+| `RECENT_LOOKBACK_HOURS` | 12 | NVD/GitHub 新发布时间快车道；不代替修改时间补采 |
 | `VULNERABILITY_BOOTSTRAP_DAYS` | 7 | 新多源入口的漏洞首次回填范围 |
-| `BACKFILL_MAX_WINDOWS` / `RECENT_MAX_PAGES` / `BACKFILL_MAX_PAGES` | 1 / 4 / 4 | 单轮历史窗口及两阶段分页预算 |
-| `BACKFILL_WINDOW_HOURS` | 1 | 修改时间回填窗口大小，避免整周数据超过分页预算 |
+| `BACKFILL_MAX_WINDOWS` / `RECENT_MAX_PAGES` / `BACKFILL_MAX_PAGES` | 16 / 4 / 4 | 单轮完整历史窗口及两阶段每窗口分页预算 |
+| `BACKFILL_WINDOW_HOURS` / `BACKFILL_MIN_WINDOW_MINUTES` | 24 / 15 | 修改时间补采目标窗口；密集更新超过分页上限时逐次缩小，最小窗口仍失败则保留游标 |
+| `BACKFILL_MAX_REQUESTS` / `BACKFILL_MAX_ATTEMPTS` | 12 / 32 | 单源单轮历史 HTTP 请求尝试数（包括重试和拆窗）及窗口尝试数上限 |
+| `RECENT_MAX_REQUESTS` / `RECENT_BUDGET_SECONDS` | 6 / 35 | 发布时间阶段请求尝试及时间上限；失败后仍尝试历史补采 |
+| `VULNERABILITY_SOURCE_BUDGET_SECONDS` | 100 | 单源两阶段合计网络预算；120 秒子进程默认进一步限制为 85 秒，为数据库提交和结果保存预留 35 秒 |
 | `PAPER_LOOKBACK_DAYS` | 7 | arXiv 提交日期滚动窗口 |
 | `AUTO_CLASSIFY_V5` / `CLASSIFY_V5_MAX_ITEMS` / `CLASSIFY_V5_MAX_LLM_CALLS` | 1 / 300 / 0 | 每轮自动 CVE 分类、条数预算和模型调用预算 |
 
 启动时联合校验轮询周期、稳定等待和整轮采集最坏预算之和严格小于六小时；默认预算为 15 分钟轮询 + 5 分钟稳定等待 + 7.5 分钟整轮超时/分类预算。首次入库时间在拿到写锁并完成融合后记录，避免锁等待和处理时间被漏算。健康报告使用最后提交的运行记录，失败不会被之前成功覆盖；新鲜度阈值考虑并发来源排队。
+
+NVD/GitHub 历史补采按保存的**修改时间游标**连续处理多个窗口，覆盖停机期间新发布记录和早期 CVE 的后续修订。近期发布时间请求独立执行，任一阶段失败不会跳过另一阶段。完整窗口入库后才推进游标；分页不完整、网络失败和预算耗尽的窗口保持原进度，下轮可去重重放。稀疏窗口单轮可覆盖多日，密集修改、上游限流或长时间停机可能需要多轮，不能承诺一轮清空历史。`monitoring_status.json` 的逐源 `backfill` 保存本轮起止游标、目标时间、实际 `lag_seconds`、请求数、拆窗数和 `pending_reason`；`pending=true` 表示尚未追平稳定等待后的目标时间，近期采集成功不能代替这项证据。既有环境如果显式配置旧的 `BACKFILL_MAX_WINDOWS=1`、`BACKFILL_WINDOW_HOURS=1`，需要同步调整这些运行配置。
 
 arXiv 默认窗口覆盖新提交和这些近期论文的重查，**不覆盖所有旧论文的新修订**。RSS 上游保留窗口、分页预算、来源自身迟发布和网络中断也影响实际完整性与时效，15 分钟轮询本身不能保证所有漏洞小于 6 小时。
 

@@ -47,7 +47,7 @@ jobs:
       DEPLOY_INGEST_CONFIGURED: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
       DEEPSEEK_REVIEW_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.deepseek_review }}
       DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-chat' }}
-      DEPLOY_INGEST_AVAILABLE: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
+      DELIVERY_STATUS_FILE: ${{ runner.temp }}/delivery_status.json
       GITHUB_TOKEN: ${{ github.token }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
@@ -71,14 +71,25 @@ jobs:
         run: python intelligence/deployment/actions_state.py restore --directory intelligence/data
       - name: Install collector dependencies
         run: python -m pip install --disable-pip-version-check -r intelligence/requirements.lock.txt
+      - name: Migrate restored state for current collector and consumers
+        id: migrate
+        env:
+          INITIAL_DEPLOYMENT: ${{ steps.restore.outputs.initial_deployment }}
+        run: |
+          if [ "$INITIAL_DEPLOYMENT" = "true" ]; then
+            python intelligence/run_migrate_state.py --directory intelligence/data --allow-new
+          else
+            python intelligence/run_migrate_state.py --directory intelligence/data
+          fi
       - name: Collect public intelligence
         id: collect
+        if: ${{ steps.migrate.outcome == 'success' }}
         timeout-minutes: 11
         # GNU timeout stops the whole child process group. State upload still runs.
         run: timeout --signal=TERM --kill-after=20s 10m python -u intelligence/run_monitor.py --once --source-timeout 120 --workers 4
       - name: Review ambiguous intelligence with DeepSeek
         id: deepseek
-        if: ${{ always() && steps.restore.outcome == 'success' && steps.collect.outcome != 'skipped' && env.DEEPSEEK_KEY_AVAILABLE == 'true' && env.DEEPSEEK_REVIEW_ENABLED == 'true' }}
+        if: ${{ always() && steps.migrate.outcome == 'success' && steps.collect.outcome != 'skipped' && env.DEEPSEEK_KEY_AVAILABLE == 'true' && env.DEEPSEEK_REVIEW_ENABLED == 'true' }}
         continue-on-error: true
         timeout-minutes: 2
         env:
@@ -86,19 +97,23 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: python intelligence/deployment/deepseek_review.py --db intelligence/data/intelligence.db
       - name: Record disabled or unavailable model review
-        if: ${{ always() && steps.restore.outcome == 'success' && steps.collect.outcome != 'skipped' && !(env.DEEPSEEK_KEY_AVAILABLE == 'true' && env.DEEPSEEK_REVIEW_ENABLED == 'true') }}
+        if: ${{ always() && steps.migrate.outcome == 'success' && steps.collect.outcome != 'skipped' && !(env.DEEPSEEK_KEY_AVAILABLE == 'true' && env.DEEPSEEK_REVIEW_ENABLED == 'true') }}
         continue-on-error: true
         run: python intelligence/deployment/deepseek_review.py --db intelligence/data/intelligence.db
       - name: Record public collection facts
-        if: ${{ always() && steps.restore.outcome == 'success' && steps.collect.outcome != 'skipped' }}
+        if: ${{ always() && steps.migrate.outcome == 'success' && steps.collect.outcome != 'skipped' }}
         run: python intelligence/deployment/actions_report.py record --directory intelligence/data
       - name: Prepare consistent SQLite snapshot
         id: snapshot
-        if: ${{ always() && steps.restore.outcome == 'success' && steps.collect.outcome != 'skipped' }}
+        if: ${{ always() && steps.migrate.outcome == 'success' && steps.collect.outcome != 'skipped' }}
         run: python intelligence/deployment/actions_state.py save --source intelligence/data --directory "${RUNNER_TEMP}/intelligence-state"
+      - name: Verify consumer compatibility before publishing snapshot
+        id: compatibility
+        if: ${{ always() && steps.snapshot.outcome == 'success' }}
+        run: python intelligence/deployment/actions_state.py check --directory "${RUNNER_TEMP}/intelligence-state"
       - name: Persist public collection state
         id: upload
-        if: ${{ always() && steps.snapshot.outcome == 'success' }}
+        if: ${{ always() && steps.compatibility.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: intelligence-state-${{ github.run_id }}
@@ -107,6 +122,7 @@ jobs:
           retention-days: 90
           compression-level: 6
       - name: Push snapshot to deploy ingest API (optional)
+        id: push
         # Real sync path: artifact alone never reaches a running 8023 DB.
         # When DEPLOY_INGEST_URL + DEPLOY_INGEST_TOKEN secrets are set, POST the
         # verified snapshot zip to the main app's /api/admin/actions-sync.
@@ -114,31 +130,13 @@ jobs:
         env:
           DEPLOY_INGEST_URL: ${{ secrets.DEPLOY_INGEST_URL }}
           DEPLOY_INGEST_TOKEN: ${{ secrets.DEPLOY_INGEST_TOKEN }}
-        run: |
-          set -euo pipefail
-          STAGE="${RUNNER_TEMP}/intelligence-state"
-          test -f "$STAGE/intelligence.db"
-          test -f "$STAGE/manifest.json"
-          ZIP="${RUNNER_TEMP}/intelligence-state-${GITHUB_RUN_ID}.zip"
-          (cd "$STAGE" && zip -qr "$ZIP" .)
-          ENDPOINT="${DEPLOY_INGEST_URL%/}"
-          case "$ENDPOINT" in
-            */api/admin/actions-sync) ;;
-            *) ENDPOINT="${ENDPOINT}/api/admin/actions-sync" ;;
-          esac
-          echo "Pushing Actions snapshot to ${ENDPOINT}"
-          curl -fsS --max-time 120 \
-            -X POST "$ENDPOINT" \
-            -H "Authorization: Bearer ${DEPLOY_INGEST_TOKEN}" \
-            -H "Content-Type: application/zip" \
-            -H "X-Actions-Repository: ${GITHUB_REPOSITORY}" \
-            -H "X-Actions-Branch: main" \
-            -H "X-Actions-Run-Id: ${GITHUB_RUN_ID}" \
-            --data-binary @"$ZIP" \
-            -o "${RUNNER_TEMP}/deploy-ingest-response.json"
-          echo "Deploy ingest response:"
-          cat "${RUNNER_TEMP}/deploy-ingest-response.json"
-          echo
+        run: python intelligence/deployment/actions_sync.py push --directory "${RUNNER_TEMP}/intelligence-state"
+      - name: Record delivery evidence or missing configuration
+        if: ${{ always() }}
+        env:
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: python intelligence/deployment/actions_sync.py delivery-status
       - name: Retain the latest eight trusted snapshots
         if: ${{ always() && steps.upload.outcome == 'success' }}
         env:
@@ -149,4 +147,6 @@ jobs:
         env:
           COLLECTION_OUTCOME: ${{ steps.collect.outcome }}
           SNAPSHOT_OUTCOME: ${{ steps.snapshot.outcome }}
+          MIGRATION_OUTCOME: ${{ steps.migrate.outcome }}
+          COMPATIBILITY_OUTCOME: ${{ steps.compatibility.outcome }}
         run: python intelligence/deployment/actions_report.py summary --directory intelligence/data

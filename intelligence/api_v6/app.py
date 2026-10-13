@@ -252,6 +252,11 @@ def create_app(root: Path | None = None, db_path: Path | None = None) -> FastAPI
                 response["database_note"] = "数据库存在但查询失败"
         return response
 
+    @app.get("/api/intelligence/delivery", tags=["统计与健康"])
+    def delivery_evidence():
+        from deployment.delivery_status import deployment_delivery
+        return deployment_delivery(repo.db_path, classifier_version=current_classifier_version(root))
+
     @app.get("/api/intelligence/{cve_id}", tags=["情报查询"])
     def detail(cve_id: str, include_raw: bool = Query(default=False, description="是否包含各来源原始响应")):
         if not CVE_PATTERN.fullmatch(cve_id):

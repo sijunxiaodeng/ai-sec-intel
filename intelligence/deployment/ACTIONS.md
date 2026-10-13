@@ -32,6 +32,18 @@
 
 ## 迁移已有数据，保留原来的时效记录
 
+旧快照可通过 `restore-file` 恢复给采集写入端，但恢复成功只证明历史和文件校验通过，不代表新版 API 可以消费。工作流在安装依赖之后、采集之前自动执行：
+
+```bash
+python intelligence/run_migrate_state.py --directory intelligence/data
+```
+
+这一步不联网、不调用模型，初始化两类资料的变更流并补齐所有保留实体，然后使用当前分类规则重新判断全部旧版本或旧内容分类；不把旧分类的版本号直接改成新版本。原来的分类理由和证据保存在 SQLite `classification_migration_history` 表中，原始来源、融合记录、资料内容、首次入库时间、增量游标、HTTP 缓存和观察基线保持原值。明确正例可继续消费，需语义判断的 CVE 保留 `pending_llm`，需复核的资料保留 `review`，不会自动转为正例或负例。再次运行不会重写当前有效分类或重置变更流 epoch。
+
+迁移失败时跳过采集和新快照上传，保留上一份可信 artifact。保存的新快照清单记录 `compatibility`，上传前执行 `actions_state.py check --directory <snapshot>`，镜像发布时也重新只读验证实际数据库：两类变更流、历史回填、写入触发器和分类器版本须与消费程序兼容。旧版本分类或缺失变更流的快照不能切换为部署的 `current`；上一次已验证的代际继续保留。常规采集的分类数量预算可能留下新记录或内容更新的分类积压，其数量在清单中单独记录，不当作分类器升级成功或 AI 正例。
+
+`migration_status.json` 记录迁移前后分类统计、旧结果存档数和历史保留检查，并纳入快照校验。部署代码与分类规则升级时，先运行新版采集器生成通过兼容检查的快照，再验证新版部署的查询和两类增量同步。
+
 首次启动支持同一个 GitHub 仓库的 Release 种子，输入是 `bootstrap_release_tag`，也可设置仓库变量 `INTELLIGENCE_BOOTSTRAP_RELEASE_TAG`，以便首次部署失败后下一个定时运行可以自动重试。固定资产名必须为 `intelligence-bootstrap-state.zip`。程序不接受其他仓库或任意 URL 的种子。
 
 制作种子前停止写入进程，或在写入进程的外部锁内使用 SQLite online backup，并确认相关基线 JSON 一致。示例：

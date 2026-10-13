@@ -15,8 +15,13 @@ if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$other_proje
   printf 'Stop the other production mode (%s) first; its data volume is preserved.\n' "$other_project" >&2
   exit 1
 fi
-docker compose -f "$compose_file" config --quiet
-docker compose -f "$compose_file" up -d --build
+compose=(docker compose)
+if [[ -f "$ROOT/.env.production" ]]; then
+  compose+=(--env-file "$ROOT/.env.production")
+fi
+compose+=(-f "$compose_file")
+"${compose[@]}" config --quiet
+"${compose[@]}" up -d --build
 printf 'Started %s mode. Logs: docker compose -f %s logs -f\n' "$mode" "$compose_file"
 printf 'API/data readiness: http://127.0.0.1:8765/api/intelligence/health\n'
 printf 'Main application: http://127.0.0.1:8023\n'

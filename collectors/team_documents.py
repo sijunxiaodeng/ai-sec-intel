@@ -35,8 +35,8 @@ def parse_record(body):
         raise ValueError("资料摘要标识不符合约定")
     if row["source_category"] not in TYPE_MAP:
         raise ValueError("尚不支持该资料摘要类别")
-    if not isinstance(row.get("description"), str) or not row["description"].strip():
-        raise ValueError("资料摘要没有可引用的描述字段")
+    if not isinstance(row.get("description"), str):
+        raise ValueError("资料摘要描述字段类型无效")
     url = urllib.parse.urlsplit(row["url"])
     if url.scheme != "https" or not url.hostname or url.username or url.password or url.port not in (None, 443):
         raise ValueError("资料摘要来源需要公开 HTTPS 地址")
@@ -56,8 +56,17 @@ def parse_record(body):
 
 def extract_summary(response):
     row = parse_record(response["body"])
-    return {"title": row["title"], "parts": [("team_api.title", row["title"]),
-            ("team_api.description", row["description"])], "content_scope": "team_summary",
+    parts = [("team_api.title", row["title"])]
+    fields = ["title"]
+    if row["description"].strip():
+        parts.append(("team_api.description", row["description"]))
+        fields.append("description")
+    notice = ("当前引用来自队友接口存档的题名/描述字段，未核对原始网页、论文或法规全文；"
+              "不能把描述当成完整条款、标准要求或本项目验证结果。" if len(fields) > 1 else
+              "当前接口存档仅包含来源题名，没有摘要或正文；只能引用该题名，"
+              "不能据此推断条款、标准要求、研究结论或本项目验证结果。")
+    return {"title": row["title"], "parts": parts, "content_scope": "team_summary",
+            "team_summary_fields": fields,
             "published_at": row.get("published_at"), "published_at_basis": "team_record_metadata",
             "source_last_modified": row.get("modified_at"),
             "team_document_id": row["document_id"], "team_source": row["source"],
@@ -65,8 +74,7 @@ def extract_summary(response):
             "team_content_updated_at": row.get("content_updated_at"),
             "team_classification": row.get("classification"),
             "source_snapshot_kind": "team_api_record", "snapshot_url": response["url"],
-            "extraction_notice": "当前引用来自队友接口存档的题名/描述字段，未核对原始网页、论文或法规全文；"
-                "不能把描述当成完整条款、标准要求或本项目验证结果。"}, row
+            "extraction_notice": notice}, row
 
 
 def _embed_mode():

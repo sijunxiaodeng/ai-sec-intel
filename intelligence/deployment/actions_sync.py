@@ -16,9 +16,12 @@ import argparse
 import io
 import json
 import os
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -30,6 +33,104 @@ except ImportError:  # Direct script invocation.
 
 SYNC_MARKER = "actions_sync.json"
 WORKFLOW_DEFAULT = "intelligence-collect.yml"
+DELIVERY_STATUS = "delivery_status.json"
+MAX_RESPONSE_BYTES = 64 * 1024
+
+
+def _manifest(payload, *, repository, branch, run_id):
+    """Bind the receipt to the outgoing generation, not only an HTTP status."""
+    if len(payload) > MAX_SNAPSHOT_BYTES:
+        raise StateError("Snapshot exceeds size limit")
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        if archive.namelist().count("manifest.json") != 1:
+            raise StateError("Snapshot must contain one manifest")
+        info = archive.getinfo("manifest.json")
+        if info.file_size > MAX_RESPONSE_BYTES:
+            raise StateError("Snapshot manifest exceeds size limit")
+        manifest = json.loads(archive.read(info))
+    if (not isinstance(manifest, dict) or manifest.get("repository") != repository
+            or manifest.get("branch") != branch or manifest.get("run_id") != int(run_id)
+            or manifest.get("workflow") != WORKFLOW_DEFAULT
+            or not re.fullmatch(r"[0-9a-f]{40}", str(manifest.get("collector_commit", "")))
+            or type(manifest.get("run_number")) is not int or manifest["run_number"] <= 0):
+        raise StateError("Snapshot manifest does not match the requested delivery")
+    return manifest
+
+
+def _endpoint(url):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname
+    except ValueError:
+        raise StateError("Deploy ingest URL is invalid") from None
+    # Remote credentials must use TLS. HTTP loopback is useful for local checks.
+    local = hostname in {"localhost", "127.0.0.1", "::1"}
+    if (not hostname or any(ord(char) < 33 or ord(char) == 127 for char in url)
+            or parsed.username or parsed.password or parsed.query or parsed.fragment
+            or parsed.scheme not in {"http", "https"} or (parsed.scheme == "http" and not local)):
+        raise StateError("Deploy ingest URL must use HTTPS without URL credentials or query parameters")
+    endpoint = url.rstrip("/")
+    return endpoint if endpoint.endswith("/api/admin/actions-sync") else endpoint + "/api/admin/actions-sync"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, newurl):
+        # A redirected request must never carry the deploy bearer token elsewhere.
+        return None
+
+
+def _receipt(body, manifest):
+    try:
+        data = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise StateError("Deploy ingest returned an invalid JSON receipt") from None
+    installed = data.get("installed") if isinstance(data, dict) else None
+    lineage = ("repository", "branch", "run_id", "run_number", "collector_commit", "workflow")
+    if (not isinstance(data, dict) or data.get("ok") is not True or not isinstance(installed, dict)
+            or type(installed.get("changed")) is not bool
+            or any(installed.get(key) != manifest.get(key) for key in lineage)
+            or type(installed.get("run_id")) is not int
+            or type(installed.get("run_number")) is not int):
+        raise StateError("Deploy ingest receipt does not confirm the outgoing generation")
+    # Do not print server response bodies, paths, or user-supplied extra fields.
+    return {"ok": True, "installed": {key: installed[key] for key in lineage},
+            "changed": installed["changed"], "consumer_verified": False}
+
+
+def record_delivery(path, *, run_id, status, reason_category, receipt=None):
+    """Persist only this run's sanitized delivery facts outside the snapshot."""
+    facts = {"run_id": str(run_id), "status": status, "reason_category": reason_category,
+             "recorded_at": datetime.now(timezone.utc).isoformat(),
+             "pull_status": "unverified", "consumer_status": "unverified"}
+    if receipt:
+        facts["installed"] = receipt["installed"]
+        facts["changed"] = receipt["changed"]
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps(facts, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(target)
+    return facts
+
+
+def delivery_status(path, *, run_id, configured, push_outcome, upload_outcome):
+    """Disabled push and absent pull evidence are distinct from verified delivery."""
+    if not configured:
+        return record_delivery(path, run_id=run_id, status="disabled", reason_category="missing_ingest_configuration")
+    if upload_outcome != "success":
+        return record_delivery(path, run_id=run_id, status="blocked", reason_category="snapshot_not_uploaded")
+    try:
+        target = Path(path)
+        if target.is_symlink() or target.stat().st_size > MAX_RESPONSE_BYTES:
+            raise ValueError("Invalid delivery status")
+        facts = json.loads(target.read_text(encoding="utf-8"))
+        if (str(facts.get("run_id")) == str(run_id) and facts.get("status") == "verified"
+                and push_outcome == "success"):
+            return facts
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return record_delivery(path, run_id=run_id, status="failed" if push_outcome == "failure" else "unknown",
+                           reason_category="ingest_not_verified")
 
 
 def find_latest_state(client: GitHubClient, *, workflow: str, branch: str):
@@ -80,9 +181,10 @@ def push_snapshot(
         payload = path.read_bytes()
         if len(payload) > MAX_SNAPSHOT_BYTES:
             raise StateError("Snapshot file exceeds size limit")
-    endpoint = url.rstrip("/")
-    if not endpoint.endswith("/api/admin/actions-sync"):
-        endpoint = endpoint + "/api/admin/actions-sync"
+    manifest = _manifest(payload, repository=repository, branch=branch, run_id=run_id)
+    endpoint = _endpoint(url)
+    if not token or len(token.strip()) < 16 or any(ord(char) < 32 or ord(char) == 127 for char in token):
+        raise StateError("Deploy ingest token must contain at least 16 characters")
     request = urllib.request.Request(
         endpoint,
         data=payload,
@@ -97,17 +199,15 @@ def push_snapshot(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read()
+        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
+            body = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
-        detail = exc.read()[:400].decode("utf-8", "replace")
-        raise StateError("Deploy ingest failed: HTTP %s %s" % (exc.code, detail)) from None
-    except (OSError, urllib.error.URLError) as exc:
-        raise StateError("Deploy ingest unreachable: %s" % exc) from None
-    try:
-        return json.loads(body.decode("utf-8"))
-    except ValueError:
-        return {"ok": True, "raw": body[:200].decode("utf-8", "replace")}
+        raise StateError("Deploy ingest failed: HTTP %s" % exc.code) from None
+    except (OSError, urllib.error.URLError):
+        raise StateError("Deploy ingest unreachable") from None
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise StateError("Deploy ingest receipt exceeds size limit")
+    return _receipt(body, manifest)
 
 
 def read_sync_marker(destination: Path | str) -> dict | None:
@@ -123,7 +223,7 @@ def read_sync_marker(destination: Path | str) -> dict | None:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("pull", "install-file", "push", "status"))
+    parser.add_argument("command", choices=("pull", "install-file", "push", "status", "delivery-status"))
     parser.add_argument("--directory", default=os.getenv("ACTIONS_SYNC_DIRECTORY") or "intelligence/actions-mirror")
     parser.add_argument("--archive")
     parser.add_argument("--repository", default=os.getenv("GITHUB_REPOSITORY") or "sijunxiaodeng/ai-sec-intel")
@@ -134,9 +234,19 @@ def main(argv=None):
     parser.add_argument("--url", default=os.getenv("DEPLOY_INGEST_URL"))
     parser.add_argument("--ingest-token", default=os.getenv("DEPLOY_INGEST_TOKEN") or os.getenv("ACTIONS_INGEST_TOKEN"))
     parser.add_argument("--api-url", default=os.getenv("GITHUB_API_URL") or "https://api.github.com")
+    parser.add_argument("--status-file", default=os.getenv("DELIVERY_STATUS_FILE"))
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "delivery-status":
+            if not args.run_id or not args.status_file:
+                raise StateError("--run-id and --status-file are required for delivery status")
+            facts = delivery_status(args.status_file, run_id=args.run_id,
+                                    configured=os.getenv("DEPLOY_INGEST_CONFIGURED") == "true",
+                                    push_outcome=os.getenv("PUSH_OUTCOME", "unknown"),
+                                    upload_outcome=os.getenv("UPLOAD_OUTCOME", "unknown"))
+            print("::notice title=Actions delivery::push=%s pull=unverified consumer=unverified" % facts["status"], flush=True)
+            return 0
         if args.command == "status":
             marker = read_sync_marker(args.directory) or {}
             print(json.dumps(marker or {"synced": False}, ensure_ascii=False, indent=2))
@@ -182,9 +292,14 @@ def main(argv=None):
             directory=args.directory if not args.archive else None,
             archive=args.archive,
         )
+        if args.status_file:
+            record_delivery(args.status_file, run_id=args.run_id, status="verified",
+                            reason_category="installed_receipt_verified", receipt=result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (StateError, RuntimeError, OSError, ValueError, zipfile.BadZipFile) as exc:
+        if args.command == "push" and args.status_file and args.run_id:
+            record_delivery(args.status_file, run_id=args.run_id, status="failed", reason_category="ingest_not_verified")
         print("ERROR: %s" % exc, flush=True)
         return 2
 
