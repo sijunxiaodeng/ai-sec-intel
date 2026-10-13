@@ -34,6 +34,8 @@ function fixture(id = cve) {
 }
 let result = fixture();
 const context = vm.createContext({
+  // The full browser script initializes this state before the extracted renderer.
+  offlineDemo: false,
   document: {createElement: tag => new Element(tag)}, $: () => panel,
   api: (url, options) => { calls.push({url, options}); return typeof result === "function" ? result(url, options) : result instanceof Error ? Promise.reject(result) : Promise.resolve(result); },
   itemSourceLabels: () => [], missingText: (value, fallback) => value || fallback,
@@ -169,6 +171,24 @@ async function main() {
   context.openDetail(cve);
   await turn();
   assert.ok(errors[errors.length - 1].includes("CVE 与请求不一致"), "current detail response must bind to the requested CVE");
-  console.log("PoC source UI: actual detail GET/POST, metadata/evidence, failure, stale, mismatch and detached-response checks passed");
+
+  context.offlineDemo = true;
+  const beforeOffline = calls.length;
+  state = open(cve, fixture());
+  assert.equal(calls.length, beforeOffline, "offline opening renders supplied local code review without collecting code");
+  assert.ok(rendered(state.section).includes("1".repeat(40)), "offline details retain the supplied pinned source metadata");
+  const fetchButton = panel.children.find(row => row.tag === "button" && row.textContent === "离线演示使用已加载的样例证据");
+  assert.ok(fetchButton);
+  assert.equal(fetchButton.disabled, true);
+  fetchButton.listeners.click();
+  await turn();
+  assert.equal(calls.length, beforeOffline, "offline detail cannot fetch external documents");
+  result = fixture();
+  state.buttons[0].listeners.click();
+  await turn();
+  assert.equal(calls[calls.length - 1].url, "/api/poc-code/" + cve, "reading saved static review remains available offline");
+  assert.equal(calls[calls.length - 1].options, undefined);
+  assert.ok(rendered(state.section).includes("1".repeat(40)));
+  console.log("PoC source UI: actual detail GET/POST, metadata/evidence, failure, stale, mismatch, detached-response and offline record checks passed");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

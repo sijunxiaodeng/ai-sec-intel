@@ -1358,12 +1358,17 @@ def monitor_b_cycle():
 @app.post("/api/monitor/run")
 def monitor_run(body: MonitorRunBody):
     from database.store import StoreBusy, collection_lock
+    from automation.schedule import _RUN_LOCK
 
+    if not _RUN_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="已有采集或监测正在进行，请稍后重试")
     try:
         with collection_lock(timeout=0):
             return _monitor_run(body)
     except StoreBusy:
         raise HTTPException(status_code=409, detail="已有采集或监测正在进行，请稍后重试") from None
+    finally:
+        _RUN_LOCK.release()
 
 
 def _monitor_run(body: MonitorRunBody):
@@ -1456,24 +1461,12 @@ def _monitor_run(body: MonitorRunBody):
             external_fetches=round_stats.get("external_fetches"),
         )
         if body.sync_library:
-            library = {"team": None, "public": None}
+            library = {"team": None, "public": {"status": "skipped", "enabled": False}}
             update_stage(
-                "library_sync",
-                status="running",
-                did="同步公开资料与资料摘要",
-                phase="资料同步",
+                "library_sync", status="running", did="同步已采集资料摘要", phase="资料同步",
             )
-            # Public library sync brings research / vendor / paper into the monitor
-            # feed via _library_documents — without inventing Talos/FreeBuf.
-            try:
-                from rag.library import sync as library_sync
-
-                library["public"] = library_sync(per_source=2, include_seeds=True)
-            except ValueError as exc:
-                library["public"] = {"status": "busy", "error": str(exc)}
-            except Exception as exc:
-                library["public"] = {"status": "error", "error": type(exc).__name__}
-                warnings.append("公开资料同步失败（研究博客/厂商公告/论文等），监测流仍刷新 CVE。")
+            # B already collected public research/vendor/paper sources. Import its
+            # changes once; explicit /api/library/sync remains available for C.
             if team.get("enabled") is False:
                 library["team"] = {"status": "skipped", "enabled": False}
             elif not team.get("reachable"):
@@ -1482,28 +1475,20 @@ def _monitor_run(body: MonitorRunBody):
             else:
                 try:
                     from rag.library import sync_team_drain
-
                     library["team"] = sync_team_drain(max_documents=body.max_documents)
                 except ValueError as exc:
                     library["team"] = {"status": "busy", "error": str(exc)}
                 except Exception as exc:
                     library["team"] = {"status": "error", "error": type(exc).__name__}
-                    warnings.append("资料摘要同步失败，CVE/公开源结果仍已刷新。")
-            # Backward-compatible top-level fields for older UI.
-            pub_st = library_outcome(library.get("public"))
-            team_st = library_outcome(library.get("team"))
-            lib_bad = pub_st == "failed" and team_st in {"failed", "skipped"}
-            active_lib_states = {pub_st} if library["team"].get("enabled") is False else {pub_st, team_st}
-            library["status"] = "failed" if lib_bad else "partial" if active_lib_states != {"success"} else "success"
+                    warnings.append("资料摘要同步失败，已入库情报仍保留。")
+            team_st = library_outcome(library["team"])
+            disabled = library["team"].get("enabled") is False
+            library["status"] = "success" if disabled or team_st == "success" else "partial"
             update_stage(
-                "library_sync",
-                status="error" if lib_bad else "ok",
-                did="同步资料到资料库",
-                got="公开 %s；资料摘要 %s" % (pub_st, team_st),
-                produced="资料可供监测流展示",
-                impact="无 CVE 资料进入情报流",
-                note="失败不回滚已入库 CVE",
-                phase="资料同步",
+                "library_sync", status="skip" if disabled else "ok" if team_st == "success" else "error",
+                did="同步资料到资料库", got="资料摘要 %s" % team_st,
+                produced="资料可供监测流展示", impact="无 CVE 资料进入情报流",
+                note="失败不回滚已入库情报", phase="资料同步",
             )
         else:
             update_stage(
@@ -1534,7 +1519,8 @@ def _monitor_run(body: MonitorRunBody):
         )
         # Persist the semantic outcome after the generic pipeline finalizer.
         # In particular, partial/failed cannot be overwritten by a done state.
-        mark_run(count=inserted, keyword=keyword, **outcome)
+        mark_run(count=inserted, keyword=keyword, source_results=result.get("source_results"),
+                 received=result.get("fetched", round_stats.get("kept", 0)), **outcome)
     except HTTPException:
         try:
             finish_pipeline(ok=False, summary="监测未完成")
@@ -1578,6 +1564,8 @@ def _monitor_run(body: MonitorRunBody):
     if (result.get("source_outcomes") or {}).get("nvd") == "skipped":
         nvd["status"] = "跳过"
     osv = _step_status("OSV")
+    if (result.get("source_outcomes") or {}).get("osv") == "skipped":
+        osv["status"] = "跳过"
     b_step = _step_status("多源情报")
     if b_step["status"] == "未跑":
         b_step = _step_status("聚合库")
@@ -1608,7 +1596,7 @@ def _monitor_run(body: MonitorRunBody):
     elif isinstance(library, dict) and library.get("status") == "partial":
         c_sync = {"status": "部分", "detail": "已保留成功同步资料，未完成来源可重试"}
     else:
-        c_sync = {"status": "成功", "detail": "已尽力同步公开/资料摘要到资料库"}
+        c_sync = {"status": "成功", "detail": "已同步已采集资料摘要到资料库"}
 
     if b_cycle is None:
         b_mon = {"status": "未请求", "detail": "本轮未另刷多源情报"}
@@ -1648,6 +1636,7 @@ def _monitor_run(body: MonitorRunBody):
         "mode": "auto",
         "keyword": keyword,
         "count": int(round_stats.get("inserted") or 0),
+        "fetched": int(result.get("fetched", round_stats.get("kept", 0)) or 0),
         "kb_total": len(result["records"]),
         "round_stats": round_stats,
         "pipeline": get_pipeline(),

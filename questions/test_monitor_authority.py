@@ -23,13 +23,26 @@ class MonitorAuthorityTests(unittest.TestCase):
         team.collect.return_value = [{'cve_id': 'CVE-2026-41234'}]
         environment = dict(os.environ)
         environment.pop('ROOT_NVD_ENABLED', None)
+        environment.pop('TEAM_ONLY_COLLECT', None)
         environment.update(overrides)
+        changes = Mock()
+        changes.collect.return_value = {
+            'source': 'b_intelligence', 'items': team.collect.return_value,
+            'retracted_ids': [], 'cursor': {'epoch': 'fixture', 'seq': 1},
+        }
         with patch.dict(os.environ, environment, clear=True), \
              patch.object(monitor_agent, 'NVDCollector', return_value=nvd) as nvd_class, \
              patch.object(monitor_agent, 'OSVCollector', return_value=osv), \
-             patch.object(monitor_agent, 'IntelligenceCollector', return_value=team) as team_class, \
+             patch.object(monitor_agent, 'IntelligenceCollector', return_value=team) as legacy_class, \
+             patch.object(monitor_agent, 'IncrementalIntelligenceCollector', return_value=changes) as change_class, \
              patch('urllib.request.urlopen', side_effect=AssertionError('Unexpected live network')):
             result = monitor_agent.run('llm')
+        team_class = change_class if overrides.get('TEAM_INTEL_MODE') in {'embed', 'sidecar'} and not (
+            overrides.get('ROOT_NVD_ENABLED') == '1' or overrides.get('TEAM_ONLY_COLLECT') == '0') else legacy_class
+        if team_class is change_class:
+            legacy_class.assert_not_called()
+        else:
+            change_class.assert_not_called()
         return result, nvd_class, team_class
 
     def test_embed_does_not_repeat_nvd_polling(self):
@@ -39,6 +52,8 @@ class MonitorAuthorityTests(unittest.TestCase):
         self.assertTrue(result['stats']['nvd_disabled_duplicate'])
         self.assertIsNone(result['collectors']['nvd'])
         self.assertEqual(result['items'][0]['cve_id'], 'CVE-2026-41234')
+        self.assertEqual(result['team_changes']['cursor']['seq'], 1)
+        self.assertTrue(result['stats']['osv_disabled_duplicate'])
 
     def test_standalone_mode_keeps_the_direct_collector(self):
         result, constructor, team = self.run_monitor({'TEAM_INTEL_MODE': 'off'})
@@ -53,6 +68,13 @@ class MonitorAuthorityTests(unittest.TestCase):
         self.assertGreaterEqual(constructor.call_count, 2)
         team.assert_called_once()
         self.assertFalse(result['stats']['nvd_disabled_duplicate'])
+
+    def test_explicit_legacy_route_uses_nonincremental_collector(self):
+        result, nvd, team = self.run_monitor({'TEAM_INTEL_MODE': 'embed', 'TEAM_ONLY_COLLECT': '0'})
+        nvd.assert_not_called()
+        team.assert_called_once()
+        self.assertNotIn('team_changes', result)
+        self.assertFalse(result['stats'].get('osv_disabled_duplicate', False))
 
     def test_disabled_team_aliases_neither_query_nor_degrade_healthy_empty_poll(self):
         for mode in ('off', 'disabled', '0', 'false', 'no'):

@@ -216,11 +216,17 @@ class LibraryTest(unittest.TestCase):
 class LibraryScheduleTest(unittest.TestCase):
     def run_with(self, error=False):
         from automation.schedule import run_once, run_public_once
+        # Import before patching: pipeline keeps references to scheduler helpers.
+        from automation import pipeline
+        state = {}
         with patch("agents.orchestrator.run_collect", side_effect=TimeoutError("NVD unavailable") if error else None, return_value={"records": []}), \
              patch("api.b_monitor.b_monitor_on_refresh", return_value=False), \
              patch("rag.library.sync", return_value={"ok": 2, "attempted": 3, "sources": []}) as library, \
              patch("rag.library.sync_team_drain", return_value={"status": "ok", "ok": 2}) as team, \
-             patch("automation.schedule.ensure_state", return_value={}), patch("automation.schedule._write_state"), patch("automation.schedule.log_line"):
+             patch("automation.schedule.ensure_state", return_value=state), \
+             patch.object(pipeline, "ensure_state", return_value=state), \
+             patch.object(pipeline, "_write_state"), \
+             patch("automation.schedule._write_state"), patch("automation.schedule.log_line"):
             if error:
                 with self.assertRaises(TimeoutError):
                     run_once()

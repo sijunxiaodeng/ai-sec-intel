@@ -24,12 +24,16 @@ class TeamDisabledTests(unittest.TestCase):
         self.db = self.root / "library.sqlite3"
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        self.stack.enter_context(patch.dict(os.environ, {"TEAM_INTEL_MODE": "off"}))
+        self.stack.enter_context(patch.dict(os.environ, {
+            "TEAM_INTEL_MODE": "off", "MAIN_KB_DB_PATH": str(self.root / "knowledge.sqlite3"),
+            "MAIN_IMPORT_DEMO_CARDS": "0",
+        }))
         self.stack.enter_context(patch("urllib.request.urlopen", side_effect=AssertionError("Unexpected live network")))
         self.stack.enter_context(patch("requests.sessions.Session.request", side_effect=AssertionError("Unexpected live network")))
         self.stack.enter_context(patch.object(schedule, "STATE_PATH", self.root / "monitor.json"))
         self.stack.enter_context(patch.object(schedule, "LOG_PATH", self.root / "collect.log"))
-        for name, path in (("DATA", self.root), ("KB_PATH", self.root / "knowledge.json"),
+        for name, path in (("DATA", self.root), ("DB_PATH", self.root / "knowledge.sqlite3"),
+                           ("KB_PATH", self.root / "knowledge.json"),
                            ("CARDS_PATH", self.root / "cards.json"), ("CARDS_JS_PATH", self.root / "cards.js"),
                            ("RUNS_PATH", self.root / "runs.json")):
             self.stack.enter_context(patch.object(store, name, path))
@@ -99,7 +103,7 @@ class TeamDisabledTests(unittest.TestCase):
         self.assertEqual(data["library_sync"]["team"], {"status": "skipped", "enabled": False})
         self.assertEqual(data["source_diag"]["b_team"]["status"], "跳过")
         self.assertEqual(schedule.state()["last_status"], "success")
-        public.assert_called_once()
+        public.assert_not_called()
         team.assert_not_called()
         cycle.assert_not_called()
 
@@ -144,12 +148,18 @@ class TeamDisabledTests(unittest.TestCase):
         with patch.object(collector, "get", return_value={"body": json.dumps({"total": 0, "items": []}).encode()}) as get:
             self.assertEqual(collector.collect()["selected"], 0)
             get.assert_called_once()
-        batch = {"candidates": [], "errors": [], "total": 0, "selected": 0, "remaining": 0, "coverage": "Synthetic fixture"}
-        with patch.object(TeamDocumentCollector, "collect", return_value=batch) as collect:
+        page = {"epoch": "synthetic-disabled-override", "cursor": 0,
+                "next_cursor": 0, "through": 0, "reset": False,
+                "has_more": False, "changes": []}
+        with patch.object(TeamDocumentCollector, "get", return_value={"body": json.dumps(page).encode()}) as get:
             result = sync_team(self.db, base_url="http://127.0.0.1:8765")
             self.assertEqual(result["status"], "ok")
-            collect.assert_called_once()
-        injected = Mock()
+            self.assertIs(result["source"]["cursor_committed"], True)
+            get.assert_called_once()
+            self.assertIn("/api/team/changes?", get.call_args.args[0])
+        batch = {"candidates": [], "errors": [], "total": 0, "selected": 0,
+                 "remaining": 0, "coverage": "Synthetic fixture"}
+        injected = Mock(use_changefeed=False, disabled=False)
         injected.base_url = "http://127.0.0.1:8765"
         injected.collect.return_value = batch
         result = sync_team(self.db, collector=injected)

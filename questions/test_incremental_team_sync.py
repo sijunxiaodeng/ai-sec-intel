@@ -61,6 +61,28 @@ class IncrementalSyncTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         local.assert_called_once()
 
+    def test_monitor_keywords_never_filter_changes_or_ack_before_persistence(self):
+        from agents import monitor_agent
+        page = {"epoch": "embedded", "reset": False, "cursor": 0, "through": 2,
+                "next_cursor": 2, "has_more": False, "changes": [
+                    {"seq": 1, "entity_id": "CVE-2026-55551", "operation": "upsert",
+                     "item": {"cve_id": "CVE-2026-55551", "source": "NVD", "product": "torchserve",
+                              "description": "Synthetic AI model serving vulnerability"}},
+                    {"seq": 2, "entity_id": "CVE-2026-55552", "operation": "retract"},
+                ]}
+        with patch.dict(os.environ, {"TEAM_INTEL_MODE": "embed", "TEAM_ONLY_COLLECT": "1"}), \
+             patch("database.store.get_sync_cursor", return_value={}), \
+             patch("database.store.set_sync_cursor") as acknowledge, \
+             patch("api.b_embed.list_changes_page", return_value=page) as local, \
+             patch("urllib.request.urlopen", side_effect=AssertionError("Unexpected HTTP")):
+            result = monitor_agent.run("vllm")
+        self.assertEqual([item["cve_id"] for item in result["items"]], ["CVE-2026-55551"])
+        self.assertEqual(result["team_changes"]["retracted_ids"], ["CVE-2026-55552"])
+        self.assertEqual(result["team_changes"]["cursor"]["seq"], 2)
+        self.assertEqual((result["stats"]["hit"], result["stats"]["kept"]), (2, 1))
+        acknowledge.assert_not_called()
+        local.assert_called_once_with(kind="cve", cursor=0, through=None, epoch=None, limit=100)
+
     def test_more_than_200_documents_are_eventually_imported_across_restart(self):
         fixture = ChangeDocumentFixture()
         for _ in range(9):

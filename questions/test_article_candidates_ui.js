@@ -21,6 +21,8 @@ let result = {detail: "Local fixture", notice: "Candidates require review", item
   evidence: [{text: "<img onerror=DO_NOT_EXECUTE>", citation_id: "DOC-1/LIB-1", url: "https://arxiv.org/abs/2401.12345", locator: "abstract", source_response_sha256: "a".repeat(64)}]
 }]};
 const context = vm.createContext({
+  // The full browser script initializes this state before the extracted renderer.
+  offlineDemo: false,
   document: {createElement: tag => new Element(tag)}, $: () => panel,
   api: url => { calls.push(url); return result instanceof Error ? Promise.reject(result) : Promise.resolve(result); },
   itemSourceLabels: () => [], missingText: (value, fallback) => value || fallback,
@@ -55,6 +57,23 @@ async function main() {
   button.listeners.click();
   await turn();
   assert.ok(descendants(section).some(row => row.textContent === result.detail));
-  console.log("article candidates UI: detail -> GET -> evidence/error/empty rendering passed");
+
+  context.offlineDemo = true;
+  const beforeOffline = calls.length;
+  context.renderDetail({cve_id: "CVE-2099-90002", references: [], papers: []});
+  const fetchButton = panel.children.find(row => row.tag === "button" && row.textContent === "离线演示使用已加载的样例证据");
+  assert.ok(fetchButton, "offline details explain why external document collection is unavailable");
+  assert.equal(fetchButton.disabled, true);
+  fetchButton.listeners.click();
+  await turn();
+  assert.equal(calls.length, beforeOffline, "offline collection guard also rejects programmatic clicks");
+  const offlineSection = panel.querySelector(".article-candidates");
+  const offlineSearch = offlineSection.children.find(row => row.tag === "button");
+  offlineSearch.listeners.click();
+  await turn();
+  assert.equal(calls[calls.length - 1], "/api/article-candidates/CVE-2099-90002", "local candidate search remains available offline");
+  assert.ok(descendants(offlineSection).some(row => row.textContent === result.detail));
+  assert.equal(offlineSearch.disabled, false);
+  console.log("article candidates UI: detail -> GET -> evidence/error/empty rendering and offline local search passed");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

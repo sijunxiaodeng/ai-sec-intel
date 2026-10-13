@@ -53,7 +53,7 @@ def _monitor_outcome(monitored):
     labels = {"nvd": "NVD", "osv": "OSV", "aggregate": "多源情报"}
     sources, warnings = {}, []
     for name, label in labels.items():
-        if name == "nvd" and stats.get("nvd_disabled_duplicate"):
+        if name in {"nvd", "osv"} and stats.get(name + "_disabled_duplicate"):
             sources[name] = "skipped"
         elif name == "aggregate" and stats.get("aggregate_disabled"):
             sources[name] = "skipped"
@@ -259,7 +259,10 @@ def run_enrich():
     apply_enrichment([enriched_record(record) for record in records], expected_revisions=expected)
     saved = load_kb()
     detail = "已查询 EPSS、CISA KEV，并按编号检索论文。对上编号的论文 %d 篇。" % attached
-    if feed.get("epss_error") or feed.get("kev_error") or paper_error:
+    paper_source_error = paper_error and (
+        not paper_status or any(batch.get("status") == "error" for batch in paper_status.get("batches", []))
+    )
+    if feed.get("epss_error") or feed.get("kev_error") or paper_source_error:
         detail = "部分公开源没有连通，失败项已跳过，已有字段仍保留。"
     if paper_error:
         detail += " 论文查询状态：" + str(paper_error)[:500]

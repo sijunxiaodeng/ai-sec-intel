@@ -281,11 +281,13 @@ def combine_monitor_outcome(result, *, b_cycle=None, libraries=()):
 
 
 def mark_run(*, count=0, keyword="", error="", status=None, warnings=None,
-             metrics=None, source_results=None):
+             metrics=None, source_results=None, received=None):
     """Update monitor state after a manual /api/monitor/run (or other external cycle)."""
     data = ensure_state()
     data["last_run"] = _now()
     data["last_count"] = int(count or 0)
+    if received is not None:
+        data["last_received"] = int(received or 0)
     data["last_keyword"] = keyword or data.get("last_keyword") or ""
     data["last_error"] = error or ""
     status = status or ("failed" if error else "success")
@@ -333,7 +335,6 @@ def run_once(keyword=None):
 
 def _run_once(keyword=None):
     from agents.orchestrator import run_collect
-    from rag.library import sync as sync_library
     from rag.library import sync_team_drain
     from automation.pipeline import begin_pipeline, update_stage, finish_pipeline
 
@@ -345,7 +346,7 @@ def _run_once(keyword=None):
         log_line("跳过重叠的自动监测请求")
         return dict(ensure_state(), skipped="overlapping_cycle")
 
-    collect_error, b_result, result, library, team_library = None, None, None, None, None
+    collect_error, b_result, result, team_library = None, None, None, None
     try:
         begin_pipeline()
         mark_running(phase="监测刷新中", keyword=keyword)
@@ -390,18 +391,15 @@ def _run_once(keyword=None):
             on_phase("monitoring", status="error", note=result["error"])
             on_phase("persist", status="skip", note="采集流程未完成，不追加新的入库操作")
 
-        # Library synchronization is independent of CVE collection success.
+        # B owns source collection. Drain its committed documents independently
+        # of CVE success; public catalog fetching has its own slower schedule.
         on_phase("library_sync", status="running", phase="资料同步",
                  did="按持久游标同步知识资料")
-        try:
-            library = sync_library(include_seeds=False)
-        except Exception as exc:
-            library = {"status": "error", "error": "公开资料同步未完成（%s）" % type(exc).__name__}
         try:
             team_library = sync_team_drain(max_documents=200)
         except Exception as exc:
             team_library = {"status": "error", "error": "资料摘要同步未完成（%s）" % type(exc).__name__}
-        libraries = (("公开资料同步", library), ("资料摘要同步", team_library))
+        libraries = (("资料摘要同步", team_library),)
         library_states = [(label, library_outcome(value)) for label, value in libraries]
         configured_skip = library_outcome(team_library) == "skipped" and team_library.get("enabled") is False
         issues = [
@@ -410,14 +408,8 @@ def _run_once(keyword=None):
         ]
         data = ensure_state()
         data["library_last_run"] = _now()
-        data["library_last_ok"] = int(library.get("ok") or 0) + int(team_library.get("ok") or 0)
+        data["library_last_ok"] = int(team_library.get("ok") or 0)
         data["library_last_error"] = "；".join(issues)
-        data["library_source_errors"] = [
-            row["source_id"] for row in library.get("sources", [])
-            if row.get("status") in {"error", "failed"} and row.get("source_id")
-        ]
-        data["library_public_last_status"] = library_outcome(library)
-        data["library_public_last_ok"] = int(library.get("ok") or 0)
         data["library_team_last_status"] = library_outcome(team_library)
         data["library_team_last_ok"] = int(team_library.get("ok") or 0)
         data["library_team_last_checked_at"] = _now()
@@ -438,26 +430,28 @@ def _run_once(keyword=None):
         on_phase(
             "library_sync",
             status="error" if active_states and all(state == "failed" for state in active_states) else "ok",
-            got="公开 %s；资料摘要 %s" % (library_outcome(library), library_outcome(team_library)),
-            produced="本轮成功 %d 条" % (int(library.get("ok") or 0) + int(team_library.get("ok") or 0)),
+            got="资料摘要 %s；公开资料由独立任务同步" % library_outcome(team_library),
+            produced="本轮成功 %d 条" % int(team_library.get("ok") or 0),
             note="；".join(issues) if issues else "已启用的资料同步完成（含合法空轮）",
         )
         outcome = combine_monitor_outcome(result, b_cycle=b_result, libraries=libraries)
         if outcome["status"] == "failed":
             on_phase("monitoring", status="error", note=outcome["error"])
         round_stats = result.get("round_stats") or {}
-        mark_run(
-            count=round_stats.get("inserted", 0),
-            keyword=keyword,
-            metrics={key: round_stats.get(key, 0) for key in ("hit", "kept", "inserted", "merged", "external_fetches")},
-            source_results=result.get("source_results"),
-            **outcome,
-        )
         finish_pipeline(
             ok=outcome["status"] == "success",
             summary=outcome.get("error") or "",
             metrics=round_stats,
             tech_detail=result.get("tech_detail"),
+        )
+        # Preserve partial and failed outcomes after the generic finalizer.
+        mark_run(
+            count=round_stats.get("inserted", 0),
+            received=result.get("fetched", round_stats.get("kept", 0)),
+            keyword=keyword,
+            metrics={key: round_stats.get(key, 0) for key in ("hit", "kept", "inserted", "merged", "external_fetches")},
+            source_results=result.get("source_results"),
+            **outcome,
         )
         log_line(
             "自动监测 %s，关键词 %s，本轮新增 %d；%s"
@@ -483,19 +477,31 @@ def run_public_once():
     from rag.library import sync as sync_library
     try:
         library = sync_library(include_seeds=False)
-        failures = [r["source_id"] for r in library["sources"] if r["status"] == "error"]
+        failures = [r["source_id"] for r in library.get("sources", [])
+                    if r.get("status") in {"error", "failed"} and r.get("source_id")]
+        outcome = library_outcome(library)
+        error = "" if outcome == "success" else "公开资料同步未全部完成"
         return _patch_state(
             library_last_run=_now(),
             library_last_epoch=time.time(),
-            library_last_ok=library["ok"],
-            library_last_error="部分来源失败" if failures else "",
+            library_last_ok=int(library.get("ok") or 0),
+            library_last_error=error,
             library_source_errors=failures,
+            library_public_last_run=_now(),
+            library_public_last_status=outcome,
+            library_public_last_ok=int(library.get("ok") or 0),
+            library_public_last_error=error,
         )
     except Exception as exc:
         return _patch_state(
             library_last_run=_now(),
             library_last_epoch=time.time(),
+            library_last_ok=0,
             library_last_error=type(exc).__name__,
+            library_public_last_run=_now(),
+            library_public_last_status="failed",
+            library_public_last_ok=0,
+            library_public_last_error=type(exc).__name__,
         )
 
 
@@ -524,7 +530,7 @@ def _loop():
             log_line("启动首轮自动监测失败（将按间隔重试）：%s: %s" % (type(exc).__name__, exc))
     else:
         log_line("定时监测已启动，间隔 %d 分钟。AUTO_MONITOR_ON_START 已关闭，启动不立即抓取。" % INTERVAL_MINUTES)
-        deadline += INTERVAL_MINUTES * 60
+    deadline += INTERVAL_MINUTES * 60
     while not _STOP.is_set():
         if _STOP.wait(max(0, deadline - time.monotonic())):
             return

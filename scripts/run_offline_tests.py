@@ -16,6 +16,11 @@ def main():
     args = parser.parse_args()
     # B intentionally has its own top-level collectors/storage packages.
     sys.path.insert(0, str(Path.cwd()))
+    # Shared protocol helpers live in the repository root. Keep them available
+    # when running B's tests without letting A's collectors shadow B's package.
+    repository_root = str(Path(__file__).resolve().parents[1])
+    if repository_root not in sys.path:
+        sys.path.append(repository_root)
     original_connect, original_connect_ex = socket.socket.connect, socket.socket.connect_ex
 
     def guard(address):

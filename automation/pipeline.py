@@ -245,7 +245,8 @@ def finish_pipeline(*, ok=True, summary="", metrics=None, tech_detail=None):
     pipe["finished_at"] = _now()
     pipe["elapsed_sec"] = _elapsed_sec(pipe.get("started_at"), pipe["finished_at"])
     if metrics:
-        pipe["metrics"].update({k: int(v) for k, v in metrics.items() if v is not None})
+        pipe["metrics"].update({k: int(v) for k, v in metrics.items()
+                                if k in empty_pipeline()["metrics"] and v is not None})
     if tech_detail is not None:
         pipe["tech_detail"] = (tech_detail or "")[:500]
     # A finished cycle must not leave the UI showing a permanently running step.

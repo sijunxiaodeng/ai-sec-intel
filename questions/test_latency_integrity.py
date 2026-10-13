@@ -73,18 +73,46 @@ class LatencyIntegrityTests(unittest.TestCase):
             pass
         waits = []
         class Event:
+            def is_set(self):
+                return False
+
             def wait(self, seconds):
                 waits.append(seconds)
                 if len(waits) == 2:
                     raise StopLoop()
-        with patch.object(schedule.threading, 'Event', Event), \
+        with patch.object(schedule, '_STOP', Event()), \
              patch.object(schedule, 'AUTO_ENABLED', True), \
              patch.object(schedule, 'AUTO_ON_START', False), \
              patch.object(schedule, 'INTERVAL_MINUTES', 15), \
+             patch.object(schedule, 'ensure_state', return_value={}), \
+             patch.object(schedule.time, 'monotonic', return_value=0), \
              patch.object(schedule, 'log_line'):
             with self.assertRaises(StopLoop):
                 schedule._loop()
         self.assertEqual(waits, [2.0, 900])
+
+    def test_immediate_startup_cycle_waits_before_the_next_round(self):
+        waits = []
+
+        class Event:
+            def is_set(self):
+                return False
+
+            def wait(self, seconds):
+                waits.append(seconds)
+                return len(waits) == 2
+
+        with patch.object(schedule, '_STOP', Event()), \
+             patch.object(schedule, 'AUTO_ENABLED', True), \
+             patch.object(schedule, 'AUTO_ON_START', True), \
+             patch.object(schedule, 'INTERVAL_MINUTES', 15), \
+             patch.object(schedule, 'ensure_state', return_value={}), \
+             patch.object(schedule.time, 'monotonic', return_value=0), \
+             patch.object(schedule, 'log_line'), \
+             patch.object(schedule, 'run_once') as run:
+            schedule._loop()
+        run.assert_called_once_with(schedule.DEFAULT_KEYWORDS)
+        self.assertEqual(waits, [2, 900])
 
     def test_disabled_scheduler_starts_no_thread_or_timer_and_has_no_next_run(self):
         with patch.object(schedule, 'AUTO_ENABLED', False), \

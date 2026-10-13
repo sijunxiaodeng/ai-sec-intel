@@ -34,8 +34,9 @@ class MonitorRefreshTest(unittest.TestCase):
         }
 
         def collect(keyword, *, on_phase=None):
-            on_phase("monitoring", status="ok")
-            on_phase("persist", status="ok")
+            if on_phase:
+                on_phase("monitoring", status="ok")
+                on_phase("persist", status="ok")
             return self.result
 
         self.collect = self.enterContext(patch.object(self.api, "run_collect", side_effect=collect))
@@ -67,7 +68,7 @@ class MonitorRefreshTest(unittest.TestCase):
         self.sync.return_value = {"status": "partial", "attempted": 7, "ok": 3}
         body = self.client.post("/api/monitor/run", json={}).json()
         self.assertEqual(body["status"], "partial")
-        self.assertEqual(body["pipeline"]["status"], "error")
+        self.assertEqual(body["pipeline"]["status"], "partial")
         library_stage = next(stage for stage in body["pipeline"]["stages"]
                              if stage["id"] == "library_sync")
         self.assertEqual(library_stage["status"], "error")
@@ -76,7 +77,10 @@ class MonitorRefreshTest(unittest.TestCase):
     def test_failed_sync_finishes_progress_and_releases_cycle_lock(self):
         self.collect.side_effect = ConnectionError("B unavailable")
         response = self.client.post("/api/monitor/run", json={})
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "failed")
+        self.assertIn("ConnectionError", response.json()["error"])
+        self.sync.assert_called_once()
         self.assertFalse(schedule.state()["running"])
         self.assertEqual(schedule.state()["last_status"], "failed")
         self.assertEqual(pipeline.get_pipeline()["status"], "error")
@@ -88,7 +92,8 @@ class MonitorRefreshTest(unittest.TestCase):
     def test_legacy_collect_uses_same_statistics_without_public_fetch(self):
         response = self.client.post("/api/collect", json={"keyword": "llm"})
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["count"], 2)
+        self.assertEqual(response.json()["count"], 0)
+        self.assertEqual(response.json()["round_stats"]["inserted"], 2)
         self.sync.assert_not_called()
         self.public.assert_not_called()
 

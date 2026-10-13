@@ -40,6 +40,10 @@ class StoreBusy(TimeoutError):
     """Another writer/cycle holds the collection lock; retry the operation."""
 
 
+class StoreWriteError(OSError):
+    """Export publication failed and a retained backup needs recovery."""
+
+
 from contextlib import contextmanager
 import errno
 import threading
@@ -238,7 +242,9 @@ def _field_meta(record, field, value, observed_at):
         return dict(stored)
     stamps = []
     if isinstance(value, dict):
-        stamps.extend(value.get(key) for key in ("updated_at", "retrieved_at", "fetched_at", "date"))
+        stamps.extend(value.get(key) for key in ("updated_at", "retrieved_at", "fetched_at", "date", "queried_at"))
+        if field in {"epss", "kev"}:
+            stamps.append((value.get("latest_attempt") or {}).get("queried_at"))
     # EPSS / KEV have their own publication/observation clocks. A CVE edit
     # cannot make an older feed result appear newer than a fresh feed fetch.
     if field not in {"epss", "kev"}:
@@ -256,6 +262,8 @@ def _field_meta(record, field, value, observed_at):
 def _pick(old, new, field, old_value, new_value, observed_at):
     old_meta = _field_meta(old, field, old_value, observed_at)
     new_meta = _field_meta(new, field, new_value, observed_at)
+    if field in {"epss", "kev"}:
+        return _pick_feed(old, new, field, old_value, new_value, old_meta, new_meta, observed_at)
     if old_value == new_value and old_meta.get("source") == new_meta.get("source") and new_meta.get("time_basis") == "observed":
         return old_value, old_meta
     old_quality, new_quality = old_meta.get("quality", 0), new_meta.get("quality", 0)
@@ -270,6 +278,42 @@ def _pick(old, new, field, old_value, new_value, observed_at):
         new_rank = (_authority(new_meta.get("source")), new_meta.get("time_basis") == "source", _time(new_meta.get("updated_at")))
         choose_new = new_rank >= old_rank
     return (new_value, new_meta) if choose_new else (old_value, old_meta)
+
+
+def _pick_feed(old, new, field, previous, incoming, old_meta, new_meta, observed_at):
+    """Order feed observations by freshness, including empty and failed queries."""
+    from enrichment.service import merge_feed
+
+    if incoming is None:
+        return previous, old_meta
+    if isinstance(previous, dict):
+        old_rank = (_authority(old_meta.get("source")), old_meta.get("time_basis") == "source", _time(old_meta.get("updated_at")))
+        new_rank = (_authority(new_meta.get("source")), new_meta.get("time_basis") == "source", _time(new_meta.get("updated_at")))
+        if new_rank < old_rank:
+            return previous, old_meta
+    # A successful empty response is current evidence, even when an older
+    # response contained a score. Malformed successes cannot replace good data.
+    if not _quality(field, incoming, new) and (not isinstance(incoming, dict) or incoming.get("status") != "error"):
+        if _quality(field, previous, old):
+            return previous, old_meta
+    if isinstance(incoming, dict) and incoming.get("retained_previous") and _quality(field, previous, old):
+        attempt = incoming.get("latest_attempt") or {}
+        old_time = _feed_observation_time(previous)
+        new_time = _feed_observation_time(incoming)
+        if attempt.get("status") == "error" and old_time and (not new_time or new_time <= old_time):
+            # A reader may have fetched against a stale successful snapshot.
+            # Keep the newer committed observation while recording its failure.
+            incoming = dict(attempt, status="error")
+    value = merge_feed(previous, incoming)
+    if value == previous:
+        return previous, old_meta
+    return value, _field_meta(new, field, value, observed_at)
+
+
+def _feed_observation_time(value):
+    if not isinstance(value, dict):
+        return ""
+    return max((_time(value.get(key)) for key in ("queried_at", "retrieved_at", "fetched_at", "updated_at", "date")), default="")
 
 
 def _merge_links(old, new):
@@ -446,8 +490,7 @@ def upsert(records, *, return_stats=False):
         counts = _write_records(con, records)
         rows = _read_records(con)
         # Exports serialize under the writer lock; SQLite remains authoritative.
-        export_cards(rows)
-        con.commit()
+        export_cards(rows, commit=con.commit)
         return dict(counts, records=rows, total=len(rows)) if return_stats else rows
     except BaseException:
         con.rollback()
@@ -457,14 +500,68 @@ def upsert(records, *, return_stats=False):
 
 
 def _atomic_text(path, text):
+    _publish_texts({path: text})
+
+
+def _replace(source, target):
+    """Retry transient Windows reader sharing conflicts for a finite budget."""
+    deadline = time.monotonic() + 0.5
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(min(0.025, max(0, deadline - time.monotonic())))
+
+
+def _staged_file(path, content, kind):
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + "." + kind + "-", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(temp_path, path)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return Path(temporary)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def _publish_texts(outputs, *, commit=None):
+    """Restore projections if publication or the authoritative commit fails."""
+    pending, backups, published, retained = {}, {}, [], set()
+    try:
+        for path, text in outputs.items():
+            pending[path] = _staged_file(path, text.encode("utf-8"), "pending")
+            backups[path] = _staged_file(path, path.read_bytes(), "backup") if path.exists() else None
+        for path, temporary in pending.items():
+            _replace(temporary, path)
+            published.append(path)
+        if commit is not None:
+            commit()
+    except BaseException as error:
+        failures = []
+        for path in reversed(published):
+            try:
+                backup = backups[path]
+                if backup is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _replace(backup, path)
+            except OSError:
+                if backups[path] is not None:
+                    retained.add(backups[path])
+                failures.append(str(path))
+        if failures:
+            raise StoreWriteError("Export rollback failed; recover retained backups for: " + ", ".join(failures)) from error
+        raise
     finally:
-        Path(temp_path).unlink(missing_ok=True)
+        for temporary in [*pending.values(), *backups.values()]:
+            if temporary is not None and temporary not in retained:
+                temporary.unlink(missing_ok=True)
 
 
 def upsert_stats(records):
@@ -472,15 +569,14 @@ def upsert_stats(records):
     return upsert(records, return_stats=True)
 
 
-def export_cards(records):
+def export_cards(records, *, commit=None):
     cards = []
     for record in records:
         item = record.get("item") or {}
         cvss = record.get("cvss") or {}
         cards.append(normalize(dict(item, cvss=cvss.get("score"), references=record.get("references") or [])))
     text = json.dumps(cards, ensure_ascii=False, indent=2)
-    _atomic_text(CARDS_PATH, text)
-    _atomic_text(CARDS_JS_PATH, "window.CARDS = %s;\n" % text)
+    _publish_texts({CARDS_PATH: text, CARDS_JS_PATH: "window.CARDS = %s;\n" % text}, commit=commit)
 
 
 def get_record(cve_id, include_out_of_scope=False):
@@ -530,8 +626,7 @@ def retract(cve_ids):
     try:
         con.execute("BEGIN IMMEDIATE")
         changed = _retract(con, cve_ids)
-        export_cards(_read_records(con))
-        con.commit()
+        export_cards(_read_records(con), commit=con.commit)
         return changed
     except BaseException:
         con.rollback()
@@ -594,7 +689,7 @@ def apply_enrichment(records, expected_revisions, job_tokens=None):
                     continue
             for field in ("epss", "kev"):
                 value = incoming.get(field)
-                if isinstance(value, dict) and not any(value.get(key) for key in ("retrieved_at", "fetched_at", "updated_at", "date")):
+                if isinstance(value, dict) and not any(value.get(key) for key in ("retrieved_at", "fetched_at", "updated_at", "date", "queried_at")):
                     incoming[field] = dict(value, retrieved_at=now)
             merged = merge_records(current, incoming, observed_at=now)
             # Only derived dimensions and approved local assessments may change.
@@ -619,8 +714,9 @@ def apply_enrichment(records, expected_revisions, job_tokens=None):
                         (cve_id, now, "enrich", payload))
             accepted.append(cve_id)
         if accepted:
-            export_cards(_read_records(con))
-        con.commit()
+            export_cards(_read_records(con), commit=con.commit)
+        else:
+            con.commit()
         return accepted
     except BaseException:
         con.rollback()
@@ -697,8 +793,7 @@ def apply_sync_page(records, *, source, cursor, retracted_ids=(), return_stats=F
         _retract(con, retracted_ids)
         _set_sync_cursor(con, source, cursor)
         rows = _read_records(con)
-        export_cards(rows)
-        con.commit()
+        export_cards(rows, commit=con.commit)
         return dict(counts, records=rows, total=len(rows)) if return_stats else rows
     except BaseException:
         con.rollback()

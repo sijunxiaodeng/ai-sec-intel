@@ -10,7 +10,7 @@ from agents import orchestrator
 from api.app import app
 from automation import schedule
 from models import enriched_record, intelligence_item
-from rag.library import sync_team as actual_sync_team
+from rag.library import sync_team as actual_sync_team, sync_team_drain as actual_sync_team_drain
 
 
 def record(number):
@@ -42,7 +42,7 @@ class OutcomeFixture(unittest.TestCase):
         self.stack.enter_context(patch.object(schedule, "STATE_PATH", root / "monitor.json"))
         self.stack.enter_context(patch.object(schedule, "LOG_PATH", root / "collect.log"))
         self.stack.enter_context(patch("api.b_monitor.b_monitor_on_refresh", return_value=False))
-        self.team_sync = self.stack.enter_context(patch("rag.library.sync_team", return_value={"status": "ok", **EMPTY_LIBRARY}))
+        self.team_sync = self.stack.enter_context(patch("rag.library.sync_team_drain", return_value={"status": "ok", **EMPTY_LIBRARY}))
         self.stack.enter_context(patch("urllib.request.urlopen", side_effect=AssertionError("Unexpected live network")))
         self.stack.enter_context(patch("requests.sessions.Session.request", side_effect=AssertionError("Unexpected live network")))
         self.old = [record(6101)]
@@ -62,7 +62,7 @@ class OutcomeFixture(unittest.TestCase):
     def api_patches(self, library=None):
         self.stack.enter_context(patch("api.app._team_reachable_probe", return_value={"reachable": True}))
         public = self.stack.enter_context(patch("rag.library.sync", return_value=library or EMPTY_LIBRARY))
-        team = self.stack.enter_context(patch("rag.library.sync_team", return_value={"status": "ok", **EMPTY_LIBRARY}))
+        team = self.stack.enter_context(patch("rag.library.sync_team_drain", return_value={"status": "ok", **EMPTY_LIBRARY}))
         return public, team
 
 
@@ -134,7 +134,7 @@ class ManualOutcomeTest(OutcomeFixture):
         self.assertEqual(data["pipeline"]["status"], "error")
         self.assertEqual(data["source_diag"]["nvd"]["status"], "跳过")
         self.assertEqual([row["cve_id"] for row in data["items"]], ["CVE-2026-6101"])
-        public.assert_called_once()
+        public.assert_not_called()
         team.assert_called_once()
         status = self.client.get("/api/monitor/status?light=1").json()
         self.assertEqual(status["last_status"], "failed")
@@ -177,16 +177,19 @@ class ManualOutcomeTest(OutcomeFixture):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "failed")
         self.assertIn("TimeoutError", response.json()["error"])
-        public.assert_called_once()
+        public.assert_not_called()
         team.assert_called_once()
 
     def test_document_failures_without_exception_do_not_look_like_empty_success(self):
         self.source_patches(monitor_result(osv="success", aggregate="success"))
-        library = {"attempted": 1, "ok": 0, "sources": [{"source_id": "blog", "status": "error"}]}
-        self.api_patches(library=library)
+        library = {"status": "partial", "attempted": 1, "ok": 0, "sources": [{"source_id": "blog", "status": "error"}]}
+        public, team = self.api_patches()
+        team.return_value = library
         data = self.client.post("/api/monitor/run", json={"sync_library": True}).json()
         self.assertEqual(data["status"], "partial")
-        self.assertIn("公开资料同步", data["error"])
+        self.assertIn("资料摘要同步", data["error"])
+        public.assert_not_called()
+        team.assert_called_once()
         self.assertEqual(data["library_sync"]["status"], "partial")
 
     def test_failed_b_and_osv_cannot_be_rescued_by_reading_cached_team_records(self):
@@ -210,8 +213,8 @@ class ScheduledOutcomeTest(OutcomeFixture):
         self.assertTrue(state["last_error"])
         self.assertFalse(state["running"])
         self.assertEqual(state["pipeline"]["status"], "error")
-        library.assert_called_once_with(include_seeds=False)
-        self.team_sync.assert_called_once_with(max_documents=30)
+        library.assert_not_called()
+        self.team_sync.assert_called_once_with(max_documents=200)
 
     def test_scheduled_empty_success_clears_error_and_partial_is_separate(self):
         schedule.mark_run(status="failed", error="Old source outage")
@@ -220,18 +223,21 @@ class ScheduledOutcomeTest(OutcomeFixture):
             success = schedule.run_once()
         self.assertEqual(success["last_status"], "success")
         self.assertEqual(success["last_error"], "")
-        with patch("rag.library.sync", return_value={"attempted": 1, "ok": 0, "sources": []}):
+        self.team_sync.return_value = {"status": "partial", "attempted": 1, "ok": 0}
+        with patch("rag.library.sync") as public:
             degraded = schedule.run_once()
+        public.assert_not_called()
         self.assertEqual(degraded["last_status"], "partial")
-        self.assertIn("公开资料同步", degraded["last_error"])
+        self.assertEqual(degraded["pipeline"]["status"], "partial")
+        self.assertIn("资料摘要同步", degraded["last_error"])
 
     def test_scheduled_exception_records_failure_after_independent_sync(self):
         self.stack.enter_context(patch("agents.orchestrator.run_collect", side_effect=TimeoutError("Synthetic outage")))
         with patch("rag.library.sync", return_value=EMPTY_LIBRARY) as library:
             with self.assertRaises(TimeoutError):
                 schedule.run_once()
-        library.assert_called_once_with(include_seeds=False)
-        self.team_sync.assert_called_once_with(max_documents=30)
+        library.assert_not_called()
+        self.team_sync.assert_called_once_with(max_documents=200)
         self.assertEqual(schedule.state()["last_status"], "failed")
         self.assertIn("TimeoutError", schedule.state()["last_error"])
         self.assertFalse(schedule._RUN_LOCK.locked())
@@ -246,54 +252,58 @@ class ScheduledOutcomeTest(OutcomeFixture):
         self.assertEqual(state["last_status"], "partial")
         self.assertIn("来源刷新", state["last_error"])
 
-    def test_scheduled_round_imports_public_and_latest_team_summaries(self):
+    def test_scheduled_round_drains_latest_team_summaries_without_public_fetch(self):
         self.source_patches(monitor_result(osv="success", aggregate="success"))
         self.team_sync.return_value = {"status": "ok", "attempted": 3, "ok": 3}
         with patch("rag.library.sync", return_value={"attempted": 2, "ok": 2, "sources": []}) as public:
             state = schedule.run_once()
-        public.assert_called_once_with(include_seeds=False)
-        self.team_sync.assert_called_once_with(max_documents=30)
+        public.assert_not_called()
+        self.team_sync.assert_called_once_with(max_documents=200)
         self.assertEqual(state["last_status"], "success")
-        self.assertEqual(state["library_last_ok"], 5)
-        self.assertEqual(state["library_public_last_ok"], 2)
+        self.assertEqual(state["library_last_ok"], 3)
+        self.assertNotIn("library_public_last_ok", state)
         self.assertEqual(state["library_team_last_ok"], 3)
         self.assertEqual(state["library_team_last_status"], "success")
         self.assertEqual(state["library_team_last_error"], "")
         self.assertTrue(state["library_team_last_run"])
 
-    def test_public_exception_does_not_stop_team_summary_sync(self):
+    def test_independent_public_exception_does_not_stop_team_summary_sync(self):
         self.source_patches(monitor_result(osv="success", aggregate="success"))
         self.team_sync.return_value = {"status": "ok", "attempted": 1, "ok": 1}
         with patch("rag.library.sync", side_effect=ConnectionError("Synthetic public source outage")) as public:
+            public_state = schedule.run_public_once()
             state = schedule.run_once()
-        public.assert_called_once()
-        self.team_sync.assert_called_once_with(max_documents=30)
-        self.assertEqual(state["last_status"], "partial")
-        self.assertIn("公开资料同步", state["last_error"])
+        public.assert_called_once_with(include_seeds=False)
+        self.team_sync.assert_called_once_with(max_documents=200)
+        self.assertEqual(public_state["library_public_last_status"], "failed")
+        self.assertEqual(state["last_status"], "success")
         self.assertEqual(state["library_public_last_status"], "failed")
         self.assertEqual(state["library_team_last_status"], "success")
         self.assertEqual(state["library_last_ok"], 1)
 
-    def test_team_exception_keeps_public_results_and_visible_degradation(self):
+    def test_team_exception_keeps_independent_public_results_and_visible_degradation(self):
         self.source_patches(monitor_result(osv="success", aggregate="success"))
         self.team_sync.side_effect = ConnectionError("Synthetic team outage")
         with patch("rag.library.sync", return_value={"attempted": 2, "ok": 2, "sources": []}) as public:
+            schedule.run_public_once()
             state = schedule.run_once()
-        public.assert_called_once()
-        self.team_sync.assert_called_once_with(max_documents=30)
+        public.assert_called_once_with(include_seeds=False)
+        self.team_sync.assert_called_once_with(max_documents=200)
         self.assertEqual(state["last_status"], "partial")
         self.assertIn("资料摘要同步", state["last_error"])
         self.assertEqual(state["library_team_last_status"], "failed")
         self.assertTrue(state["library_team_last_error"])
-        self.assertEqual(state["library_last_ok"], 2)
+        self.assertEqual(state["library_last_ok"], 0)
+        self.assertEqual(state["library_public_last_ok"], 2)
 
     def test_cve_and_public_failures_still_attempt_team_without_clearing_failure(self):
         self.source_patches(monitor_result())
         self.team_sync.return_value = {"status": "ok", "attempted": 1, "ok": 1}
         with patch("rag.library.sync", side_effect=TimeoutError("Synthetic public timeout")) as public:
+            schedule.run_public_once()
             state = schedule.run_once()
-        public.assert_called_once()
-        self.team_sync.assert_called_once_with(max_documents=30)
+        public.assert_called_once_with(include_seeds=False)
+        self.team_sync.assert_called_once_with(max_documents=200)
         self.assertEqual(state["last_status"], "failed")
         self.assertEqual(state["pipeline"]["status"], "error")
         self.assertEqual(state["library_team_last_status"], "success")
@@ -304,11 +314,12 @@ class ScheduledOutcomeTest(OutcomeFixture):
         self.source_patches(monitored)
         with patch.dict("os.environ", {"TEAM_INTEL_MODE": "off"}), \
                 patch("rag.library.sync", return_value=EMPTY_LIBRARY) as public, \
-                patch("rag.library.sync_team", wraps=actual_sync_team) as team, \
+                patch("rag.library.sync_team_drain", wraps=actual_sync_team_drain) as team, \
+                patch("rag.library.sync_team", wraps=actual_sync_team), \
                 patch("collectors.team_documents.TeamDocumentCollector") as adapter:
             state = schedule.run_once()
-        public.assert_called_once()
-        team.assert_called_once_with(max_documents=30)
+        public.assert_not_called()
+        team.assert_called_once_with(max_documents=200)
         adapter.assert_not_called()
         self.assertEqual(state["last_status"], "success")
         self.assertEqual(state["last_error"], "")
@@ -316,6 +327,19 @@ class ScheduledOutcomeTest(OutcomeFixture):
         self.assertEqual(state["library_team_last_ok"], 0)
         self.assertEqual(state["library_team_last_error"], "")
         self.assertNotIn("library_team_last_run", state)
+
+    def test_independent_public_sync_reports_partial_source_results(self):
+        library = {"attempted": 2, "ok": 1, "sources": [
+            {"source_id": "healthy", "status": "ok"},
+            {"source_id": "offline", "status": "failed"},
+        ]}
+        with patch("rag.library.sync", return_value=library):
+            state = schedule.run_public_once()
+        self.assertEqual(state["library_public_last_status"], "partial")
+        self.assertEqual(state["library_public_last_ok"], 1)
+        self.assertEqual(state["library_source_errors"], ["offline"])
+        self.assertTrue(state["library_public_last_error"])
+        self.team_sync.assert_not_called()
 
 
 if __name__ == "__main__":

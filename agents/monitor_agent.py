@@ -1,15 +1,17 @@
-"""监测智能体：NVD + OSV + 多源 CVE（同属一次监测刷新）。
+"""Synchronize all classified B intelligence changes by default.
 
-默认宽词为 llm；OSV 将宽词展开为已登记 AI 包集合。
-NVD 不再永久只查首词 llm：对宽词/逗号串使用 AI 组件产品词
-（open webui、vllm、ollama…）多词查询并按 CVE 去重，轮次有上限以防限流。
+B owns external source collection; A commits records, withdrawals and the
+persistent delivery cursor together. Direct NVD/OSV facades are retained for
+explicit legacy fallback or standalone operation with the team source disabled.
 
 Steps include optional did/got/produced/impact for the monitor pipeline panel.
 """
 import os
 from datetime import datetime, timezone
 
-from collectors.intelligence import IntelligenceCollector, team_base_url, team_intel_disabled
+from collectors.intelligence import (
+    IntelligenceCollector, IncrementalIntelligenceCollector, team_intel_disabled,
+)
 from collectors.nvd import NVDCollector
 from collectors.osv import OSVCollector, BROAD_KEYWORDS
 
@@ -179,7 +181,50 @@ def _sum_stats(rows):
     return out
 
 
+def _team_only_enabled():
+    """B owns external collection; direct facades remain an explicit fallback."""
+    if team_intel_disabled():
+        return False
+    if "TEAM_ONLY_COLLECT" in os.environ:
+        return os.environ["TEAM_ONLY_COLLECT"].strip().lower() not in {"0", "false", "no", "off"}
+    direct_nvd = os.environ.get("ROOT_NVD_ENABLED", "0").strip().lower()
+    return direct_nvd in {"0", "false", "no", "off", ""}
+
+
+def _run_team_changes(keyword):
+    # Consume every classified change, including updates and withdrawals. Keywords
+    # are display/search filters, not synchronization windows: restricting the
+    # import would silently omit records while advancing the durable feed cursor.
+    collector = IncrementalIntelligenceCollector(timeout=5)
+    try:
+        changes = collector.collect()
+    except Exception as exc:
+        raise RuntimeError("多源情报变更同步未完成；已有情报保留，下轮重试") from exc
+    items = changes["items"]
+    retracted = len(changes["retracted_ids"])
+    received = len(items) + retracted
+    step = _step(
+        "同步 多源情报变更",
+        "读取 %d 条新增/更新、%d 条撤回；入库成功后提交位点" % (len(items), retracted),
+        did="读取 B 已分类情报的持久变更流", got="本轮变更 %d 条" % received,
+        produced="进入整理 %d 条，撤回 %d 条" % (len(items), retracted),
+        impact="保留所有 AI 情报变更，避免关键词筛选漏采",
+        note="B 负责外部采集；A 同步情报及游标",
+    )
+    return {
+        "status": "success", "items": items, "steps": [step],
+        "team_changes": changes, "collectors": {"nvd": None, "osv": None},
+        "source_results": [{"source": "b_intelligence", "status": "success", "fetched": received}],
+        "keywords": {"primary": keyword, "nvd": [], "team": []},
+        "stats": {"hit": received, "kept": len(items), "external_fetches": 0,
+                  "nvd": {}, "osv": {}, "nvd_disabled_duplicate": True,
+                  "osv_disabled_duplicate": True, "aggregate_disabled": False, "aggregate_ok": True},
+    }
+
+
 def run(keyword="llm"):
+    if _team_only_enabled():
+        return _run_team_changes(keyword)
     primary_list, team_keys = _parse_keywords(keyword)
     primary = primary_list[0]
     # Cap team multi-pass (local embed is cheap; still bound work).
@@ -323,7 +368,7 @@ def run(keyword="llm"):
     for kw in ([] if team_disabled else team_keys):
         try:
             items = IntelligenceCollector(
-                keyword=kw, base_url=team_base_url(), timeout=team_timeout, max_pages=5
+                keyword=kw, timeout=team_timeout, max_pages=5
             ).collect()
             team_fetches += 1
             team_batches.append(items)
