@@ -750,7 +750,14 @@ function renderMonitorLive(data, opts) {
     else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（等待约 " + intervalText + "）";
     else if (data) nextEl.textContent = "完成首轮后等待约 " + intervalText;
   }
-  var pipe = (opts.pipeline) || (data && data.pipeline);
+  var pipe = opts.pipeline || null;
+  if (!pipe && data && data.pipeline) {
+    // While a refresh is in flight, do not paint a stale completed/idle pipeline
+    // (all-zero metrics) over the in-progress shell — wait for a running poll.
+    var staleDone = monitorRefreshing && running
+      && data.pipeline.status !== "running";
+    if (!staleDone) pipe = data.pipeline;
+  }
   if (pipe) {
     if (running && elapsed != null) {
       pipe = {
@@ -2019,7 +2026,8 @@ function runMonitorRefresh(options) {
   setBusyButton(overviewBtn, true, "正在刷新…", "立即刷新监测");
   clearError();
   // Keep pipeline shell visible immediately so layout does not jump when first poll arrives.
-  renderCollectPipeline({
+  // Also seed lastMonitorStatus so the 1s tick cannot re-paint a stale all-zero done pipeline.
+  var startPipe = {
     status: "running",
     elapsed_sec: 0,
     metrics: {},
@@ -2028,8 +2036,22 @@ function runMonitorRefresh(options) {
       { id: "persist", title: "整理入库", subtitle: "规范化并合并写入知识库", status: "pending" },
       { id: "library_sync", title: "资料同步", subtitle: "公开与资料摘要（可选）", status: "pending" }
     ]
-  }, { forceShow: true });
-  renderMonitorLive(lastMonitorStatus, { running: true, elapsedSec: 0, phase: "监测刷新中" });
+  };
+  lastMonitorStatus = lastMonitorStatus ? {
+    last_run: lastMonitorStatus.last_run,
+    last_count: lastMonitorStatus.last_count,
+    next_run: lastMonitorStatus.next_run,
+    interval_minutes: lastMonitorStatus.interval_minutes,
+    interval_hours: lastMonitorStatus.interval_hours,
+    auto_enabled: lastMonitorStatus.auto_enabled,
+    offline_demo: lastMonitorStatus.offline_demo,
+    team: lastMonitorStatus.team,
+    running: true,
+    run_phase: "监测刷新中",
+    pipeline: startPipe
+  } : { running: true, run_phase: "监测刷新中", pipeline: startPipe };
+  renderCollectPipeline(startPipe, { forceShow: true });
+  renderMonitorLive(lastMonitorStatus, { running: true, elapsedSec: 0, phase: "监测刷新中", pipeline: startPipe });
   var busyBase = keyword
     ? ("正在按「" + keyword + "」监测刷新，")
     : "监测刷新中（可能需数十秒），";
