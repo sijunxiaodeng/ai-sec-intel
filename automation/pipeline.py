@@ -155,7 +155,7 @@ def _load_pipeline():
 
 
 @_state_transaction
-def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="", note="", phase=None):
+def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="", note="", phase=None, metrics=None):
     data, pipe = _load_pipeline()
     for stage in pipe.get("stages") or []:
         if stage.get("id") != stage_id:
@@ -180,6 +180,12 @@ def update_stage(stage_id, *, status=None, did="", got="", produced="", impact="
             if stage.get("id") == stage_id:
                 data["run_phase"] = str(stage.get("title") or stage_id)[:80]
                 break
+    # Mid-run partial counts (e.g. hit after 监测中 ends, before 整理入库 finishes).
+    if metrics:
+        pipe_metrics = pipe.setdefault("metrics", {})
+        for key, value in metrics.items():
+            if key in pipe_metrics and value is not None:
+                pipe_metrics[key] = int(value)
     _recount(pipe)
     data["pipeline"] = pipe
     _write_state(data)

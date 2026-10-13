@@ -30,6 +30,9 @@ var monitorRefreshing = false;
 var monitorElapsedTimer = null;
 var monitorPollTimer = null;
 var monitorRefreshStartedAt = 0;
+var lastMonitorStatus = null;
+var lastMonitorToastPhase = "";
+var selectedMonitorId = null;
 var offlineDemo = false;
 var offlineModeKnown = false;
 
@@ -379,6 +382,9 @@ function renderItemRow(parent, item, onPick) {
   var isDoc = item.kind === "document";
   var row = add(parent, "button", "row" + (isDoc ? " is-doc" : ""));
   row.type = "button";
+  var itemKey = String(item.cve_id || item.id || item.url || "");
+  if (itemKey) row.setAttribute("data-item-id", itemKey);
+  if (selectedMonitorId && itemKey && selectedMonitorId === itemKey) row.className += " is-selected";
   if (isDemoItem(item) || item.demo) row.className += " is-demo";
   row.addEventListener("click", function () { onPick(item); });
   var id = add(row, "div");
@@ -548,6 +554,43 @@ function stageStatusLabel(status) {
   return { text: "等待", cls: "st-pend" };
 }
 
+function pipelineCountsPending(pipeline) {
+  var metrics = (pipeline && pipeline.metrics) || {};
+  return (pipeline && pipeline.status === "running")
+    && !(metrics.hit || metrics.kept || metrics.inserted || metrics.merged || metrics.external_fetches);
+}
+
+function ensurePipelineStageEl(stagesEl, stage, index) {
+  var existing = stagesEl.children[index];
+  var wantId = stage.id || String(index);
+  if (existing && existing.getAttribute("data-stage-id") === wantId) return existing;
+  // Structure drift: rebuild from this index onward once.
+  while (stagesEl.children.length > index) {
+    stagesEl.removeChild(stagesEl.lastChild);
+  }
+  var li = document.createElement("li");
+  li.setAttribute("data-stage-id", wantId);
+  var top = document.createElement("div");
+  top.className = "pipeline-stage-top";
+  var title = document.createElement("span");
+  title.className = "pipeline-stage-title";
+  top.appendChild(title);
+  var sub = document.createElement("span");
+  sub.className = "pipeline-stage-sub";
+  top.appendChild(sub);
+  var stEl = document.createElement("span");
+  stEl.className = "pipeline-stage-status";
+  top.appendChild(stEl);
+  li.appendChild(top);
+  var note = document.createElement("p");
+  note.className = "hint pipeline-stage-note";
+  note.style.margin = "4px 0 0";
+  note.hidden = true;
+  li.appendChild(note);
+  stagesEl.appendChild(li);
+  return li;
+}
+
 function renderCollectPipeline(pipeline, opts) {
   opts = opts || {};
   var box = $("collect-pipeline");
@@ -564,11 +607,14 @@ function renderCollectPipeline(pipeline, opts) {
   box.hidden = false;
   var metrics = pipeline.metrics || {};
   var status = pipeline.status || "";
+  var countsPending = pipelineCountsPending(pipeline);
   if (summaryEl) {
     if (status === "running") {
       summaryEl.textContent = "监测刷新中"
         + (pipeline.elapsed_sec != null ? "（已 " + pipeline.elapsed_sec + " 秒）" : "")
-        + "…";
+        + (countsPending
+          ? "——请求进行中，本轮统计待阶段结束。"
+          : "——下方为已汇总的本轮统计。");
     } else if (pipeline.summary) {
       summaryEl.textContent = pipeline.summary;
     } else {
@@ -580,55 +626,69 @@ function renderCollectPipeline(pipeline, opts) {
     if (pipeline.elapsed_sec != null && status !== "idle") {
       bits.push("耗时 <strong>" + pipeline.elapsed_sec + "s</strong>");
     }
-    bits.push("查询返回 <strong>" + (metrics.hit || 0) + "</strong>");
-    bits.push("水位后保留 <strong>" + (metrics.kept || 0) + "</strong>");
-    bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
-    bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
-    bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
-    if (metrics.external_fetches) {
-      bits.push("外部请求 <strong>" + metrics.external_fetches + "</strong>");
+    // Avoid flashing zeros while collectors are still running — that looked like "搜空".
+    if (countsPending) {
+      bits.push("<em>本轮统计待阶段结束</em>");
+      if (metrics.failures) bits.push("失败 <strong>" + metrics.failures + "</strong>");
+    } else {
+      bits.push("查询返回 <strong>" + (metrics.hit || 0) + "</strong>");
+      bits.push("水位后保留 <strong>" + (metrics.kept || 0) + "</strong>");
+      bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
+      bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
+      bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
+      if (metrics.external_fetches) {
+        bits.push("外部请求 <strong>" + metrics.external_fetches + "</strong>");
+      }
     }
-    metricsEl.innerHTML = bits.join("<span aria-hidden=\"true\"> · </span>");
+    var nextHtml = bits.join("<span aria-hidden=\"true\"> · </span>");
+    if (metricsEl.getAttribute("data-html") !== nextHtml) {
+      metricsEl.setAttribute("data-html", nextHtml);
+      metricsEl.innerHTML = nextHtml;
+    }
     metricsEl.hidden = false;
   }
-  clear(stagesEl);
-  // Coarse product stages only — no per-source 抓取·X rows.
-  (pipeline.stages || []).forEach(function (stage) {
-    var li = document.createElement("li");
+  // In-place stage updates — avoid clear()+rebuild flicker and CSS re-entry animation.
+  var stages = pipeline.stages || [];
+  stages.forEach(function (stage, index) {
+    var li = ensurePipelineStageEl(stagesEl, stage, index);
     var st = stage.status || "pending";
-    li.className = "pipeline-stage is-" + st;
-    var top = document.createElement("div");
-    top.className = "pipeline-stage-top";
-    var title = document.createElement("span");
-    title.className = "pipeline-stage-title";
-    title.textContent = stage.title || stage.id || "";
-    top.appendChild(title);
+    var nextClass = "pipeline-stage is-" + st;
+    if (li.className !== nextClass) li.className = nextClass;
+    var title = li.querySelector(".pipeline-stage-title");
+    var sub = li.querySelector(".pipeline-stage-sub");
+    var stEl = li.querySelector(".pipeline-stage-status");
+    var note = li.querySelector(".pipeline-stage-note");
+    if (title) title.textContent = stage.title || stage.id || "";
+    var subText = "";
     if (stage.got || stage.produced) {
-      var sub = document.createElement("span");
-      sub.className = "pipeline-stage-sub";
-      sub.textContent = [stage.got, stage.produced].filter(Boolean).join(" · ");
-      top.appendChild(sub);
+      subText = [stage.got, stage.produced].filter(Boolean).join(" · ");
     } else if (stage.subtitle && st === "pending") {
-      var sub2 = document.createElement("span");
-      sub2.className = "pipeline-stage-sub";
-      sub2.textContent = stage.subtitle;
-      top.appendChild(sub2);
+      subText = stage.subtitle;
+    } else if (stage.did && st === "running") {
+      subText = stage.did;
+    }
+    if (sub) {
+      sub.textContent = subText;
+      sub.hidden = !subText;
     }
     var badge = stageStatusLabel(st);
-    var stEl = document.createElement("span");
-    stEl.className = "pipeline-stage-status " + badge.cls;
-    stEl.textContent = badge.text;
-    top.appendChild(stEl);
-    li.appendChild(top);
-    if (stage.note && (st === "ok" || st === "error" || st === "skip")) {
-      var note = document.createElement("p");
-      note.className = "hint";
-      note.style.margin = "4px 0 0";
-      note.textContent = stage.note;
-      li.appendChild(note);
+    if (stEl) {
+      stEl.className = "pipeline-stage-status " + badge.cls;
+      stEl.textContent = badge.text;
     }
-    stagesEl.appendChild(li);
+    if (note) {
+      if (stage.note && (st === "ok" || st === "error" || st === "skip")) {
+        note.hidden = false;
+        note.textContent = stage.note;
+      } else {
+        note.hidden = true;
+        note.textContent = "";
+      }
+    }
   });
+  while (stagesEl.children.length > stages.length) {
+    stagesEl.removeChild(stagesEl.lastChild);
+  }
   if (techEl && techBody) {
     var tech = pipeline.tech_detail || "";
     if (tech) {
@@ -643,6 +703,9 @@ function renderCollectPipeline(pipeline, opts) {
 
 function renderMonitorLive(data, opts) {
   opts = opts || {};
+  // Merge poll/tick fragments onto last known status so null ticks do not wipe clocks.
+  if (data) lastMonitorStatus = data;
+  else data = lastMonitorStatus;
   var live = $("monitor-live");
   var stateEl = $("monitor-live-state");
   var lastEl = $("monitor-live-last");
@@ -673,9 +736,9 @@ function renderMonitorLive(data, opts) {
         : "约 " + intervalText + " 后自动刷新，也可立即刷新。";
     }
   }
-  if (lastEl) {
-    var last = (data && data.last_run) || "";
-    var count = (data && data.last_count) || 0;
+  if (lastEl && data) {
+    var last = data.last_run || "";
+    var count = data.last_count || 0;
     lastEl.textContent = last
       ? (formatStamp(last) + (count ? " · 本轮新增 " + count + " 条" : " · 本轮新增 0"))
       : (offlineDemo ? "离线样例已就绪" : "尚未刷新；可点「立即刷新一轮」");
@@ -685,12 +748,25 @@ function renderMonitorLive(data, opts) {
     else if (offlineDemo) nextEl.textContent = "离线演示不执行定时采集";
     else if (data && data.auto_enabled === false) nextEl.textContent = "自动监测已关闭";
     else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（等待约 " + intervalText + "）";
-    else nextEl.textContent = "完成首轮后等待约 " + intervalText;
+    else if (data) nextEl.textContent = "完成首轮后等待约 " + intervalText;
   }
-  if (data && data.pipeline) {
-    renderCollectPipeline(data.pipeline, { forceShow: running || ["done", "partial", "error"].indexOf(data.pipeline.status) !== -1 });
-  } else if (opts.pipeline) {
-    renderCollectPipeline(opts.pipeline, { forceShow: true });
+  var pipe = (opts.pipeline) || (data && data.pipeline);
+  if (pipe) {
+    if (running && elapsed != null) {
+      pipe = {
+        status: pipe.status,
+        started_at: pipe.started_at,
+        finished_at: pipe.finished_at,
+        elapsed_sec: pipe.elapsed_sec != null ? pipe.elapsed_sec : elapsed,
+        metrics: pipe.metrics,
+        stages: pipe.stages,
+        summary: pipe.summary,
+        tech_detail: pipe.tech_detail,
+      };
+    }
+    renderCollectPipeline(pipe, {
+      forceShow: running || ["done", "partial", "error"].indexOf(pipe.status) !== -1,
+    });
   }
 }
 
@@ -698,6 +774,7 @@ function loadMonitorStatus() {
   return api("/api/monitor/status").then(function (data) {
     setOfflineMode(data.offline_demo);
     setTeamHealth(data.team);
+    lastMonitorStatus = data;
     renderMonitorLive(data);
     if (monitorRefreshing) {
       // Keep the in-progress copy; only refresh the live panel timestamps.
@@ -952,9 +1029,19 @@ function renderMonitorFeed(data) {
 function loadItems(view) {
   var query = view === "monitor" ? monitorKeyword() : "";
   if (view === "monitor") {
+    var listEl = $("monitor-list");
+    var winY = window.scrollY || document.documentElement.scrollTop || 0;
+    var listY = listEl ? listEl.scrollTop : 0;
     return api("/api/monitor/feed?kind=" + encodeURIComponent(monitorScope) + (query ? "&q=" + encodeURIComponent(query) : "")).then(function (data) {
       lastMonitorFeed = data;
-      return renderMonitorFeed(data);
+      var result = renderMonitorFeed(data);
+      if (listEl) listEl.scrollTop = listY;
+      window.scrollTo(0, winY);
+      if (selectedMonitorId && listEl) {
+        var row = listEl.querySelector('[data-item-id="' + selectedMonitorId + '"]');
+        if (row) row.classList.add("is-selected");
+      }
+      return result;
     }).catch(function (error) {
       if (monitorRefreshing) {
         // Soft-fail during in-flight refresh; final loadItems after run will retry.
@@ -984,6 +1071,17 @@ function loadItems(view) {
 
 function openMonitorDetail(item) {
   if (!item) return;
+  selectedMonitorId = String(item.cve_id || item.id || item.url || "");
+  var listEl = $("monitor-list");
+  if (listEl) {
+    listEl.querySelectorAll(".row.is-selected").forEach(function (node) {
+      node.classList.remove("is-selected");
+    });
+    var row = selectedMonitorId
+      ? listEl.querySelector('[data-item-id="' + selectedMonitorId.replace(/"/g, "") + '"]')
+      : null;
+    if (row) row.classList.add("is-selected");
+  }
   if (item.kind === "document") {
     var panel = $("monitor-detail");
     clear(panel);
@@ -1866,27 +1964,37 @@ function stopMonitorProgressTimers() {
 function startMonitorProgressTimers(busyBase) {
   stopMonitorProgressTimers();
   monitorRefreshStartedAt = Date.now();
+  lastMonitorToastPhase = "";
+  var lastPhaseSeen = "";
   var tick = function () {
     var sec = Math.max(0, Math.round((Date.now() - monitorRefreshStartedAt) / 1000));
-    var msg = busyBase + "已等待 " + sec + " 秒…";
-    setMonitorStatus(msg);
-    showToast(msg, "busy");
-    renderMonitorLive(null, { running: true, elapsedSec: sec, phase: "请求进行中" });
+    var phase = (lastMonitorStatus && lastMonitorStatus.run_phase) || lastPhaseSeen || "监测刷新中";
+    // Status line ticks every second; toast stays quiet so it does not fight phase updates.
+    setMonitorStatus(busyBase + "已等待 " + sec + " 秒…");
+    renderMonitorLive(lastMonitorStatus, {
+      running: true,
+      elapsedSec: sec,
+      phase: phase,
+    });
   };
   tick();
   monitorElapsedTimer = setInterval(tick, 1000);
   monitorPollTimer = setInterval(function () {
     api("/api/monitor/status?light=1").then(function (data) {
       if (!monitorRefreshing) return;
+      lastMonitorStatus = data;
       var sec = Math.max(0, Math.round((Date.now() - monitorRefreshStartedAt) / 1000));
+      var phase = data.run_phase || "监测执行中";
       renderMonitorLive(data, {
         running: true,
         elapsedSec: sec,
-        phase: data.run_phase || "监测执行中",
+        phase: phase,
       });
-      if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
-      if (data.run_phase) {
-        showToast("监测进行中：" + data.run_phase + "（" + sec + " 秒）", "busy");
+      // Toast only when the product stage changes — not every poll.
+      if (phase && phase !== lastMonitorToastPhase) {
+        lastMonitorToastPhase = phase;
+        lastPhaseSeen = phase;
+        showToast("监测进行中：" + phase + "（已 " + sec + " 秒）", "busy");
       }
     }).catch(function () {});
   }, 1500);
@@ -1910,9 +2018,22 @@ function runMonitorRefresh(options) {
   setBusyButton(button, true, "正在刷新…", "立即刷新一轮");
   setBusyButton(overviewBtn, true, "正在刷新…", "立即刷新监测");
   clearError();
+  // Keep pipeline shell visible immediately so layout does not jump when first poll arrives.
+  renderCollectPipeline({
+    status: "running",
+    elapsed_sec: 0,
+    metrics: {},
+    stages: [
+      { id: "monitoring", title: "监测中", subtitle: "同步多源已分类情报及变更", status: "running", did: "多方面来源一并抓取中…" },
+      { id: "persist", title: "整理入库", subtitle: "规范化并合并写入知识库", status: "pending" },
+      { id: "library_sync", title: "资料同步", subtitle: "公开与资料摘要（可选）", status: "pending" }
+    ]
+  }, { forceShow: true });
+  renderMonitorLive(lastMonitorStatus, { running: true, elapsedSec: 0, phase: "监测刷新中" });
   var busyBase = keyword
     ? ("正在按「" + keyword + "」监测刷新，")
     : "监测刷新中（可能需数十秒），";
+  showToast("监测已开始：监测中 → 整理入库 → 资料同步", "busy");
   startMonitorProgressTimers(busyBase);
   return api("/api/monitor/run", {
     method: "POST",
@@ -1925,6 +2046,8 @@ function runMonitorRefresh(options) {
     var bmon = (data.source_diag && data.source_diag.b_monitor) || {};
     var rs = data.round_stats || {};
     var outcomeLabel = {success: "采集成功", partial: "采集部分成功", failed: "采集失败"}[data.status] || "本轮完成";
+    // Stop progress timers before painting the final pipeline so busy/result copy do not race.
+    stopMonitorProgressTimers();
     if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
     var roundLine = "查询返回 " + (rs.hit != null ? rs.hit : "—")
       + " · 水位后保留 " + (rs.kept != null ? rs.kept : "—")
@@ -1933,8 +2056,9 @@ function runMonitorRefresh(options) {
     setMonitorStatus(outcomeLabel + "：" + roundLine
       + (bmon.status ? "；多源情报刷新 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
-      + "。正在刷新情报流…");
-    showToast(outcomeLabel + "：" + roundLine, "busy");
+      + "。正在更新情报流…");
+    // One intermediate toast only — final ok/error toast after feed settles.
+    showToast(outcomeLabel + "：" + roundLine + "，正在更新情报流…", "busy");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
       var done = outcomeLabel + "：" + roundLine + "；当前显示 "
@@ -1967,6 +2091,7 @@ function runMonitorRefresh(options) {
   }).then(function (data) {
     stopMonitorProgressTimers();
     monitorRefreshing = false;
+    lastMonitorToastPhase = "";
     setBusyButton(button, false, null, "立即刷新一轮");
     setBusyButton(overviewBtn, false, null, "立即刷新监测");
     return loadMonitorStatus().then(function () {
@@ -1976,6 +2101,7 @@ function runMonitorRefresh(options) {
   }, function (error) {
     stopMonitorProgressTimers();
     monitorRefreshing = false;
+    lastMonitorToastPhase = "";
     setBusyButton(button, false, null, "立即刷新一轮");
     setBusyButton(overviewBtn, false, null, "立即刷新监测");
     loadMonitorStatus();
