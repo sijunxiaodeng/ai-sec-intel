@@ -47,7 +47,6 @@ jobs:
       DEPLOY_INGEST_CONFIGURED: ${{ secrets.DEPLOY_INGEST_URL != '' && secrets.DEPLOY_INGEST_TOKEN != '' }}
       DEEPSEEK_REVIEW_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.deepseek_review }}
       DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL || 'deepseek-chat' }}
-      DELIVERY_STATUS_FILE: ${{ runner.temp }}/delivery_status.json
       GITHUB_TOKEN: ${{ github.token }}
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       INTELLIGENCE_BOOTSTRAP_RELEASE_TAG: ${{ inputs.bootstrap_release_tag || vars.INTELLIGENCE_BOOTSTRAP_RELEASE_TAG }}
@@ -130,10 +129,12 @@ jobs:
         env:
           DEPLOY_INGEST_URL: ${{ secrets.DEPLOY_INGEST_URL }}
           DEPLOY_INGEST_TOKEN: ${{ secrets.DEPLOY_INGEST_TOKEN }}
+          DELIVERY_STATUS_FILE: ${{ runner.temp }}/delivery_status.json
         run: python intelligence/deployment/actions_sync.py push --directory "${RUNNER_TEMP}/intelligence-state"
       - name: Record delivery evidence or missing configuration
         if: ${{ always() }}
         env:
+          DELIVERY_STATUS_FILE: ${{ runner.temp }}/delivery_status.json
           PUSH_OUTCOME: ${{ steps.push.outcome }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
         run: python intelligence/deployment/actions_sync.py delivery-status
@@ -145,6 +146,7 @@ jobs:
       - name: Summarize collection
         if: ${{ always() }}
         env:
+          DELIVERY_STATUS_FILE: ${{ runner.temp }}/delivery_status.json
           COLLECTION_OUTCOME: ${{ steps.collect.outcome }}
           SNAPSHOT_OUTCOME: ${{ steps.snapshot.outcome }}
           MIGRATION_OUTCOME: ${{ steps.migrate.outcome }}
