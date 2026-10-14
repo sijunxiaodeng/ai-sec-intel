@@ -53,6 +53,39 @@ docker compose --env-file .env.production -f docker-compose.actions.yml logs --t
 
 可以提供验收 JSON 或错误摘要供诊断；先检查其中没有令牌，不要发送 `.env.production`、完整 Compose 配置或 `docker inspect` 输出。
 
+## 基础镜像下载失败时
+
+如果构建停在 `FROM python:3.12-slim`，并报 `auth.docker.io/token` 的连接超时，表示 Docker 尚未取得基础镜像。此时还没有运行项目服务，修改 GitHub 令牌不能解决这一错误。
+
+电脑已运行代理时，先让 Docker Desktop 使用该代理：
+
+1. 在代理软件中找到实际的 **HTTP 或 mixed（混合）代理端口**。不要猜测端口，也不要把 SOCKS 专用端口填进 HTTP 代理栏。
+2. 打开 Docker Desktop **Settings → Resources → Proxies**（部分版本为 **Settings → Proxies**），找到 **Docker Desktop proxy**。如果系统代理已正确配置，可以使用系统代理；也可启用手动配置，将 HTTP 和 HTTPS 两栏都填为 `http://127.0.0.1:实际端口`。这里的地址是本地代理的协议，HTTPS 目标仍通过代理建立 HTTPS 连接。
+3. 如果页面还有 **Containers proxy**，选择 **Same as host proxy**，让它沿用上面的代理。当前 Docker 文档说明镜像拉取使用此配置；已有独立配置时，只修改 Docker Desktop proxy 可能不足以修复下载。
+4. 点击 **Apply & Restart**（或当前版本对应的保存/应用按钮），等待 Engine 再次运行，保持代理软件开启。只有 VPN 隧道、没有 HTTP/mixed 端口时，不要套用上述本地地址，应按该软件实际的系统代理或隧道路由配置排查。
+
+Windows 浏览器能访问，并不能证明 Docker Desktop 的镜像拉取已使用同一代理。容器内应用访问 GitHub 是后续网络环节，应以实际下载结果判断是否需要额外配置。具体选项见 [Docker 官方代理设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#proxies)。
+
+Docker Engine JSON 中的 `dns` 主要控制容器 DNS，不能替代 Windows 或 Desktop 对上述鉴权请求的网络配置；`registry-mirrors` 也不会直接修复仍在连接 `auth.docker.io` 的超时。此问题不需要删除数据卷、恢复出厂设置或关闭 TLS 验证。
+
+应用配置后，先单独验证基础镜像下载：
+
+```powershell
+docker pull python:3.12-slim
+```
+
+成功后再运行第 3 节的启动命令；已有数据卷会保留。如果镜像已能下载，但随后出现 Python 依赖下载或 GitHub 快照下载错误，那是后续网络环节，应根据新的报错继续排查。
+
+如果仍然失败，可以在 Windows PowerShell 分别检查域名解析和显式代理请求：
+
+```powershell
+Resolve-DnsName auth.docker.io
+$proxyPort = Read-Host '请输入代理软件的 HTTP/mixed 端口'
+curl.exe --proxy "http://127.0.0.1:$proxyPort" --connect-timeout 10 --max-time 20 -sS -o NUL -w 'HTTP %{http_code}\n' 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/python:pull'
+```
+
+最后一条只输出 HTTP 状态，不输出 Docker 下载令牌，正常通常返回 `HTTP 200`。`curl.exe` 不一定沿用 Windows 系统代理，因此不带 `--proxy` 的失败不能证明代理不可用；显式代理请求成功仍需通过 `docker pull` 核查 Desktop 的配置。代理可能在远端解析域名，本机 DNS 结果应单独判断。错误中的 IP 地址异常时，核查系统、路由器或代理的 DNS 配置；不要把某个临时 IP 写进 hosts。修复配置后可运行 `Clear-DnsClientCache` 清理 Windows DNS 缓存。
+
 ## 持续运行与停止
 
 `b-mirror` 每 60 秒检查新快照；主应用定时消费漏洞与资料。用另一次真实云端运行再执行验收，才能证明后续更新也正常。电脑关机或 Docker Desktop 停止后，本机网页/API 会停止；GitHub 仍可采集，下次启动会追取新快照。要全天提供服务，需要持续在线机器。
