@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -14,6 +17,7 @@ from collectors.documents import (
     ArxivCollector, FeedCollector, GitHubVendorAdvisoryCollector,
     document_id, is_ai_security_related, source_timestamp,
 )
+from collectors.http import CollectionRateLimited
 
 
 class Response:
@@ -231,6 +235,12 @@ class ArxivTests(unittest.TestCase):
 class VendorTests(unittest.TestCase):
     url = "https://api.github.com/repos/example/ai-project/security-advisories"
 
+    def setUp(self):
+        credentials = patch.dict(os.environ, {"GITHUB_TOKEN": "", "GH_TOKEN": "",
+                                             "INTELLIGENCE_CHILD_TIMEOUT_SECONDS": "120"})
+        credentials.start()
+        self.addCleanup(credentials.stop)
+
     def advisory(self, ghsa="GHSA-aaaa-bbbb-cccc"):
         return {"ghsa_id": ghsa, "summary": "LLM vulnerability", "description": "Model loader security issue",
                 "html_url": "https://github.com/example/ai-project/security/advisories/" + ghsa,
@@ -264,6 +274,139 @@ class VendorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             collector.collect()
         self.assertEqual(len(collector.session.calls), 1)
+
+    def test_vendor_environment_credentials_are_sent_on_every_valid_page(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "fixture-primary", "GH_TOKEN": "fixture-fallback"}):
+            collector = self.collector(
+                Response(json.dumps([self.advisory()]), next_url=self.url + "?page=2&per_page=100"),
+                Response(json.dumps([self.advisory("GHSA-dddd-eeee-ffff")])),
+            )
+            result = collector.collect()
+        self.assertEqual(result.fetched_count, 2)
+        for _, options in collector.session.calls:
+            self.assertEqual(options["headers"]["Authorization"], "Bearer fixture-primary")
+            self.assertFalse(options["allow_redirects"])
+        self.assertNotIn("fixture-primary", repr(result))
+
+    def test_vendor_environment_fallback_and_explicit_token_precedence(self):
+        cases = [
+            ({"GITHUB_TOKEN": "", "GH_TOKEN": "fixture-fallback"}, {}, "Bearer fixture-fallback"),
+            ({"GITHUB_TOKEN": "fixture-primary", "GH_TOKEN": "fixture-fallback"},
+             {"token": "fixture-explicit"}, "Bearer fixture-explicit"),
+            ({"GITHUB_TOKEN": "fixture-primary", "GH_TOKEN": "fixture-fallback"}, {"token": ""}, None),
+            ({"GITHUB_TOKEN": "", "GH_TOKEN": ""}, {}, None),
+        ]
+        for environment, options, expected in cases:
+            with self.subTest(expected=expected), patch.dict(os.environ, environment):
+                collector = self.collector(Response("[]"), **options)
+                collector.collect()
+                self.assertEqual(collector.session.calls[0][1]["headers"].get("Authorization"), expected)
+
+    def test_vendor_rejects_noncanonical_initial_endpoint_before_auth_request(self):
+        urls = [
+            self.url.replace("https:", "http:"),
+            self.url.replace("api.github.com", "api.github.com:8443"),
+            self.url.replace("api.github.com", "fixture-user:fixture-password@api.github.com"),
+            self.url.replace("api.github.com", "api.github.com.evil.test"),
+            self.url + "?page=2", self.url + "#fragment",
+        ]
+        for url in urls:
+            session = Session()
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                GitHubVendorAdvisoryCollector("AI_VENDOR_TEST", "vendor_advisory", "advisory", url,
+                                             token="fixture-token", session=session)
+            self.assertEqual(session.calls, [])
+
+    def test_vendor_rejects_unsafe_pagination_before_second_auth_request(self):
+        urls = [
+            self.url.replace("https:", "http:"),
+            self.url.replace("api.github.com", "api.github.com:8443"),
+            self.url.replace("api.github.com", "fixture-user:fixture-password@api.github.com"),
+            self.url.replace("/example/", "/another-owner/"),
+            self.url + "#fragment",
+        ]
+        for url in urls:
+            response = Response(json.dumps([self.advisory()]), next_url=url)
+            collector = self.collector(response, token="fixture-token")
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                collector.collect()
+            self.assertEqual(len(collector.session.calls), 1)
+            self.assertTrue(response.closed)
+
+    def test_vendor_real_requests_session_does_not_follow_auth_redirects(self):
+        class RedirectAdapter(requests.adapters.BaseAdapter):
+            def __init__(self, status, location):
+                self.status, self.location, self.calls = status, location, []
+
+            def send(self, request, **kwargs):
+                self.calls.append(request)
+                response = requests.Response()
+                response.status_code = self.status if len(self.calls) == 1 else 200
+                response.headers["Location"] = self.location
+                response.url, response.request = request.url, request
+                response._content, response._content_consumed = b"[]", True
+                return response
+
+            def close(self):
+                pass
+
+        targets = ["https://foreign.test/advisories", self.url.replace("https:", "http:"),
+                   self.url.replace("/example/", "/another-owner/"), self.url + "?page=2"]
+        for status in (301, 302, 303, 307, 308):
+            for target in targets:
+                adapter = RedirectAdapter(status, target)
+                with self.subTest(status=status, target=target), requests.Session() as session:
+                    session.trust_env = False
+                    session.mount("https://", adapter)
+                    session.mount("http://", adapter)
+                    collector = GitHubVendorAdvisoryCollector(
+                        "AI_VENDOR_TEST", "vendor_advisory", "advisory", self.url,
+                        token="fixture-token", session=session,
+                    )
+                    with self.assertRaisesRegex(ValueError, "redirects"):
+                        collector.collect()
+                    self.assertEqual(len(adapter.calls), 1)
+                    self.assertEqual(adapter.calls[0].headers["Authorization"], "Bearer fixture-token")
+
+    def test_vendor_auth_redirect_response_is_closed_and_304_still_works(self):
+        redirect = Response(status=302, headers={"Location": "https://foreign.test/"})
+        collector = self.collector(redirect, token="fixture-token")
+        with self.assertRaises(ValueError):
+            collector.collect()
+        self.assertTrue(redirect.closed)
+        unchanged = Response(status=304, headers={"ETag": '"vendor-v2"'})
+        collector = self.collector(unchanged, token="fixture-token")
+        self.assertEqual(collector.collect(etag='"vendor-v1"').status, "not_modified")
+        self.assertEqual(collector.session.calls[0][1]["headers"]["If-None-Match"], '"vendor-v1"')
+        self.assertTrue(unchanged.closed)
+
+    def test_vendor_rate_limit_exceeding_child_budget_preserves_provider_failure(self):
+        for status in (403, 429):
+            response = Response(status=status, headers={"Retry-After": "120", "X-RateLimit-Remaining": "0"})
+            collector = self.collector(response, token="fixture-token")
+            with self.subTest(status=status), patch("collectors.http.time.sleep") as sleeper:
+                with self.assertRaises(CollectionRateLimited) as caught:
+                    collector.collect()
+                self.assertIs(caught.exception.response, response)
+                self.assertEqual(caught.exception.response.status_code, status)
+                self.assertTrue(response.closed)
+                self.assertEqual(len(collector.session.calls), 1)
+                sleeper.assert_not_called()
+
+    def test_vendor_short_child_budget_is_shared_across_pages(self):
+        first = Response(json.dumps([self.advisory()]), next_url=self.url + "?page=2")
+        limited = Response(status=429, headers={"Retry-After": "25"})
+        collector = self.collector(first, limited, token="fixture-token")
+        with patch.dict(os.environ, {"INTELLIGENCE_CHILD_TIMEOUT_SECONDS": "45"}), \
+                patch("collectors.http.time.monotonic", side_effect=(100 + n for n in range(100))), \
+                patch("collectors.http.time.sleep") as sleeper:
+            with self.assertRaises(CollectionRateLimited):
+                collector.collect()
+        self.assertEqual(len(collector.session.calls), 2)
+        self.assertTrue(first.closed and limited.closed)
+        self.assertLessEqual(collector.session.calls[0][1]["timeout"], 22.5)
+        self.assertLess(collector.session.calls[1][1]["timeout"], collector.session.calls[0][1]["timeout"])
+        sleeper.assert_not_called()
 
     def test_vendor_malformed_or_incomplete_payloads_cannot_succeed(self):
         for response in (Response('{"message":"rate limited"}'), Response('['), Response('[{}]'),

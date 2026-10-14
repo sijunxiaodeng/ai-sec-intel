@@ -123,6 +123,20 @@ class OrchestratorOutcomeTest(OutcomeFixture):
 
 
 class ManualOutcomeTest(OutcomeFixture):
+    def test_raw_source_summary_survives_ai_zero_insert_round(self):
+        self.source_patches(monitor_result(osv="success", aggregate="success"))
+        self.api_patches()
+        summary = {"status": "partial", "raw_inserted": 38, "source_failed": 6, "source_total": 13}
+        with patch("api.b_monitor.b_monitor_on_refresh", return_value=True), \
+                patch("api.b_embed.embed_enabled", return_value=True), \
+                patch("api.b_monitor.run_b_monitor_cycle", return_value={"status": "partial", "collection_summary": summary}):
+            data = self.client.post("/api/monitor/run", json={"sync_library": False}).json()
+        self.assertEqual(data["count"], 0)
+        self.assertEqual(data["collection_summary"], summary)
+        status = self.client.get("/api/monitor/status?light=1").json()
+        self.assertEqual(status["last_count"], 0)
+        self.assertEqual(status["collection_summary"], summary)
+
     def test_failed_refresh_returns_explicit_failure_keeps_dashboard_and_syncs_library(self):
         self.source_patches(monitor_result())
         public, team = self.api_patches()
@@ -205,6 +219,16 @@ class ManualOutcomeTest(OutcomeFixture):
 
 
 class ScheduledOutcomeTest(OutcomeFixture):
+    def test_scheduled_source_counts_survive_zero_ai_insert(self):
+        self.source_patches(monitor_result(osv="success", aggregate="success"))
+        summary = {"status": "partial", "raw_inserted": 38}
+        with patch("api.b_monitor.b_monitor_on_refresh", return_value=True), \
+                patch("api.b_embed.embed_enabled", return_value=True), \
+                patch("api.b_monitor.run_b_monitor_cycle", return_value={"status": "partial", "collection_summary": summary}):
+            state = schedule.run_once()
+        self.assertEqual(state["last_count"], 0)
+        self.assertEqual(state["collection_summary"], summary)
+
     def test_all_failed_scheduled_run_keeps_error_and_still_syncs_documents(self):
         self.source_patches(monitor_result())
         with patch("rag.library.sync", return_value=EMPTY_LIBRARY) as library:

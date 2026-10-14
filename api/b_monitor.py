@@ -119,9 +119,9 @@ def run_b_monitor_cycle(
             if marker.exists() and marker.read_text().strip() == "actions-mirror":
                 raise ValueError("Actions mirrors cannot run a second collector")
         claim_role(db.parent, "collector")
-        source_timeout = _bounded(source_timeout, "B_MONITOR_SOURCE_TIMEOUT", 45, 5, 300)
+        source_timeout = _bounded(source_timeout, "B_MONITOR_SOURCE_TIMEOUT", 120, 5, 300)
         workers = _bounded(workers, "B_MONITOR_WORKERS", 4, 1, 8)
-        overall_timeout = _bounded(overall_timeout, "B_MONITOR_OVERALL_TIMEOUT", 180, 1, 600)
+        overall_timeout = _bounded(overall_timeout, "B_MONITOR_OVERALL_TIMEOUT", 600, 1, 600)
         poll_minutes = _bounded(None, "MONITOR_INTERVAL_MINUTES", 15, 1, 1440)
         summary.update(db_path=str(db), source_timeout_seconds=source_timeout,
                        workers=workers, overall_timeout_seconds=overall_timeout)
@@ -169,6 +169,8 @@ def run_b_monitor_cycle(
                 failed_sources=result.get("failed_sources"),
                 source_names=sorted(sources), error=result.get("error"),
             )
+            from automation.collection_summary import summarize_collection
+            summary["collection_summary"] = summarize_collection(dict(result, status=summary["status"]))
             if child.returncode and not summary["error"]:
                 summary["error"] = "B collector worker failed (exit %s)" % child.returncode
             return summary
@@ -181,6 +183,8 @@ def run_b_monitor_cycle(
             summary["error"] = "%s (%s)" % (summary["error"], detail[:160])
         return summary
     finally:
+        from automation.collection_summary import summarize_collection
+        summary.setdefault("collection_summary", summarize_collection(summary))
         _CYCLE_LOCK.release()
 
 

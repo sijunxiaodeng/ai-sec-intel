@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import requests
 from collectors.cisa_kev import CISAKEVCollector
 from collectors.github_advisory import GitHubAdvisoryCollector
-from collectors.http import _get, CollectionBudgetExceeded, RequestBudget
+from collectors.http import _get, CollectionBudgetExceeded, CollectionRateLimited, RequestBudget
 from collectors.nvd import NVDCollector
 from incremental.api_collectors import (
     GithubModifiedCollector, NVDModifiedCollector, _api_timestamp, _iso_timestamp,
@@ -181,6 +181,18 @@ class IncrementalCollectorTests(unittest.TestCase):
 
 
 class RequestRetryTests(unittest.TestCase):
+    @patch('collectors.http.time.sleep')
+    def test_quota_failure_preserves_status_when_wait_exceeds_budget(self, sleep):
+        limited = Response({}, status=403, headers={'Retry-After': '120'})
+        session = session_for(limited)
+        with self.assertRaises(CollectionRateLimited) as caught:
+            _get(session, 'https://api.github.com/advisories',
+                 budget=RequestBudget(max_requests=4, deadline=time.monotonic() + 5))
+        self.assertEqual(caught.exception.response.status_code, 403)
+        self.assertTrue(limited.closed)
+        self.assertEqual(session.get.call_count, 1)
+        sleep.assert_not_called()
+
     @patch('collectors.http.time.sleep')
     def test_retry_wait_cannot_overrun_source_deadline(self, sleep):
         session = session_for(Response({}, status=429, headers={'Retry-After': '120'}), Response({}))

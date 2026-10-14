@@ -58,8 +58,8 @@ python -m venv .venv
 | `AUTO_MONITOR_ENABLED` | `1` | 后台自动调度总开关；关闭后仍可显式手动调用联网采集 |
 | `MONITOR_INTERVAL_MINUTES` | `15` | 完成一轮后的等待分钟数；显式设置优先 |
 | `MONITOR_INTERVAL_HOURS` | 未设置 | 兼容旧小时设置；分钟设置为空时生效 |
-| `B_MONITOR_SOURCE_TIMEOUT` | `45` | 单来源秒数 |
-| `B_MONITOR_OVERALL_TIMEOUT` | `180` | 子进程工作截止秒数，另有有界进程清理耗时 |
+| `B_MONITOR_SOURCE_TIMEOUT` | `120` | 单来源秒数；为最新发布查询、历史追补及数据库提交预留时间 |
+| `B_MONITOR_OVERALL_TIMEOUT` | `600` | 全轮子进程截止秒数，含 13 来源并发采集与分类，另有有界进程清理耗时 |
 | `AUTO_INGEST_ON_COLLECT` | 主应用 `1`，演示/Compose `0` | 每轮自动抓取 CVE 关联全文；独立资料同步仍由对应请求/计划任务执行 |
 | `ROOT_NVD_ENABLED` | 未设置 | 默认 embed/sidecar 使用监测模块 NVD；设 `1` 显式启用根兼容采集器 |
 

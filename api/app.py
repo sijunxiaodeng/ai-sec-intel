@@ -1379,6 +1379,7 @@ def monitor_status(light: int = 0):
         "last_run": st.get("last_run") or "",
         "next_run": next_run_iso(st) if automatic_enabled else "",
         "last_count": st.get("last_count") or 0,
+        "collection_summary": st.get("collection_summary"),
         "last_error": st.get("last_error") or "",
         "last_status": st.get("last_status") or "",
         "last_warnings": st.get("last_warnings") or [],
@@ -1593,6 +1594,7 @@ def _monitor_run(body: MonitorRunBody):
         # Persist the semantic outcome after the generic pipeline finalizer.
         # In particular, partial/failed cannot be overwritten by a done state.
         mark_run(count=inserted, keyword=keyword, source_results=result.get("source_results"),
+                 collection_summary=(b_cycle or {}).get("collection_summary"),
                  received=result.get("fetched", round_stats.get("kept", 0)), **outcome)
     except HTTPException:
         try:
@@ -1602,7 +1604,8 @@ def _monitor_run(body: MonitorRunBody):
         raise
     except Exception as exc:
         try:
-            mark_run(count=0, keyword=keyword, error=str(exc)[:200])
+            mark_run(count=0, keyword=keyword, error=str(exc)[:200],
+                     collection_summary=(b_cycle or {}).get("collection_summary"))
             finish_pipeline(ok=False, summary="监测失败：%s" % str(exc)[:160])
         except Exception:
             pass
@@ -1717,6 +1720,7 @@ def _monitor_run(body: MonitorRunBody):
         "library_sync": library,
         "team": team,
         "b_monitor": b_cycle,
+        "collection_summary": (b_cycle or {}).get("collection_summary"),
         "warnings": warnings,
         "source_diag": source_diag,
         "items": [_summary(record) for record in result["records"][:10]],

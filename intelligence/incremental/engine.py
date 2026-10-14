@@ -18,6 +18,8 @@ def ingest_incremental_source(
     settle_minutes: int = 10, window_days: int = 7,
     max_windows: int = 8, log: Callable = print, window_hours: float | None = None,
     adaptive_min_window_minutes: int = 15, max_attempts: int = 64,
+    cursor_name: str | None = None, initial_start: datetime | None = None,
+    target_end: datetime | None = None,
 ):
     if any(x < 0 for x in [bootstrap_days, overlap_minutes, settle_minutes]):
         raise ValueError('Bootstrap/overlap/settle values cannot be negative')
@@ -37,15 +39,22 @@ def ingest_incremental_source(
         raise ValueError('now must be timezone aware')
     now = now.astimezone(timezone.utc)
     safe_end = (now - timedelta(minutes=settle_minutes)).replace(microsecond=0)
-    cursor = cursors.get(name)
+    if target_end is not None:
+        if target_end.tzinfo is None or target_end > safe_end:
+            raise ValueError('Target must be timezone aware and no later than settled time')
+        safe_end = target_end.astimezone(timezone.utc)
+    if initial_start is not None and initial_start.tzinfo is None:
+        raise ValueError('Initial recovery start must be timezone aware')
+    checkpoint_name = cursor_name or name
+    cursor = cursors.get(checkpoint_name)
     if cursor is not None:
         if cursor.tzinfo is None:
             raise ValueError('Checkpoint must be timezone aware')
         cursor = cursor.astimezone(timezone.utc)
     start = ((cursor - timedelta(minutes=overlap_minutes)) if cursor else
-             (safe_end - timedelta(days=bootstrap_days)))
+             (initial_start or (safe_end - timedelta(days=bootstrap_days))))
     if cursor is not None:
-        replay_end = cursors.get_replay_end(name, cursor)
+        replay_end = cursors.get_replay_end(checkpoint_name, cursor)
         if isinstance(replay_end, datetime):
             start = max(start, replay_end)
     outcome = {'windows': 0, 'fetched': 0, 'inserted': 0, 'updated': 0,
@@ -69,7 +78,7 @@ def ingest_incremental_source(
     position = min(cursor, safe_end) if cursor else start
     first_window = True
     current_window = window
-    saved_window = cursors.get_window_seconds(name)
+    saved_window = cursors.get_window_seconds(checkpoint_name)
     if isinstance(saved_window, (int, float)) and math.isfinite(saved_window) and saved_window > 0:
         current_window = min(window, timedelta(seconds=saved_window))
         if current_window < window:
@@ -104,7 +113,7 @@ def ingest_incremental_source(
                     raise
                 current_window = max(span / 2, timedelta(minutes=adaptive_min_window_minutes))
                 end = query_start + current_window
-                cursors.save_window_seconds(name, current_window.total_seconds())
+                cursors.save_window_seconds(checkpoint_name, current_window.total_seconds())
                 outcome['split_windows'] += 1
                 log(f'{name}: 修改量超过分页预算，缩小窗口后重试；游标未推进')
         # NEVER advance cursor if pagination, conversion or DB ingestion fails.
@@ -113,11 +122,11 @@ def ingest_incremental_source(
         # that ingestion returned successfully.
         counts = {key: int(result[key]) for key in ('fetched', 'inserted', 'updated', 'unchanged')}
         if checkpoint is None or end > checkpoint:
-            cursors.advance(name, end)
+            cursors.advance(checkpoint_name, end)
             checkpoint = end
             outcome['windows'] += 1
         else:
-            cursors.save_replay_end(name, checkpoint, end)
+            cursors.save_replay_end(checkpoint_name, checkpoint, end)
             outcome['replayed_windows'] += 1
         for key in ('fetched', 'inserted', 'updated', 'unchanged'):
             outcome[key] += counts[key]
@@ -129,7 +138,7 @@ def ingest_incremental_source(
         if (isinstance(page_size, int) and isinstance(pages, int)
                 and counts['fetched'] <= page_size * pages // 4):
             current_window = min(current_window * 2, window)
-        cursors.save_window_seconds(name, current_window.total_seconds())
+        cursors.save_window_seconds(checkpoint_name, current_window.total_seconds())
     if position < safe_end:
         outcome['pending_reason'] = 'window_budget'
         log(f'{name}: 还有积压窗口，后续再次运行会继续处理')

@@ -13,6 +13,14 @@ class CollectionBudgetExceeded(RuntimeError):
     """A bounded collection may resume its uncommitted window next cycle."""
 
 
+class CollectionRateLimited(CollectionBudgetExceeded):
+    """Retain a provider's quota failure when its wait cannot fit the budget."""
+
+    def __init__(self, response):
+        super().__init__('Provider rate limit exceeds remaining collection budget')
+        self.response = response
+
+
 class RequestBudget:
     """Count every HTTP attempt and stop before exceeding a source deadline."""
 
@@ -98,7 +106,12 @@ def _get(session, url, *, headers=None, params=None, timeout=35, retries=4,
         if retryable and attempt < retries - 1:
             delay = _retry_delay(response, attempt)
             response.close()
-            budget.sleep(delay) if budget else time.sleep(delay)
+            try:
+                budget.sleep(delay) if budget else time.sleep(delay)
+            except CollectionBudgetExceeded:
+                if response.status_code in {403, 429}:
+                    raise CollectionRateLimited(response) from None
+                raise
             continue
         response.raise_for_status()
         return response

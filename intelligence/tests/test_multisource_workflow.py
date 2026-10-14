@@ -64,6 +64,9 @@ class MultisourceTests(unittest.TestCase):
                                            ('CVE-2026-10001',)).fetchone()[0]
                 first_seen = recorded_first_seen()
                 CursorStore(db).advance(source, cursor)
+                # Publication coverage is already current; this case isolates
+                # the independent nine-day modified-history backlog.
+                CursorStore(db).advance(source + ':published', now - timedelta(hours=1))
                 class Collector:
                     max_pages = 4
                     def __init__(self):
@@ -106,7 +109,8 @@ class MultisourceTests(unittest.TestCase):
             result = collect_source(spec, db, now=now, collector=Collector())
             self.assertEqual(result['status'], 'partial')
             self.assertFalse(result['recent_success'])
-            self.assertFalse(result['pending'])
+            self.assertTrue(result['pending'])
+            self.assertTrue(result['publication_recovery']['pending'])
             self.assertEqual(result['backfill']['lag_seconds'], 0)
             self.assertEqual(CursorStore(db).get('NVD'), now - timedelta(minutes=5))
             with closing(sqlite3.connect(db)) as con:
@@ -153,6 +157,7 @@ class MultisourceTests(unittest.TestCase):
                 patch.dict(os.environ, settings), patch('monitoring.multisource.time.monotonic', return_value=1000):
             db = Path(directory) / 'intel.db'
             CursorStore(db).advance('NVD', now - timedelta(hours=1))
+            CursorStore(db).advance('NVD:published', now - timedelta(hours=1))
             result = collect_source(get_sources()[0], db, now=now, collector=Collector())
             self.assertEqual(result['status'], 'success')
             self.assertEqual(deadlines, [1035, 1085])

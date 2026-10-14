@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import math
+import os
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -21,7 +23,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 
-from collectors.http import _get
+from collectors.http import RequestBudget, _get
 from classification.scope_policy import classify_scope
 
 
@@ -132,10 +134,13 @@ class _NoDTD(ET.TreeBuilder):
 
 class _StreamingSession:
     """Let the shared verified/retrying HTTP helper retain a bounded body."""
-    def __init__(self, session):
+    def __init__(self, session, *, allow_redirects=True):
         self.session = session
+        self.allow_redirects = allow_redirects
 
     def get(self, url, **kwargs):
+        if not self.allow_redirects:
+            kwargs["allow_redirects"] = False
         return self.session.get(url, stream=True, **kwargs)
 
 
@@ -337,12 +342,13 @@ class FeedCollector:
         return items, len(entries), filtered, metadata
 
     def _fetch(self, url, *, etag=None, last_modified=None, accept=None, extra_headers=None,
-               before_request=None):
+               before_request=None, allow_redirects=True, budget=None):
         headers = _condition_headers(etag, last_modified)
         headers["Accept"] = accept or "application/atom+xml, application/rss+xml, application/xml"
         headers.update(extra_headers or {})
-        return _get(_StreamingSession(self.session), url, headers=headers, timeout=self.timeout,
-                    before_request=before_request)
+        return _get(_StreamingSession(self.session, allow_redirects=allow_redirects),
+                    url, headers=headers, timeout=self.timeout,
+                    before_request=before_request, budget=budget)
 
     def collect(self, etag=None, last_modified=None) -> CollectionResult:
         response = self._fetch(self.url, etag=etag, last_modified=last_modified)
@@ -429,15 +435,42 @@ class GitHubVendorAdvisoryCollector(FeedCollector):
     def __init__(self, *args, token=None, max_pages=20, **kwargs):
         super().__init__(*args, **kwargs)
         parsed = urlsplit(self.url)
-        if (parsed.hostname != "api.github.com" or not re.fullmatch(
+        if (parsed.netloc != "api.github.com" or not re.fullmatch(
             r"/repos/[^/]+/[^/]+/security-advisories", parsed.path
         ) or parsed.query or parsed.fragment):
             raise ValueError("Vendor advisories require an official GitHub repository API endpoint")
         if max_pages < 1:
             raise ValueError("max_pages must be positive")
-        self.token, self.max_pages = token, max_pages
+        # An explicit empty string intentionally opts out of environment auth.
+        self.token = token if token is not None else (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN", ""))
+        if not isinstance(self.token, str) or "\r" in self.token or "\n" in self.token:
+            raise ValueError("Invalid GitHub authentication token")
+        self.max_pages = max_pages
+
+    def _validate_api_url(self, url):
+        target, initial = urlsplit(url), urlsplit(self.url)
+        if (target.scheme != "https" or target.netloc != "api.github.com"
+                or target.path != initial.path or target.fragment):
+            raise ValueError("Vendor pagination escaped the original HTTPS API endpoint")
+
+    def _fetch(self, url, **kwargs):
+        self._validate_api_url(url)
+        # Validate every destination before sending auth; requests must never
+        # follow a redirect on our behalf, including to a different API path.
+        response = super()._fetch(url, **kwargs, allow_redirects=False)
+        if 300 <= response.status_code < 400 and response.status_code != 304:
+            response.close()
+            raise ValueError("Vendor API redirects are not accepted")
+        return response
 
     def collect(self, etag=None, last_modified=None) -> CollectionResult:
+        child_seconds = float(os.getenv("INTELLIGENCE_CHILD_TIMEOUT_SECONDS", "120"))
+        if not math.isfinite(child_seconds) or child_seconds <= 0:
+            raise ValueError("Child timeout must be finite and positive")
+        # Keep a rate-limit wait from consuming the child process's lifetime
+        # and hiding the provider's status behind a generic process timeout.
+        budget = RequestBudget(max_requests=self.max_pages * 4,
+                               deadline=time.monotonic() + max(child_seconds / 2, child_seconds - 35))
         headers = {"X-GitHub-Api-Version": "2022-11-28"}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
@@ -446,7 +479,7 @@ class GitHubVendorAdvisoryCollector(FeedCollector):
         for page in range(self.max_pages):
             response = self._fetch(url, etag=etag if page == 0 else None,
                                    last_modified=last_modified if page == 0 else None,
-                                   accept="application/vnd.github+json", extra_headers=headers)
+                                   accept="application/vnd.github+json", extra_headers=headers, budget=budget)
             try:
                 if response.status_code == 304:
                     if page:
@@ -489,10 +522,7 @@ class GitHubVendorAdvisoryCollector(FeedCollector):
                         first_headers.get("last-modified") if page == 0 else None,
                         first_headers, count, filtered,
                     )
-                target, initial = urlsplit(next_url), urlsplit(self.url)
-                if (target.scheme != "https" or target.netloc != initial.netloc
-                        or target.path != initial.path or target.fragment):
-                    raise ValueError("Vendor pagination escaped the original HTTPS API endpoint")
+                self._validate_api_url(next_url)
                 if not payload:
                     raise ValueError("Vendor source returned an incomplete empty page")
                 url = next_url

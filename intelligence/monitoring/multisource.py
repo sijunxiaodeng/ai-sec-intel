@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
@@ -70,6 +71,70 @@ def document_collector(spec, now):
     return classes[spec.kind](spec.name, spec.category, spec.content_type or spec.category, url, **options)
 
 
+def recover_publications(spec, collector, store, cursors, *, now, safe_end,
+                         recent_start, recent_success, deadline, settle):
+    """Recover a fixed publication range separately from modification history.
+
+    A legacy database starts with a persisted seven-day lower bound (configurable
+    through the existing bootstrap setting), NOT a claim about earlier coverage.
+    Only complete, committed windows advance the independent published cursor.
+    The latest window may bridge the final gap only after all older slices finish.
+    """
+    key = spec.name + ':published'
+    anchor = cursors.bootstrap_start(key, safe_end - timedelta(
+        days=_integer('VULNERABILITY_BOOTSTRAP_DAYS', 7, 1)))
+    before = cursors.get(key)
+    target = recent_start if recent_success else safe_end
+    counts = dict(fetched=0, inserted=0, updated=0, unchanged=0)
+    # Reserve at least half of the remaining network time for modified history.
+    remaining = max(0, deadline - time.monotonic())
+    collector.max_pages = _integer('PUBLICATION_RECOVERY_MAX_PAGES', 4, 1)
+    collector.request_budget = RequestBudget(
+        max_requests=_integer('PUBLICATION_RECOVERY_MAX_REQUESTS', 6, 1),
+        deadline=time.monotonic() + min(remaining / 2,
+                                      _integer('PUBLICATION_RECOVERY_BUDGET_SECONDS', 25, 1)),
+    )
+
+    def ingest(name, rows, **kwargs):
+        result = store.ingest_batch(name, rows, **kwargs)
+        for field in counts:
+            counts[field] += int(result[field])
+        return result
+
+    try:
+        if (before or anchor) < target:
+            outcome = ingest_incremental_source(
+                name=spec.name, cursor_name=key,
+                collector=SimpleNamespace(collect_window=collector.collect_published_window,
+                                          max_pages=collector.max_pages,
+                                          page_size=getattr(collector, 'page_size', 100)),
+                store=SimpleNamespace(ingest_batch=ingest), cursors=cursors,
+                now=now, settle_minutes=settle, target_end=target, initial_start=anchor,
+                overlap_minutes=0, window_hours=_integer('PUBLICATION_RECOVERY_WINDOW_HOURS', 6, 1),
+                max_windows=_integer('PUBLICATION_RECOVERY_MAX_WINDOWS', 4, 1),
+                max_attempts=_integer('PUBLICATION_RECOVERY_MAX_ATTEMPTS', 8, 1),
+                adaptive_min_window_minutes=_integer('BACKFILL_MIN_WINDOW_MINUTES', 15, 1),
+            )
+        else:
+            outcome = dict(counts, windows=0, attempts=0, pending_reason=None)
+    except Exception as exc:
+        outcome = dict(counts, pending_reason='source_failure', error=safe_error(exc))
+    checkpoint = cursors.get(key)
+    # A recent success never skips an older missing publication range.
+    if recent_success and (checkpoint or anchor) >= recent_start:
+        cursors.advance(key, safe_end)
+        checkpoint = cursors.get(key)
+    outcome.update(bootstrap_start_at=iso_utc(anchor),
+                   coverage_scope='published_since_persisted_bootstrap_start',
+                   cursor_start_at=iso_utc(before) if before else None,
+                   cursor_end_at=iso_utc(checkpoint) if checkpoint else None,
+                   target_end_at=iso_utc(safe_end),
+                   lag_seconds=max(0, (safe_end - (checkpoint or anchor)).total_seconds()),
+                   requests=collector.request_budget.requests)
+    outcome['pending'] = outcome['lag_seconds'] > 0
+    return outcome
+
+
 def collect_source(spec, db_path, *, now=None, collector=None):
     """One independently retryable source; usable recent CVEs are stored first."""
     now = now or datetime.now(timezone.utc)
@@ -98,7 +163,8 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             lookback = _integer('RECENT_LOOKBACK_HOURS', 12, 1)
             if settle >= min(360, lookback * 60):
                 raise ValueError('Settlement must be below 6 hours and the recent lookback window')
-            safe_end = now - timedelta(minutes=settle)
+            safe_end = (now - timedelta(minutes=settle)).replace(microsecond=0)
+            recent_start = now - timedelta(hours=lookback)
             source_seconds = _integer('VULNERABILITY_SOURCE_BUDGET_SECONDS', 100, 1)
             child_seconds = float(os.getenv('INTELLIGENCE_CHILD_TIMEOUT_SECONDS', '120'))
             if child_seconds <= 0:
@@ -109,6 +175,12 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             deadline = source_started + network_seconds
             # Publication must not wait behind bulk edits of old records.
             recent_method = getattr(collector, 'collect_published_window', collector.collect_window)
+            cursors = CursorStore(db_path)
+            if callable(getattr(collector, 'collect_published_window', None)):
+                # Fix the migration range before the first HTTP request, so a
+                # killed/failed first cycle cannot slide it forward next time.
+                cursors.bootstrap_start(spec.name + ':published', safe_end - timedelta(
+                    days=_integer('VULNERABILITY_BOOTSTRAP_DAYS', 7, 1)))
             recent_counts = dict(fetched=0, inserted=0, updated=0, unchanged=0)
             recent_error = None
             try:
@@ -116,14 +188,19 @@ def collect_source(spec, db_path, *, now=None, collector=None):
                     max_requests=_integer('RECENT_MAX_REQUESTS', 6, 1),
                     deadline=min(deadline, time.monotonic() + _integer('RECENT_BUDGET_SECONDS', 35, 1)),
                 )
-                recent = recent_method(now - timedelta(hours=lookback), safe_end)
+                recent = recent_method(recent_start, safe_end)
                 recent_counts = store.ingest_batch(spec.name, recent, started_at=started)
             except Exception as exc:
                 recent_error = safe_error(exc)
             # Catch-up has its own monotonic cursor. Failure cannot erase the
             # already committed recent phase or falsely advance its checkpoint.
             # A publication failure must also not starve historical revisions.
-            cursors = CursorStore(db_path)
+            publication = None
+            if callable(getattr(collector, 'collect_published_window', None)):
+                publication = recover_publications(
+                    spec, collector, store, cursors, now=now, safe_end=safe_end,
+                    recent_start=recent_start, recent_success=recent_error is None,
+                    deadline=deadline, settle=settle)
             initial_checkpoint = cursors.get(spec.name)
             try:
                 collector.max_pages = _integer('BACKFILL_MAX_PAGES', 4, 1)
@@ -154,14 +231,16 @@ def collect_source(spec, db_path, *, now=None, collector=None):
                 return {'source': spec.name, 'category': spec.category,
                         'status': 'partial' if recent_error is None or progressed else 'failed',
                         **recent_counts, 'recent_success': recent_error is None, 'pending': True,
-                        'recent_error': recent_error, 'backfill': progress, 'error': safe_error(exc)}
+                        'recent_error': recent_error, 'publication_recovery': publication,
+                        'backfill': progress, 'error': safe_error(exc)}
             backlog['requests'] = collector.request_budget.requests
             if recent_error:
                 store.record_failure(spec.name, recent_error, started)
             return {'source': spec.name, 'category': spec.category,
-                    'status': 'partial' if backlog['pending'] or recent_error else 'success',
+                    'status': 'partial' if backlog['pending'] or recent_error or (publication or {}).get('pending') else 'success',
                     **recent_counts, 'recent_success': recent_error is None,
-                    'recent_error': recent_error, 'pending': backlog['pending'], 'backfill': backlog}
+                    'recent_error': recent_error, 'pending': backlog['pending'] or bool((publication or {}).get('pending')),
+                    'publication_recovery': publication, 'backfill': backlog}
         if spec.kind in ('cisa', 'osv'):
             collector = collector or (CISAKEVCollector() if spec.kind == 'cisa' else OSVCollector(**spec.options))
             rows = collector.collect()

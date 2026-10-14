@@ -175,6 +175,14 @@
             <span id="monitor-live-last">—</span>
           </div>
           <div class="monitor-live-row">
+            <span class="monitor-live-label">来源采集</span>
+            <span id="monitor-live-sources" title="来源记录包括漏洞及资料；同一CVE在不同来源可能重复计数，不等于AI主库唯一CVE新增。计数不完整时仅展示已确认的源报告合计。">来源采集统计未提供</span>
+          </div>
+          <details id="monitor-source-details" hidden>
+            <summary>查看各来源结果</summary>
+            <div id="monitor-source-list"></div>
+          </details>
+          <div class="monitor-live-row">
             <span class="monitor-live-label">下次刷新</span>
             <span id="monitor-live-next">—</span>
           </div>
@@ -189,7 +197,7 @@
         <div class="collect-pipeline" id="collect-pipeline" hidden>
           <header class="pipeline-head">
             <h3 class="pipeline-title">本轮监测</h3>
-            <p class="hint" id="pipeline-summary">刷新后显示查询返回、水位后保留、新增与合并。</p>
+            <p class="hint" id="pipeline-summary">刷新后显示AI情报同步返回、保留、新增与合并；上方单独显示来源采集结果。</p>
           </header>
           <div class="pipeline-metrics" id="pipeline-metrics" hidden></div>
           <ol class="pipeline-stages" id="pipeline-stages"></ol>
@@ -493,7 +501,7 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261014-investigations"></script>
+  <script src="/assets/app.js?v=20261014-source-status"></script>
   <script src="/assets/risks.js?v=20261014-investigations"></script>
 </body>
 </html>

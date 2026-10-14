@@ -327,7 +327,10 @@ function isDemoItem(item) {
 }
 
 function dateText(value) {
-  return (value || "").slice(0, 10) || "未知";
+  if (!value) return "未知";
+  var text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  return formatStamp(text);
 }
 
 function epssText(epss) {
@@ -544,8 +547,67 @@ function statusClass(status) {
 
 function formatStamp(value) {
   if (!value) return "—";
-  var text = String(value).replace("T", " ").replace("Z", " UTC");
-  return text.length > 22 ? text.slice(0, 19) + " UTC" : text;
+  var text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text + "（仅日期）";
+  // A naive timestamp has no known offset. Do not silently reinterpret it as
+  // UTC or the browser's zone; source dates without a time remain dates.
+  if (!/T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) return text.replace("T", " ") + "（时区未标明）";
+  var instant = new Date(text);
+  if (!Number.isFinite(instant.getTime())) return text;
+  var parts = {};
+  new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+    .formatToParts(instant).forEach(function (part) { parts[part.type] = part.value; });
+  return parts.year + "-" + parts.month + "-" + parts.day + " "
+    + parts.hour + ":" + parts.minute + ":" + parts.second + "（北京时间）";
+}
+
+function monitorCount(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? String(value) : "未提供";
+}
+
+function monitorResultLabel(status) {
+  return {success: "成功", partial: "部分成功", failed: "失败", timeout: "超时", running: "进行中",
+    skipped: "跳过", disabled: "未启用"}[status] || "状态未提供";
+}
+
+function sourceCoverageText(summary) {
+  if (!summary) return "来源采集统计未提供";
+  return "来源成功 " + monitorCount(summary.source_success) + "/" + monitorCount(summary.source_total)
+    + " · 部分成功 " + monitorCount(summary.source_partial) + " · 失败 " + monitorCount(summary.source_failed)
+    + " · 跳过 " + monitorCount(summary.source_skipped);
+}
+
+function collectionSummaryText(summary) {
+  if (!summary) return "来源采集统计未提供；AI情报新增数不能代表全部来源结果。";
+  var label = summary.counts_complete === true ? "来源记录新增 " : "已确认来源记录新增 ";
+  return "最近来源采集 " + (summary.finished_at ? formatStamp(summary.finished_at) : "结束时间未提供")
+    + "（" + monitorResultLabel(summary.status) + "） · " + label + monitorCount(summary.raw_inserted)
+    + " · 来源记录更新 " + monitorCount(summary.raw_updated) + " · " + sourceCoverageText(summary)
+    + (summary.counts_complete === false ? "。计数不完整，未上报来源可能已保存部分记录。" : "");
+}
+
+function renderCollectionSummary(summary) {
+  var line = $("monitor-live-sources");
+  if (line) line.textContent = collectionSummaryText(summary);
+  var details = $("monitor-source-details"), list = $("monitor-source-list");
+  if (!details || !list) return;
+  var rows = summary && Array.isArray(summary.sources) ? summary.sources : [];
+  details.hidden = rows.length === 0;
+  clear(list);
+  rows.forEach(function (row) {
+    var message = sourceLabel(row.source) + "：" + monitorResultLabel(row.status)
+      + " · 来源记录新增 " + monitorCount(row.inserted) + " · 更新 " + monitorCount(row.updated);
+    if (row.recent_success === true) message += " · 最近发布采集成功";
+    if (row.pending === true) message += " · 历史窗口仍待追赶";
+    if (row.error) message += " · " + String(row.error).slice(0, 240);
+    add(list, "p", "hint", message);
+  });
+}
+
+function aiMonitorHeadline(data) {
+  return "最近更新 " + formatStamp(data.last_run) + " · 上次AI情报新增 " + monitorCount(data.last_count)
+    + " 条 · 上次刷新" + monitorResultLabel(data.last_status);
 }
 
 function stageStatusLabel(status) {
@@ -621,7 +683,7 @@ function renderCollectPipeline(pipeline, opts) {
     } else if (pipeline.summary) {
       summaryEl.textContent = pipeline.summary;
     } else {
-      summaryEl.textContent = "本轮结果如下。无新增时请对照查询返回、水位后保留与合并。";
+      summaryEl.textContent = "下方是AI情报同步统计；来源采集结果见上方。AI情报新增为0不代表各来源没有新记录。";
     }
   }
   if (metricsEl) {
@@ -634,11 +696,11 @@ function renderCollectPipeline(pipeline, opts) {
       bits.push("<em>本轮统计待阶段结束</em>");
       if (metrics.failures) bits.push("失败 <strong>" + metrics.failures + "</strong>");
     } else {
-      bits.push("查询返回 <strong>" + (metrics.hit || 0) + "</strong>");
-      bits.push("水位后保留 <strong>" + (metrics.kept || 0) + "</strong>");
-      bits.push("新增 <strong>" + (metrics.inserted || 0) + "</strong>");
-      bits.push("合并 <strong>" + (metrics.merged || 0) + "</strong>");
-      bits.push("失败 <strong>" + (metrics.failures || 0) + "</strong>");
+      bits.push("AI同步返回 <strong>" + monitorCount(metrics.hit) + "</strong>");
+      bits.push("AI同步水位后保留 <strong>" + monitorCount(metrics.kept) + "</strong>");
+      bits.push("AI情报新增 <strong>" + monitorCount(metrics.inserted) + "</strong>");
+      bits.push("AI情报合并 <strong>" + monitorCount(metrics.merged) + "</strong>");
+      bits.push("流程失败阶段 <strong>" + monitorCount(metrics.failures) + "</strong>");
       if (metrics.external_fetches) {
         bits.push("外部请求 <strong>" + metrics.external_fetches + "</strong>");
       }
@@ -732,7 +794,7 @@ function renderMonitorLive(data, opts) {
         : "监测刷新中…";
     }
   } else {
-    stateEl.textContent = "空闲";
+    stateEl.textContent = data && data.last_status ? "空闲 · 上次刷新" + monitorResultLabel(data.last_status) : "空闲";
     if (phaseEl) {
       phaseEl.textContent = offlineDemo ? "离线样例已加载；手动刷新只同步本地样例。"
         : data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
@@ -741,11 +803,11 @@ function renderMonitorLive(data, opts) {
   }
   if (lastEl && data) {
     var last = data.last_run || "";
-    var count = data.last_count || 0;
     lastEl.textContent = last
-      ? (formatStamp(last) + (count ? " · 本轮新增 " + count + " 条" : " · 本轮新增 0"))
+      ? (formatStamp(last) + " · 上次AI情报新增 " + monitorCount(data.last_count) + " 条")
       : (offlineDemo ? "离线样例已就绪" : "尚未刷新；可点「立即刷新一轮」");
   }
+  renderCollectionSummary(data && data.collection_summary);
   if (nextEl) {
     if (running) nextEl.textContent = "本轮进行中…";
     else if (offlineDemo) nextEl.textContent = "离线演示不执行定时采集";
@@ -795,15 +857,16 @@ function loadMonitorStatus() {
     if (data.running) bits.push("正在刷新：" + (data.run_phase || "进行中"));
     else if (data.last_run) {
       bits.push("最近更新 " + formatStamp(data.last_run));
-      bits.push("上次新增 " + (data.last_count || 0) + " 条");
+      bits.push("上次AI情报新增 " + monitorCount(data.last_count) + " 条");
       var pm = (data.pipeline && data.pipeline.metrics) || {};
-      if (pm.hit != null) bits.push("查询返回 " + (pm.hit || 0));
-      if (pm.kept != null) bits.push("水位后保留 " + (pm.kept || 0));
-      if (pm.merged != null) bits.push("合并 " + (pm.merged || 0));
+      if (pm.hit != null) bits.push("AI同步返回 " + pm.hit);
+      if (pm.kept != null) bits.push("AI同步水位后保留 " + pm.kept);
+      if (pm.merged != null) bits.push("AI情报合并 " + pm.merged);
+      bits.push(collectionSummaryText(data.collection_summary));
     } else bits.push("尚未刷新；可点「立即刷新一轮」");
     if (!data.running && data.next_run) bits.push("下次刷新 " + formatStamp(data.next_run));
     if (data.last_error) bits.push("上次错误：" + data.last_error);
-    if (data.last_status) bits.push("上次结果：" + ({success: "成功", partial: "部分成功", failed: "失败"}[data.last_status] || data.last_status));
+    if (data.last_status) bits.push("上次结果：" + monitorResultLabel(data.last_status));
     if ((data.last_warnings || []).length && !data.last_error) bits.push("上次提示：" + data.last_warnings[0]);
     setMonitorStatus(bits.join(" · ") + "。");
     var line = $("monitor-line");
@@ -811,7 +874,7 @@ function loadMonitorStatus() {
       line.textContent = data.running
         ? ("监测进行中：" + (data.run_phase || "刷新中") + "…")
         : (data.last_run
-          ? ("最近更新 " + formatStamp(data.last_run) + " · 上次新增 " + (data.last_count || 0) + " 条")
+          ? (aiMonitorHeadline(data) + " · " + sourceCoverageText(data.collection_summary))
           : "可点「立即刷新监测」马上跑一轮");
     }
     return data;
@@ -831,7 +894,8 @@ function loadOverview() {
     var monitor = data.monitor || {};
     var team = data.team_intel || {};
     var sourceNames = (data.sources || []).slice(0, 6).map(sourceLabel);
-    var running = monitor.running ? "正在刷新" : (monitor.last_run ? "最近刷新 " + monitor.last_run : "可点监测页立即刷新");
+    var running = monitor.running ? "正在刷新" : (monitor.last_run
+      ? aiMonitorHeadline(monitor) + " · " + sourceCoverageText(monitor.collection_summary) : "可点监测页立即刷新");
     $("monitor-line").textContent =
       "监测 · " + running +
       " · 情报 " + data.items +
@@ -1957,14 +2021,15 @@ function diagnoseEmptyFeed(runData, feed, keyword) {
   srcLine("资料同步", diag.c_library_sync);
 
   var rs = (runData && runData.round_stats) || {};
+  bits.push(collectionSummaryText(runData && runData.collection_summary));
   if ((diag.written === 0 || (runData && runData.count === 0)) && (rs.inserted === 0 || rs.inserted == null)) {
-    bits.push("本轮 CVE 新增 0"
+    bits.push("本轮AI情报新增 0"
       + (rs.hit != null
         ? "（查询返回 " + rs.hit + "，水位后保留 " + (rs.kept || 0) + "，合并 " + (rs.merged || 0) + "）"
         : ""));
   }
   if (rs.hit > 0 && (rs.inserted || 0) === 0) {
-    bits.push("本轮无新增编号；已有情报仍可浏览");
+    bits.push("本轮无新增AI情报编号；不代表各来源没有新增记录，已有情报仍可浏览");
   }
   if (team.enabled !== false && team.reachable === false) {
     bits.push("部分来源暂不可用，仍可查看 NVD / OSV 与已有资料");
@@ -2104,10 +2169,12 @@ function runMonitorRefresh(options) {
     // Stop progress timers before painting the final pipeline so busy/result copy do not race.
     stopMonitorProgressTimers();
     if (data.pipeline) renderCollectPipeline(data.pipeline, { forceShow: true });
-    var roundLine = "查询返回 " + (rs.hit != null ? rs.hit : "—")
-      + " · 水位后保留 " + (rs.kept != null ? rs.kept : "—")
-      + " · 新增 " + (data.count != null ? data.count : (rs.inserted || 0))
-      + " · 合并 " + (rs.merged != null ? rs.merged : "—");
+    renderCollectionSummary(data.collection_summary);
+    var roundLine = "AI情报新增 " + monitorCount(data.count != null ? data.count : rs.inserted)
+      + " · AI同步返回 " + monitorCount(rs.hit)
+      + " · AI同步水位后保留 " + monitorCount(rs.kept)
+      + " · AI情报合并 " + monitorCount(rs.merged)
+      + "；" + collectionSummaryText(data.collection_summary);
     setMonitorStatus(outcomeLabel + "：" + roundLine
       + (bmon.status ? "；多源情报刷新 " + bmon.status : "")
       + (lib && lib.status ? "；资料同步 " + lib.status : "")
@@ -2120,7 +2187,7 @@ function runMonitorRefresh(options) {
         + total + " 条" + (keyword ? "（关键词「" + keyword + "」）" : "")
         + "。";
       if ((data.count || 0) === 0 && (rs.hit || 0) > 0) {
-        done += " 本轮无新增编号；可查看查询返回与水位后保留。";
+        done += " 本轮无新增AI情报编号；来源可能已新增非AI记录、更新已有记录，或有来源尚未完成，请对照来源结果。";
       }
       if (data.status === "failed") done += " 采集未成功，当前显示保留的已有记录。";
       setMonitorStatus(done);
@@ -2192,10 +2259,10 @@ on("collect-form", "submit", function (event) {
   }).then(function (data) {
     var resultLabel = {success: "补采成功", partial: "补采部分成功", failed: "补采失败"}[data.status] || "补采完成";
     var inserted = ((data.round_stats || {}).inserted) || 0;
-    setMonitorStatus(resultLabel + "：本轮新增 " + inserted + " 条 CVE；正在刷新情报流…");
+    setMonitorStatus(resultLabel + "：本轮AI情报新增 " + inserted + " 条 CVE；正在刷新情报流…");
     return loadItems("monitor").then(function (feed) {
       var total = ((feed && feed.counts) || {}).total || ((feed && feed.items) || []).length || 0;
-      var msg = resultLabel + "：本轮新增 " + inserted + " 条；当前流匹配「" + keyword + "」共 " + total + " 条。";
+      var msg = resultLabel + "：本轮AI情报新增 " + inserted + " 条；当前流匹配「" + keyword + "」共 " + total + " 条。";
       setMonitorStatus(msg);
       showToast(msg, total && ["failed", "partial"].indexOf(data.status) === -1 ? "ok" : "error");
       if (!total) showError(new Error("补采已执行，但关键词「" + keyword + "」在情报流中暂无匹配。可清除关键词查看全部。"));

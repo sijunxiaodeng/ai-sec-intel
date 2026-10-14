@@ -40,6 +40,21 @@ class CursorStore:
                 checkpoint_at TEXT NOT NULL,
                 replay_end_at TEXT NOT NULL
             )''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS incremental_bootstrap_starts(
+                source TEXT PRIMARY KEY,
+                start_at TEXT NOT NULL
+            )''')
+
+    def bootstrap_start(self, source: str, default: datetime) -> datetime:
+        """Persist a recovery lower bound; this is NOT a completed-window cursor."""
+        if not source.strip():
+            raise ValueError('source must not be empty')
+        with self._connect() as conn:
+            conn.execute('INSERT OR IGNORE INTO incremental_bootstrap_starts VALUES (?,?)',
+                         (source, iso_utc(default)))
+            row = conn.execute('SELECT start_at FROM incremental_bootstrap_starts WHERE source=?',
+                               (source,)).fetchone()
+        return as_utc(row['start_at'])
 
     @contextmanager
     def _connect(self):

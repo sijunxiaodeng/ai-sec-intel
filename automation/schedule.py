@@ -281,11 +281,12 @@ def combine_monitor_outcome(result, *, b_cycle=None, libraries=()):
 
 
 def mark_run(*, count=0, keyword="", error="", status=None, warnings=None,
-             metrics=None, source_results=None, received=None):
+             metrics=None, source_results=None, received=None, collection_summary=None):
     """Update monitor state after a manual /api/monitor/run (or other external cycle)."""
     data = ensure_state()
     data["last_run"] = _now()
     data["last_count"] = int(count or 0)
+    data["collection_summary"] = collection_summary
     if received is not None:
         data["last_received"] = int(received or 0)
     data["last_keyword"] = keyword or data.get("last_keyword") or ""
@@ -451,6 +452,7 @@ def _run_once(keyword=None):
             keyword=keyword,
             metrics={key: round_stats.get(key, 0) for key in ("hit", "kept", "inserted", "merged", "external_fetches")},
             source_results=result.get("source_results"),
+            collection_summary=(b_result or {}).get("collection_summary"),
             **outcome,
         )
         log_line(
@@ -459,7 +461,8 @@ def _run_once(keyword=None):
         )
     except Exception as exc:
         collect_error = exc
-        mark_run(count=0, keyword=keyword, status="failed", error="监测流程未完成（%s）" % type(exc).__name__)
+        mark_run(count=0, keyword=keyword, status="failed", error="监测流程未完成（%s）" % type(exc).__name__,
+                 collection_summary=(b_result or {}).get("collection_summary"))
         try:
             finish_pipeline(ok=False, summary=str(exc)[:200])
         except Exception:
