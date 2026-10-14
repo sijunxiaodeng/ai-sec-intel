@@ -16,7 +16,7 @@ try {
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
     $MockScript = Join-Path $BinDir 'mock-docker.ps1'
     $MockCode = @'
-$DockerArgs = @($args)
+$DockerArgs = @($args | ForEach-Object { if ($_ -eq '__AISEC_STDIN_DASH__') { '-' } else { $_ } })
 Add-Content -LiteralPath $env:AISEC_TEST_CALLS -Encoding UTF8 -Value (ConvertTo-Json -Compress -InputObject $DockerArgs)
 $Case = $env:AISEC_TEST_CASE
 if ($DockerArgs[0] -eq 'info') {
@@ -57,7 +57,12 @@ exit 3
     Set-Content -LiteralPath $MockScript -Value $MockCode -Encoding UTF8
     if ($IsWindowsHost) {
         # A .cmd native process preserves the actual external-command exit code.
-        $MockLauncher = '@echo off' + "`r`n" + '"' + $PowerShellExe + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0mock-docker.ps1" %*' + "`r`nexit /b %errorlevel%`r`n"
+        # Windows powershell.exe -File treats a lone '-' as an invalid empty
+        # parameter name before the mock can run. Docker.exe accepts it as stdin.
+        # Encode only this fixed mock argument and restore it inside the script.
+        $MockLauncher = '@echo off' + "`r`nsetlocal`r`n" + 'set "AISEC_NATIVE_ARGUMENTS=%*"' + "`r`n" +
+            'set "AISEC_NATIVE_ARGUMENTS=%AISEC_NATIVE_ARGUMENTS:python -=python __AISEC_STDIN_DASH__%"' + "`r`n" +
+            '"' + $PowerShellExe + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0mock-docker.ps1" %AISEC_NATIVE_ARGUMENTS%' + "`r`nexit /b %errorlevel%`r`n"
         Set-Content -LiteralPath (Join-Path $BinDir 'docker.cmd') -Value $MockLauncher -Encoding Ascii
     } else {
         $env:AISEC_TEST_PWSH = $PowerShellExe
