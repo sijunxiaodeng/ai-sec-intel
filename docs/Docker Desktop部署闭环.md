@@ -117,4 +117,18 @@ docker compose --env-file .env.production -f docker-compose.actions.yml down
 
 证据完整保存于 [Docker Actions 交付验收 JSON](evidence/docker-actions-delivery-20261014.json)。此隔离验收为便于核查而关闭了主应用自动轮询/富化，并显式同步两个消费者；证明真实快照安装、提供、持久消费、重启与换代，没有证明后台富化、索引完成或持续无人值守。云端 Docker 构建遇到 DNS 限制，验收镜像通过同一锁文件的依赖 wheels 离线构建；标准 Dockerfile 另由 GitHub 容器 CI 验证。
 
-第 47 次真实云采集有一个来源失败、一个部分完成，因此部署同步成功不等于所有上游来源正常或历史积压已经清空。上述结果属于云端隔离机器，不代表你的 Windows 电脑已经部署。Windows 脚本的原生 PowerShell 语法和隔离 mock 流程由 CI 的 `windows-deployment-scripts` 作业核查。
+第 47 次真实云采集有一个来源失败、一个部分完成，因此部署同步成功不等于所有上游来源正常或历史积压已经清空。上述表格记录云端隔离机器的结果，Windows 本机验收见下一节。Windows 脚本的原生 PowerShell 语法和隔离 mock 流程由 CI 的 `windows-deployment-scripts` 作业核查。
+
+## Windows 本机验收（用户提供）
+
+2026-10-14 北京时间 18:51:10，用户在自己的 Windows Docker Desktop 上运行 `production-check.ps1 -Sync -WaitSeconds 900`，并提供了完整终端 JSON。记录见 [Windows Actions 交付验收 JSON](evidence/windows-actions-delivery-20261014.json)。
+
+| 检查 | 用户提供的实测结果 |
+| --- | --- |
+| 目标云快照 | 第 48 次运行 `38548485608`，代码 `3076843103054facccdb3c2c1b45ee6c7c207140` |
+| 快照提供与最近自动拉取 | `snapshot_serving_verified=true`，`poller_observation=ready` |
+| 漏洞与资料持久消费 | 两路 `caught_up=true`，同一 epoch `53dc8c0640b547e5926bc9555f05ef07`，上限 `37037` |
+| 部署同步闭环 | `deployment_import_loop_verified=true` |
+| 本次等待及验收耗时 | `325.305` 秒，约 5 分 25 秒 |
+
+该证据来自用户本机报告，未对用户电脑进行独立远程检查。它支持本机自动镜像拉取、主应用代理提供快照和两路持久入库的闭环结论。`processing_verified=false` 保留后台富化及索引完成的独立验收；本次耗时不是问答响应或采集延迟指标，也没有建立连续无人值守运行、质量评测或恢复演练证据。
