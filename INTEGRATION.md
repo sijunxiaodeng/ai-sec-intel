@@ -8,15 +8,16 @@
 
 ## Bash 一键演示
 
+运维前门是根目录 **Makefile**（说明见 [DEPLOY.md](DEPLOY.md)）：
+
 ```bash
 git pull origin main
-python -m pip install -r requirements.txt
-python scripts/offline_demo.py  # 首次自动生成合成数据，不联网采集
-# 或 ./scripts/demo-up.sh（默认离线；首次安装/构建需包网络）
-./scripts/demo-smoke.sh
+make up            # 默认离线；有 Docker → offline compose，否则本地 .venv
+make smoke
+make down
 ```
 
-脚本优先使用 Docker Compose，无可用 Docker 时使用本地 `.venv`。默认离线演示使用合成样例；联网演示须显式设置 `DEMO_NETWORK=online`。停止自己启动的演示用 `./scripts/demo-down.sh`。
+等价脚本：`./scripts/demo-up.sh` / `demo-smoke.sh` / `demo-down.sh`。无 Docker 时先 `python -m pip install -r requirements.txt`；也可直接 `python scripts/offline_demo.py`（前台）。默认离线合成样例；联网演示用 `make online` 或 `DEMO_NETWORK=online`。
 
 只启动离线容器、不触发联网采集时：
 

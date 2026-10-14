@@ -10,17 +10,40 @@ source "$SCRIPT_DIR/demo-lib.sh"
 
 MODE="${DEMO_MODE:-auto}"
 # Offline data is the default demo. Online collection remains explicit.
+# Prefer: make up / make offline  →  single product surface :8023
 if [[ "${DEMO_NETWORK:-offline}" == "offline" && "$DEMO_ACTIONS_MODE" == "0" ]]; then
   if [[ "$MODE" != "local" ]] && have_docker; then
+    log "starting offline compose (project=$COMPOSE_PROJECT-offline)"
     docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" up --build --detach --wait
     printf '%s\n' offline-compose > "$DEMO_DIR/mode"
+    wait_http "$MAIN_URL/api/overview" "offline demo" 90
     log "offline synthetic demo ready; external collection/model calls disabled"
+    log "  Open only:     $MAIN_URL"
+    log "  Stop:          make down   # or ./scripts/demo-down.sh"
     exit 0
   fi
   ensure_venvs
+  if [[ -f "$DEMO_DIR/main.pid" ]] && kill -0 "$(cat "$DEMO_DIR/main.pid")" 2>/dev/null; then
+    log "offline local already running pid=$(cat "$DEMO_DIR/main.pid")"
+    printf '%s\n' offline-local > "$DEMO_DIR/mode"
+    wait_http "$MAIN_URL/api/overview" "offline demo" 30
+    exit 0
+  fi
+  log "Docker unavailable — starting offline local on $MAIN_URL"
+  (
+    cd "$ROOT"
+    nohup "$ROOT/.venv/bin/python" "$SCRIPT_DIR/offline_demo.py" \
+      --data-directory "$DEMO_DIR/offline" --host 127.0.0.1 --port "$MAIN_PORT" \
+      >"$DEMO_DIR/offline-demo.log" 2>&1 &
+    echo $! >"$DEMO_DIR/main.pid"
+  )
   printf '%s\n' offline-local > "$DEMO_DIR/mode"
-  printf '%s\n' "$$" > "$DEMO_DIR/main.pid"
-  exec "$ROOT/.venv/bin/python" "$SCRIPT_DIR/offline_demo.py" --data-directory "$DEMO_DIR/offline" --port "$MAIN_PORT"
+  wait_http "$MAIN_URL/api/overview" "offline demo" 120
+  log "offline synthetic demo ready; external collection/model calls disabled"
+  log "  Open only:     $MAIN_URL"
+  log "  Logs:          $DEMO_DIR/offline-demo.log   # or make logs"
+  log "  Stop:          make down   # or ./scripts/demo-down.sh"
+  exit 0
 fi
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
 export AUTO_INGEST_ON_COLLECT
@@ -65,8 +88,8 @@ start_compose() {
     -o "$DEMO_DIR/auto-monitor-boot.json" \
     && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
     || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
-  log "Keep running: docker compose -p $COMPOSE_PROJECT logs -f"
-  log "Stop:           ./scripts/demo-down.sh"
+  log "Keep running: make logs   # or docker compose -p $COMPOSE_PROJECT logs -f"
+  log "Stop:           make down   # or ./scripts/demo-down.sh"
 }
 
 start_local_sidecar() {
@@ -174,8 +197,8 @@ start_local() {
     -o "$DEMO_DIR/auto-monitor-boot.json" \
     && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
     || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
-  log "Logs: $DEMO_DIR/main-api.log${TEAM_INTEL_MODE:+  $DEMO_DIR/b-api.log}"
-  log "Stop: ./scripts/demo-down.sh"
+  log "Logs: make logs   # or $DEMO_DIR/main-api.log"
+  log "Stop: make down   # or ./scripts/demo-down.sh"
 }
 
 case "$MODE" in

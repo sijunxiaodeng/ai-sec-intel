@@ -1,3 +1,5 @@
+# 默认演示路径（make up / make offline）。单端口 :8023，合成样例，不联网采集。
+# 数据卷: offline-demo-data。停止: make down
 name: ai-sec-intel-offline-demo
 services:
   app:

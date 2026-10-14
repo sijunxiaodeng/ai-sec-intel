@@ -5,17 +5,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || true)"
-if [[ "$mode" == "offline-compose" ]]; then
-  docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" down
-  rm -f "$DEMO_DIR/mode"
-  exit 0
-fi
-if [[ "$mode" == "compose" ]] || have_docker; then
-  if have_docker; then
-    log "stopping compose project $COMPOSE_PROJECT"
-    docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" down || true
-  fi
-fi
+case "$mode" in
+  offline-compose)
+    if have_docker; then
+      log "stopping offline compose project $COMPOSE_PROJECT-offline"
+      docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" down || true
+    fi
+    ;;
+  compose)
+    if have_docker; then
+      log "stopping compose project $COMPOSE_PROJECT"
+      docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" down || true
+    fi
+    ;;
+  *)
+    # Unknown/empty: only tear down compose if Docker is up and project is running;
+    # never kill unrelated production stacks by project name alone beyond demo projects.
+    if have_docker; then
+      if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT-offline" 2>/dev/null || true)" ]]; then
+        docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" down || true
+      fi
+      if [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" 2>/dev/null || true)" ]]; then
+        docker compose -p "$COMPOSE_PROJECT" -f "$ROOT/docker-compose.yml" down || true
+      fi
+    fi
+    ;;
+esac
 for name in b.pid main.pid; do
   if [[ -f "$DEMO_DIR/$name" ]]; then
     pid="$(cat "$DEMO_DIR/$name" || true)"
