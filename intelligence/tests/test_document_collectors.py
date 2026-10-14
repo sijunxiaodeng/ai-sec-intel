@@ -268,6 +268,32 @@ class VendorTests(unittest.TestCase):
         self.assertEqual(len(result.items), 2)
         self.assertIsNone(result.etag)
 
+    def test_vendor_numeric_repository_pagination_stays_on_original_repository(self):
+        next_query = "?page=2&per_page=100"
+        collector = self.collector(
+            Response(json.dumps([self.advisory()]),
+                     next_url="https://api.github.com/repositories/599547518/security-advisories" + next_query,
+                     headers={"ETag": '"page-1"'}),
+            Response(json.dumps([self.advisory("GHSA-dddd-eeee-ffff")])),
+            token="fixture-token",
+        )
+        result = collector.collect(etag='"prior-page-1"')
+        self.assertEqual(result.fetched_count, 2)
+        self.assertEqual(len(result.items), 2)
+        self.assertIsNone(result.etag)
+        self.assertEqual([url for url, _ in collector.session.calls],
+                         [self.url + "?per_page=100", self.url + next_query])
+        for _, options in collector.session.calls:
+            self.assertEqual(options["headers"]["Authorization"], "Bearer fixture-token")
+            self.assertFalse(options["allow_redirects"])
+        self.assertNotIn("If-None-Match", collector.session.calls[1][1]["headers"])
+
+    def test_vendor_numeric_alias_cannot_be_requested_directly(self):
+        collector = self.collector(token="fixture-token")
+        with self.assertRaises(ValueError):
+            collector._fetch("https://api.github.com/repositories/599547518/security-advisories?page=2")
+        self.assertEqual(collector.session.calls, [])
+
     def test_vendor_never_forwards_authentication_to_foreign_pagination_url(self):
         collector = self.collector(Response(json.dumps([self.advisory()]), next_url="https://unknown.test/advisories"),
                                    token="TEST_TOKEN")
@@ -324,6 +350,12 @@ class VendorTests(unittest.TestCase):
             self.url.replace("api.github.com", "fixture-user:fixture-password@api.github.com"),
             self.url.replace("/example/", "/another-owner/"),
             self.url + "#fragment",
+            "https://api.github.com/repositories/not-a-number/security-advisories?page=2",
+            "https://api.github.com/repositories/599547518/issues?page=2",
+            "https://api.github.com/repositories/599547518/security-advisories/extra?page=2",
+            "https://api.github.com/repositories/599547518%2Fsecurity-advisories?page=2",
+            "https://foreign.test/repositories/599547518/security-advisories?page=2",
+            "http://api.github.com/repositories/599547518/security-advisories?page=2",
         ]
         for url in urls:
             response = Response(json.dumps([self.advisory()]), next_url=url)

@@ -102,6 +102,7 @@ jobs:
           node questions/test_article_candidates_ui.js
           node questions/test_asset_observations_ui.js
           node questions/test_poc_sources_ui.js
+          node questions/test_monitor_status_ui.js
 
   intelligence-tests:
     runs-on: ubuntu-latest

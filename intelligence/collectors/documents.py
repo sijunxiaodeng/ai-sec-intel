@@ -453,6 +453,16 @@ class GitHubVendorAdvisoryCollector(FeedCollector):
                 or target.path != initial.path or target.fragment):
             raise ValueError("Vendor pagination escaped the original HTTPS API endpoint")
 
+    def _pagination_url(self, url):
+        target, initial = urlsplit(url), urlsplit(self.url)
+        # GitHub may emit numeric repository aliases in Link headers. Reuse
+        # only their pagination query, never the alias's repository identity.
+        alias = re.fullmatch(r"/repositories/[1-9][0-9]*/security-advisories", target.path)
+        if (target.scheme != "https" or target.netloc != "api.github.com" or target.fragment
+                or (target.path != initial.path and not alias)):
+            raise ValueError("Vendor pagination escaped the original HTTPS API endpoint")
+        return urlunsplit((initial.scheme, initial.netloc, initial.path, target.query, ""))
+
     def _fetch(self, url, **kwargs):
         self._validate_api_url(url)
         # Validate every destination before sending auth; requests must never
@@ -522,7 +532,7 @@ class GitHubVendorAdvisoryCollector(FeedCollector):
                         first_headers.get("last-modified") if page == 0 else None,
                         first_headers, count, filtered,
                     )
-                self._validate_api_url(next_url)
+                next_url = self._pagination_url(next_url)
                 if not payload:
                     raise ValueError("Vendor source returned an incomplete empty page")
                 url = next_url
