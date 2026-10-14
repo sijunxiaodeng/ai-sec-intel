@@ -26,7 +26,21 @@ def main(argv=None):
         result = run_cycle(ROOT, db_path=Path(args.db).resolve(), workers=args.workers,
                            timeout_seconds=args.timeout, poll_interval_minutes=args.poll_minutes)
     except Exception as exc:
-        result = {"status": "failed", "sources": {}, "error": type(exc).__name__ + ": B collector could not complete"}
+        detail = str(exc).strip()
+        kind = type(exc).__name__
+        if kind == "ModuleNotFoundError" and ("fcntl" in detail or getattr(exc, "name", "") == "fcntl"):
+            error = (
+                "当前运行环境缺少可用的文件锁能力（常见于不完整的 Windows/精简 Python），"
+                "多源刷新未能完成。"
+            )
+        elif kind == "ModuleNotFoundError":
+            missing = getattr(exc, "name", None) or detail[:80] or "未知模块"
+            error = "缺少运行依赖「%s」，多源刷新未能完成。" % missing
+        else:
+            error = "多源刷新未能完成（%s）" % kind
+            if detail:
+                error = "%s：%s" % (error, detail[:120])
+        result = {"status": "failed", "sources": {}, "error": error}
         status = 1
     target = Path(args.result)
     temporary = target.with_suffix(".tmp")

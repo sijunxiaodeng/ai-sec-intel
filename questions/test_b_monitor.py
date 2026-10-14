@@ -92,3 +92,38 @@ class BMonitorTest(unittest.TestCase):
                 if key == "intelligence" or key.startswith("intelligence."):
                     sys.modules.pop(key, None)
             sys.modules.update(saved_modules)
+
+    def test_fcntl_module_missing_yields_chinese_product_error(self):
+        """#30 fixed path order; fcntl missing on Windows must not surface ModuleNotFoundError."""
+        with patch(
+            "intelligence.deployment.state_role.claim_role",
+            side_effect=ModuleNotFoundError("No module named 'fcntl'", name="fcntl"),
+        ), patch("api.b_monitor.subprocess.Popen") as spawn:
+            result = b_monitor.run_b_monitor_cycle()
+        self.assertEqual(result["status"], "failed")
+        error = result.get("error") or ""
+        self.assertNotIn("ModuleNotFoundError", error)
+        self.assertIn("文件锁", error)
+        spawn.assert_not_called()
+
+    def test_cycle_failure_message_maps_fcntl(self):
+        message = b_monitor.cycle_failure_message(
+            ModuleNotFoundError("No module named 'fcntl'", name="fcntl")
+        )
+        self.assertIn("文件锁", message)
+        self.assertNotIn("ModuleNotFoundError", message)
+
+    def test_worker_fcntl_error_is_productized(self):
+        def launch(command, **kwargs):
+            path = Path(command[command.index("--result") + 1])
+            path.write_text(json.dumps({
+                "status": "failed",
+                "sources": {},
+                "error": "ModuleNotFoundError: No module named 'fcntl'",
+            }))
+            return Mock(returncode=1)
+        with patch("api.b_monitor.subprocess.Popen", side_effect=launch):
+            result = b_monitor.run_b_monitor_cycle()
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("文件锁", result.get("error") or "")
+        self.assertNotIn("ModuleNotFoundError", result.get("error") or "")

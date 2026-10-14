@@ -21,10 +21,12 @@ from pathlib import Path
 
 try:
     from .actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
-    from .state_role import claim_role, ProcessFileLock
+    from .file_lock import exclusive_file_lock
+    from .state_role import claim_role
 except ImportError:  # Direct script invocation in the B container.
     from actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
-    from state_role import claim_role, ProcessFileLock
+    from file_lock import exclusive_file_lock
+    from state_role import claim_role
 
 
 def _read_json(path):
@@ -102,7 +104,7 @@ def install_snapshot(payload, directory, *, repository, branch, run_id,
         raise StateError("Snapshot exceeds size limit")
     directory = Path(directory).absolute()
     claim_role(directory, "actions-mirror")
-    with ProcessFileLock(directory / ".publication.lock", timeout=120):
+    with exclusive_file_lock(directory / ".publication.lock", timeout=120):
         current = directory / "current"
         if current.exists() and not current.is_symlink():
             raise StateError("Current generation must be a managed symlink")
@@ -206,23 +208,26 @@ def main(argv=None):
     try:
         claim_role(directory, "actions-mirror")
         client = GitHubClient(os.getenv("GITHUB_TOKEN"), args.repository)
-        with ProcessFileLock(directory / ".mirror.lock"):
-            while True:
-                try:
-                    result = deliver_latest(client, directory, workflow=args.workflow)
-                    record_status(directory, status="ready", poll_interval_seconds=args.interval_seconds, **result)
-                    print(f"Verified Actions delivery: run {result['run_id']}; changed={result['changed']}", flush=True)
-                    failed = False
-                except (StateError, ValueError, KeyError, sqlite3.DatabaseError, OSError, zipfile.BadZipFile):
-                    # No response bodies, token-bearing URLs or exception details.
-                    record_status(directory, status="degraded", reason="delivery_validation_or_network_failed",
-                                  poll_interval_seconds=args.interval_seconds,
-                                  serving_previous=bool((directory / "current/intelligence.db").is_file()))
-                    print("Actions delivery failed; previous verified generation retained", flush=True)
-                    failed = True
-                if args.once:
-                    return 1 if failed else 0
-                time.sleep(args.interval_seconds)
+        try:
+            with exclusive_file_lock(directory / ".mirror.lock", blocking=False):
+                while True:
+                    try:
+                        result = deliver_latest(client, directory, workflow=args.workflow)
+                        record_status(directory, status="ready", poll_interval_seconds=args.interval_seconds, **result)
+                        print(f"Verified Actions delivery: run {result['run_id']}; changed={result['changed']}", flush=True)
+                        failed = False
+                    except (StateError, ValueError, KeyError, sqlite3.DatabaseError, OSError, zipfile.BadZipFile):
+                        # No response bodies, token-bearing URLs or exception details.
+                        record_status(directory, status="degraded", reason="delivery_validation_or_network_failed",
+                                      poll_interval_seconds=args.interval_seconds,
+                                      serving_previous=bool((directory / "current/intelligence.db").is_file()))
+                        print("Actions delivery failed; previous verified generation retained", flush=True)
+                        failed = True
+                    if args.once:
+                        return 1 if failed else 0
+                    time.sleep(args.interval_seconds)
+        except OSError as exc:
+            raise StateError("Another mirror already owns this volume") from exc
     except (StateError, RuntimeError, OSError):
         print("Actions mirror cannot start; verify token access and use a separate mirror volume", flush=True)
         return 1
