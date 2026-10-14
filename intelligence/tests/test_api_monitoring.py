@@ -131,6 +131,7 @@ class LatencyTests(unittest.TestCase):
         result = latency_report(con, '2026-10-08T00:00:00Z')
         self.assertEqual(result['continuous_monitoring']['samples'], 1)
         self.assertEqual(result['continuous_monitoring']['p95_hours'], 2)
+        self.assertEqual(result['continuous_monitoring']['mean_hours'], 2)
         self.assertEqual(result['all_observed_including_backfill']['samples'], 2)
         self.assertEqual(result['excluded'], {'missing_or_imprecise_time': 2, 'negative_delay': 1,
                                              'future_timestamp': 0, 'invalid_payload': 0})

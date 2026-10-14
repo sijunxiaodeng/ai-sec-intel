@@ -96,9 +96,11 @@ def run(base, dataset, mode, case_ids=None):
                      "answer": result["answer"], "evidence": result.get("evidence", []),
                      "manual_review": {"reviewer": None, "independent_human": None,
                                        "source_supported": None, "relevant": None, "conditions_preserved": None,
-                                       "synthesis_correct": None, "notes": ""}})
+                                       "synthesis_correct": None, "reasoning_kind": None,
+                                       "reasoning_explained": None, "notes": ""}})
     return {"schema_version": 1, "recorded_at": datetime.now(timezone.utc).isoformat(), "mode": mode,
-            "purpose": dataset["purpose"], "source_manifest": sources, "rows": rows,
+            "purpose": dataset["purpose"], "dataset_cases": len(dataset["cases"]),
+            "source_manifest": sources, "rows": rows,
             "summary": {"cases": len(rows), "automatic_passed": sum(r["automatic_passed"] for r in rows),
                         "model_attempted": sum(r["model_attempted"] for r in rows),
                         "model_accepted": sum(r["used_model"] for r in rows),
@@ -120,9 +122,10 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("data/relations-evaluation.json"))
     parser.add_argument("--public-output", type=Path)
     args = parser.parse_args()
-    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
+    frozen_bytes = args.dataset.read_bytes()
+    dataset = json.loads(frozen_bytes)
     report = run(args.url, dataset, args.mode, args.case)
-    report["dataset_sha256"] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
+    report["dataset_sha256"] = hashlib.sha256(frozen_bytes).hexdigest()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.public_output:

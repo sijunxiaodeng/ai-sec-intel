@@ -6,8 +6,11 @@ import json
 import math
 from pathlib import Path
 import re
+import sqlite3
 
 from enrichment.documents import digest
+from enrichment.history import catalogue, field_evidence, related as related_history, weaknesses
+from enrichment.risk_taxonomy import candidates as taxonomy_candidates
 from rag.evidence import DEFAULT_DB, CVE, _connection
 
 FIRST = "https://www.first.org/cvss/v3.1/specification-document"
@@ -91,10 +94,12 @@ def _empty(cve_id, detail):
     return {"schema_version": 1, "cve_id": cve_id, "status": "insufficient_evidence",
             "detail": detail, "cvss": None, "cvss_candidates": [], "affected_ranges": [],
             "attack_conditions": [], "technical_impact": [], "poc_candidates": [], "fix_records": [],
+            "weaknesses": [], "historical_relations": {"status": "insufficient_evidence", "items": [], "evidence": []},
+            "risk_taxonomy": {"status": "insufficient_evidence", "items": [], "evidence": []},
             "warnings": [], "evidence": [], "asset_impact": {"status": "unknown", "reason": "此技术报告未结合具体资产及部署信息；登记清单的匹配结果另行评估"}}
 
 
-def assess(cve_id, db_path=DEFAULT_DB):
+def assess(cve_id, db_path=DEFAULT_DB, *, history_catalog=None):
     cve_id = cve_id.upper()
     report = _empty(cve_id, "请先抓取该编号的 NVD 关联资料")
     if not CVE.fullmatch(cve_id) or not Path(db_path).exists():
@@ -150,6 +155,11 @@ def assess(cve_id, db_path=DEFAULT_DB):
     metrics.sort(key=lambda r: (order.get(r["version"], 4), 0 if r["metric_type"] == "Primary" else 1, r.get("source") or ""))
     report["cvss_candidates"] = metrics
     report["cvss"] = metrics[0] if metrics else None
+    for weakness in weaknesses(cve):
+        citation = field_evidence(cve, doc, sha, weakness["pointer"], weakness.pop("source_value"), "weakness")
+        weakness.update(source_url=source_url, evidence_ids=[citation["citation_id"]])
+        report["weaknesses"].append(weakness)
+        report["evidence"].append(citation)
     for i, block in enumerate(cve.get("configurations") or []):
         for match in _walk_config(block, "configurations/" + str(i)):
             match["evidence_ids"] = cite(match["pointer"])
@@ -206,14 +216,29 @@ def assess(cve_id, db_path=DEFAULT_DB):
     standards = {"4.0": FIRST4, "3.1": FIRST, "3.0": FIRST30}
     report["interpretation_standard"] = standards.get(metrics[0]["version"]) if metrics and explanations else None
     report["warnings"].append("受影响版本范围本身不自动等于厂商确认的修复版本")
+    report["risk_taxonomy"] = taxonomy_candidates(cve, doc, sha)
+    report["evidence"].extend(report["risk_taxonomy"]["evidence"])
+    try:
+        history = related_history(cve, doc, sha, history_catalog if history_catalog is not None else catalogue(db_path))
+        report["historical_relations"] = history
+        known_ids = {r["citation_id"] for r in report["evidence"]}
+        report["evidence"].extend(r for r in history["evidence"] if r["citation_id"] not in known_ids)
+    except (sqlite3.Error, OSError, ValueError):
+        report["historical_relations"] = {"status": "error", "items": [], "evidence": [],
+                                           "detail": "本地历史目录暂不可用；其他已校验的技术评估字段保留。"}
     return report
 
 
 def enrich_view(records, db_path=DEFAULT_DB):
     """扩展现有 raw_data；不写回或覆盖主监测库的历史卡片。"""
     result = copy.deepcopy(records)
+    # Build once for this read view instead of scanning the directory for each CVE.
+    try:
+        history_catalog = catalogue(db_path)
+    except (sqlite3.Error, OSError, ValueError):
+        history_catalog = {"sources": {}, "scope": "历史目录暂不可用", "status": "error"}
     for record in result:
-        report = assess(record["item"]["cve_id"], db_path)
+        report = assess(record["item"]["cve_id"], db_path, history_catalog=history_catalog)
         if report["status"] in ("ok", "partial"):
             raw = record["item"].setdefault("raw_data", {})
             raw["automatic_assessment"] = report

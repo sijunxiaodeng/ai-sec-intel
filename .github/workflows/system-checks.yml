@@ -105,6 +105,8 @@ jobs:
           docker compose -f docker-compose.production.yml config --quiet
           docker compose -f docker-compose.actions.yml config --quiet
           docker compose -f docker-compose.offline.yml config --quiet
+          GRAFANA_ADMIN_PASSWORD=ci-config-validation-only docker compose -f docker-compose.production.yml -f docker-compose.observability.yml config --quiet
+          GRAFANA_ADMIN_PASSWORD=ci-config-validation-only docker compose -f docker-compose.actions.yml -f docker-compose.observability.yml config --quiet
       - name: Disable public networking and automatic collection for synthetic integration
         run: |
           cat > "${RUNNER_TEMP}/compose-offline.yml" <<'YAML'
@@ -125,6 +127,8 @@ jobs:
             default:
               internal: true
           YAML
+      - name: Validate Prometheus configuration and operational alert rules
+        run: docker run --rm --network none --volume "$PWD/ops/prometheus:/etc/prometheus:ro" --entrypoint /bin/promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
       - name: Build and start the isolated demo containers
         run: docker compose -f docker-compose.yml -f "${RUNNER_TEMP}/compose-offline.yml" up --build --detach --wait --wait-timeout 180
       - name: Verify actual B API, B-to-A records and B-to-C document synchronization

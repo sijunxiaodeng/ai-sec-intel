@@ -2,10 +2,10 @@
 import json
 import sqlite3
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from monitoring.coverage import coverage_report
+from monitoring.coverage import coverage_report, _summary as source_latency_summary
 from monitoring.metrics import _summary as cve_latency_summary
 
 NOW = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
@@ -210,6 +210,86 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(summary["under_6h"], 1)
         self.assertEqual(summary["breached_6h"], 2)
         self.assertEqual(summary["within_6h"], 2)  # Compatibility field has a different contract.
+
+    def test_average_latency_does_not_mix_empty_sample_with_zero_delay(self):
+        for summarize, values in ((cve_latency_summary, [0, 1, 5]),
+                                  (source_latency_summary, [0, 3600, 18000])):
+            self.assertEqual(summarize(values)["mean_hours"], 2)
+            self.assertIsNone(summarize([])["mean_hours"])
+
+    def test_full_week_attempt_history_reports_gap_and_failure_without_claiming_uptime(self):
+        # A recorded run every 15 minutes over a week still cannot prove that a
+        # process stayed up between runs or nobody intervened.
+        boundary = NOW - timedelta(days=7)
+        rows = []
+        for index in range(673):
+            started = boundary + timedelta(minutes=15 * index)
+            if index == 672:
+                finished = started
+            else:
+                finished = started + timedelta(seconds=10)
+            rows.append((index + 1, "NVD", started.isoformat(), finished.isoformat(), "success", 0, None))
+        self.con.executemany("INSERT INTO collector_runs VALUES(?,?,?,?,?,?,?)", rows)
+        history = self.report()["recorded_polling_history_by_source"]["NVD"]
+        self.assertTrue(history["has_seven_day_history"])
+        self.assertEqual(history["cadence_evidence"], "recorded_attempts_within_limit")
+        self.assertEqual(history["max_observed_gap_seconds"], 900)
+        self.assertFalse(history["continuous_uptime_verified"])
+        self.assertFalse(history["unattended_operation_verified"])
+        self.con.execute("DELETE FROM collector_runs WHERE id BETWEEN 400 AND 402")
+        self.con.execute("UPDATE collector_runs SET status='failed',error_text='HTTPError: HTTP 429' WHERE id=500")
+        history = self.report()["recorded_polling_history_by_source"]["NVD"]
+        self.assertEqual(history["recorded_failures"], 1)
+        self.assertEqual(history["observed_gaps_over_limit"], 1)
+        self.assertEqual(history["max_observed_gap_seconds"], 3600)
+        self.assertEqual(history["cadence_evidence"], "observed_polling_gaps")
+        self.assertIn("source_polling_gap", {a["code"] for a in self.report()["source_alerts"]})
+
+    def test_old_attempt_anchors_week_boundary_but_future_or_invalid_run_does_not_prove_history(self):
+        self.con.execute("INSERT INTO collector_runs VALUES(1,'NVD','2026-09-30T12:00:00Z','2026-09-30T12:01:00Z','success',0,NULL)")
+        self.con.execute("INSERT INTO collector_runs VALUES(2,'NVD','2026-10-08T11:50:00Z','2026-10-08T11:51:00Z','success',0,NULL)")
+        self.con.execute("INSERT INTO collector_runs VALUES(3,'NVD','2026-10-09T12:00:00Z','2026-10-09T12:01:00Z','success',0,NULL)")
+        self.con.execute("INSERT INTO collector_runs VALUES(4,'NVD','2026-09-29T12:00:00Z','bad-time','success',0,NULL)")
+        history = self.report()["recorded_polling_history_by_source"]["NVD"]
+        self.assertEqual(history["invalid_run_timestamps"], 2)
+        self.assertEqual(history["oldest_recorded_attempt_at"], "2026-09-30T12:00:00+00:00")
+        self.assertEqual(history["max_observed_gap_seconds"], 7 * 86400 - 600)
+        self.assertEqual(history["recorded_attempts"], 1)
+        self.assertEqual(history["cadence_evidence"], "observed_polling_gaps")
+
+    def test_latest_failed_validation_raises_actionable_alert_without_exposing_error_text(self):
+        self.con.execute("INSERT INTO collector_runs VALUES(1,'NVD','2026-10-08T11:50:00Z','2026-10-08T11:51:00Z','failed',0,?)",
+                         ("ValueError: credential=https://user:secret@example.org",))
+        report = self.report()
+        self.assertEqual(report["freshness_by_source"]["NVD"]["latest_error_category"], "validation_failure")
+        self.assertIn("source_validation_failure", {a["code"] for a in report["source_alerts"]})
+        self.assertNotIn("secret", json.dumps(report))
+        self.assertEqual(report["recorded_polling_history_by_source"]["NVD"]["cadence_evidence"], "insufficient_history")
+
+    def test_ai_latency_subset_excludes_unclassified_and_stale_verdicts(self):
+        self.baseline()
+        for index, published in enumerate(("2026-10-08T01:00:00Z", "2026-10-08T11:00:00Z", "2026-10-08T10:00:00Z")):
+            identifier = f"CVE-2026-1000{index}"
+            self.source_item(published, "2026-10-08T11:50:00Z", cve=identifier)
+            self.con.execute("INSERT INTO unified_vulnerabilities VALUES(?, 'current')", (identifier,))
+        self.con.execute("INSERT INTO ai_classifications VALUES('CVE-2026-10000','current','v1','classified',1)")
+        self.con.execute("INSERT INTO ai_classifications VALUES('CVE-2026-10002','old','v1','classified',1)")
+        report = self.report()
+        self.assertEqual(report["live_precise_samples"], 3)
+        self.assertEqual(report["ai_live_precise_samples"], 1)
+        self.assertEqual(report["ai_violations_ge_6h"], 1)
+        self.assertEqual(report["per_source_ai_live_latency"]["NVD"]["live"]["mean_hours"], 10.833333)
+        self.assertEqual(report["ai_unknown_live_timing"], 0)
+
+    def test_ai_document_latency_requires_current_completed_positive_verdict(self):
+        self.specs = [SimpleNamespace(name="BLOG", category="security_blog")]
+        self.baseline("BLOG", "security_blog")
+        self.doc("BLOG", "security_blog", "2026-10-08T11:00:00Z")
+        self.doc("BLOG", "security_blog", "2026-10-08T08:00:00Z", state="review")
+        self.doc("BLOG", "security_blog", "2026-10-08T09:00:00Z", ai=False)
+        report = self.report()
+        self.assertEqual(report["ai_live_precise_samples"], 1)
+        self.assertEqual(report["per_source_ai_live_latency"]["BLOG"]["live"]["mean_hours"], 0.833333)
 
 
 if __name__ == "__main__":

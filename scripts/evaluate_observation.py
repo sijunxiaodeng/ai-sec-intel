@@ -46,6 +46,7 @@ def distribution(values):
         return values[math.ceil(len(values) * fraction) - 1] if values else None
     return {
         "samples": len(values),
+        "mean_seconds": math.fsum(values) / len(values) if values else None,
         "p50_seconds": percentile(.5), "p95_seconds": percentile(.95),
         "max_seconds": values[-1] if values else None,
         "strict_under_6h": sum(value < DEADLINE_SECONDS for value in values),

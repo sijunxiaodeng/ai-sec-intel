@@ -2,10 +2,18 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from questions.evaluate import DATASET, check_case, summarize_review
+from questions.evaluate import DATASET, check_case, run, summarize_review
 
 
 class EvaluationTest(unittest.TestCase):
+    def test_changed_dataset_is_rejected_before_querying_or_loading_models(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "frozen.json"
+            path.write_text(json.dumps({"cases": [{"id": "new-version"}]}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "题单文件已变化"):
+                run(Path(temp) / "unused.sqlite3", {"cases": [{"id": "old-version"}]},
+                    "rules", dataset_path=path)
+
     def test_topic_list_has_unique_questions_and_manual_source_preconditions(self):
         data = json.loads(DATASET.read_text(encoding="utf-8"))
         self.assertEqual(len(data["cases"]), 36)

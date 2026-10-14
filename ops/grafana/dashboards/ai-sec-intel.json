@@ -1,0 +1,21 @@
+{
+  "uid": "ai-sec-operations",
+  "title": "AI 安全情报运行证据",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "tags": ["ai-security", "observed-evidence"],
+  "panels": [
+    {"id": 1, "type": "text", "title": "验收边界", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 4}, "options": {"mode": "markdown", "content": "图表来自真实采集状态和持久队列。**缺失值表示未知，不表示 0 或达标。** AI 时效仅统计当前有效 AI 正例，历史回填与运行配置不证明 SLA；观察基线不证明连续 7 天运行。当前未埋点问答 QPS/端到端延迟，未连接外部告警通知。"}},
+    {"id": 2, "type": "stat", "title": "已观察有效 AI 来源类别", "gridPos": {"x": 0, "y": 4, "w": 6, "h": 5}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_observed_ai_source_categories", "refId": "A"}], "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}, "fieldConfig": {"defaults": {"noValue": "暂无证据"}, "overrides": []}},
+    {"id": 3, "type": "stat", "title": "采集来源最新尝试成功比例", "gridPos": {"x": 6, "y": 4, "w": 6, "h": 5}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "avg(ai_sec_source_latest_run_success)", "refId": "A"}], "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}, "fieldConfig": {"defaults": {"unit": "percentunit", "noValue": "暂无证据"}, "overrides": []}},
+    {"id": 4, "type": "stat", "title": "待处理 / 退避队列", "gridPos": {"x": 12, "y": 4, "w": 6, "h": 5}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "sum(ai_sec_processing_jobs{status=~\"pending|retry\"})", "refId": "A"}], "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}, "fieldConfig": {"defaults": {"noValue": "暂无证据"}, "overrides": []}},
+    {"id": 5, "type": "stat", "title": "重试耗尽任务", "gridPos": {"x": 18, "y": 4, "w": 6, "h": 5}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_processing_jobs{status=\"failed\"}", "refId": "A"}], "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}, "fieldConfig": {"defaults": {"noValue": "暂无证据"}, "overrides": []}},
+    {"id": 6, "type": "timeseries", "title": "当前有效 AI 正例：发布到首次采集 P95", "gridPos": {"x": 0, "y": 9, "w": 12, "h": 8}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_source_live_latency_p95_seconds{population=\"current_ai_positive\"}", "legendFormat": "{{source}}", "refId": "A"}], "fieldConfig": {"defaults": {"unit": "s", "noValue": "暂无精确 AI 样本"}, "overrides": []}},
+    {"id": 7, "type": "timeseries", "title": "各来源距最近成功运行", "gridPos": {"x": 12, "y": 9, "w": 12, "h": 8}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_source_seconds_since_success", "legendFormat": "{{source}}", "refId": "A"}], "fieldConfig": {"defaults": {"unit": "s", "noValue": "尚未成功"}, "overrides": []}},
+    {"id": 8, "type": "timeseries", "title": "运行证据获取状态", "gridPos": {"x": 0, "y": 17, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_probe_success", "legendFormat": "{{endpoint}}", "refId": "A"}], "fieldConfig": {"defaults": {"min": 0, "max": 1}, "overrides": []}},
+    {"id": 9, "type": "timeseries", "title": "各状态持久任务数", "gridPos": {"x": 12, "y": 17, "w": 12, "h": 7}, "datasource": {"type": "prometheus", "uid": "ai-sec-prometheus"}, "targets": [{"expr": "ai_sec_processing_jobs", "legendFormat": "{{status}}", "refId": "A"}], "fieldConfig": {"defaults": {"min": 0}, "overrides": []}}
+  ]
+}

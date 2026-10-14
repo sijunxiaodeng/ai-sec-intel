@@ -98,7 +98,30 @@ def prepare(db, dataset):
         print(cve, "成功来源", result["ok"])
 
 
-def run(db, dataset, mode):
+def load_dataset(path):
+    """Accept a separately frozen human-authored dataset without changing it."""
+    dataset = json.loads(path.read_text(encoding="utf-8"))
+    cases, sources = dataset.get("cases"), dataset.get("sources")
+    if not isinstance(cases, list) or not cases or not isinstance(sources, list) or not sources:
+        raise ValueError("题单须包含非空 cases 和 sources")
+    if any(not isinstance(case, dict) for case in cases):
+        raise ValueError("每题须为对象")
+    ids = [case.get("id") for case in cases]
+    if any(not isinstance(value, str) or not value.strip() for value in ids) or len(set(ids)) != len(ids):
+        raise ValueError("题号须为非空且唯一的字符串")
+    for case in cases:
+        if not isinstance(case.get("question"), str) or not case["question"].strip() or not case.get("review_checklist"):
+            raise ValueError("每题须有问题和人工复核要点")
+        if not isinstance(case.get("expected_cves"), list):
+            raise ValueError("每题须明确 expected_cves；拒答题使用空列表")
+    return dataset
+
+
+def run(db, dataset, mode, *, dataset_path=DATASET):
+    frozen_bytes = dataset_path.read_bytes()
+    if json.loads(frozen_bytes) != dataset:
+        raise ValueError("题单文件已变化，请重新冻结后运行")
+    dataset_sha256 = hashlib.sha256(frozen_bytes).hexdigest()
     from fastapi.testclient import TestClient
     from api.app import app
     from agents.conversation import SessionStore
@@ -145,10 +168,12 @@ def run(db, dataset, mode):
             else:
                 payload = response.json()
                 failures = check_case(case, payload)
-            rows.append({"id": case["id"], "category": case["category"], "question": case["question"],
+            rows.append({"id": case["id"], "category": case.get("category", "未分类"), "question": case["question"],
                          "history": case.get("history", []), "seconds": round(elapsed, 4),
                          "automatic_passed": not failures, "failures": failures,
-                         "manual_review": {"correct": None, "citations_supported": None, "notes": ""},
+                         "manual_review": {"correct": None, "citations_supported": None, "notes": "",
+                                           "reviewer": None, "independent_human": None,
+                                           "reasoning_kind": None, "reasoning_explained": None},
                          "model_attempted": bool(drafts), "model_drafts": list(drafts),
                          "review_checklist": case["review_checklist"], "response": payload})
             print("%s %s %.3fs %s" % (case["id"], "自动检查通过" if not failures else "需复核", elapsed,
@@ -159,12 +184,14 @@ def run(db, dataset, mode):
     return {"schema_version": 1, "run_at": datetime.now(timezone.utc).isoformat(), "mode": mode,
             "model": settings["model"] if mode == "model" else None,
             "endpoint_type": ("local" if settings["base_url"].startswith("http://127.0.0.1:") else "configured") if mode == "model" else None,
-            "dataset_sha256": hashlib.sha256(DATASET.read_bytes()).hexdigest(), "source_manifest": manifest,
+            "dataset_sha256": dataset_sha256,
+            "dataset_cases": len(dataset["cases"]), "source_manifest": manifest,
             "summary": {"cases": len(rows), "automatic_passed": sum(r["automatic_passed"] for r in rows),
                         "used_model_cases": sum(bool(r["response"].get("used_model")) for r in rows),
                         "accepted_model_automatic_passed": sum(r["automatic_passed"] and bool(r["response"].get("used_model")) for r in rows),
                         "model_attempted_cases": sum(r["model_attempted"] for r in rows),
                         "model_fallback_cases": sum(r["model_attempted"] and not r["response"].get("used_model") for r in rows),
+                        "timing_scope": "in_process_testclient",
                         "median_seconds": statistics.median(times), "p95_seconds": times[math.ceil(len(times)*.95)-1],
                         "max_seconds": max(times), "over_5_seconds": sum(t > 5 for t in times),
                         "manual_accuracy": None, "manual_citation_support_rate": None,
@@ -192,6 +219,8 @@ def summarize_review(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", type=Path, default=ROOT / "data" / "qa_evaluation.sqlite3")
+    parser.add_argument("--dataset", type=Path, default=DATASET,
+                        help="独立编写并冻结的题单；保留来源前提与逐题人工复核要点")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--mode", choices=["rules", "model"], default="rules")
     parser.add_argument("--output", type=Path, default=ROOT / "data" / "qa-evaluation-report.json")
@@ -201,10 +230,10 @@ def main():
         if args.summarize_review:
             print(json.dumps(summarize_review(args.summarize_review), ensure_ascii=False))
             return
-        dataset = json.loads(DATASET.read_text(encoding="utf-8"))
+        dataset = load_dataset(args.dataset)
         if args.prepare:
             prepare(args.db, dataset)
-        report = run(args.db, dataset, args.mode)
+        report = run(args.db, dataset, args.mode, dataset_path=args.dataset)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(report["summary"], ensure_ascii=False))

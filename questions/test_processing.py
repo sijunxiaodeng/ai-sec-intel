@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -61,6 +62,97 @@ class ProcessingTest(unittest.TestCase):
         self.assertEqual(processing.enqueue(store.load_kb()), 0)
         self.assertEqual(store.get_record(self.record["item"]["cve_id"])["epss"]["score"], "0.31")
 
+    def test_failed_first_tool_does_not_starve_other_dimensions_and_trace_survives_restart(self):
+        store.upsert([self.record])
+        cve = self.record["item"]["cve_id"]
+        paper = {"title": "CVE-specific study", "url": "https://arxiv.org/abs/2610.12345"}
+        with patch("enrichment.service.apply_public_feeds", side_effect=ConnectionError("private-token")), \
+             patch("enrichment.papers.fetch_papers", return_value=({cve: [paper]}, None)) as research, \
+             patch("rag.ingest.ingest", return_value={"attempted": 0, "ok": 0}), \
+             patch("rag.hybrid.update_index", return_value={"status": "deferred"}):
+            processing.run_batch()
+        research.assert_called_once()
+        self.assertEqual(store.get_record(cve)["papers"], [paper])
+        first = processing.state()["agent_traces"][0]
+        self.assertEqual(first["status"], "retry")
+        self.assertTrue(first["trace"]["committed"])
+        self.assertEqual([c["status"] for c in first["trace"]["calls"]], ["error", "ok"])
+        self.assertNotIn("private-token", json.dumps(first))
+        with processing._connection() as conn:
+            self.assertEqual(json.loads(conn.execute("SELECT agent_trace_json FROM processing_jobs WHERE stage='enrich'").fetchone()[0]), first["trace"])
+
+    def test_prompt_injection_prioritizes_research_and_failed_research_changes_retry_order(self):
+        row = copy.deepcopy(self.record)
+        row["item"]["description"] = "Indirect prompt injection in agent tool output"
+        store.upsert([row])
+        order = []
+        def papers(cve_ids):
+            order.append("papers")
+            return {}, None
+        def feeds(records):
+            order.append("feeds")
+            return {}
+        with patch("enrichment.service.apply_public_feeds", side_effect=feeds), \
+             patch("enrichment.papers.fetch_papers", side_effect=papers), \
+             patch("rag.ingest.ingest", return_value={"attempted": 0, "ok": 0}), \
+             patch("rag.hybrid.update_index", return_value={"status": "deferred"}):
+            processing.run_batch()
+        self.assertEqual(order, ["papers", "feeds"])
+        self.assertEqual(processing.state()["agent_traces"][0]["trace"]["decision"]["policy"], "research_first")
+
+    def test_trace_completion_uses_existing_lease_fence(self):
+        store.upsert([self.record])
+        processing.enqueue(store.load_kb())
+        old = processing._claim("enrich", 1)[0]
+        with processing._connection() as conn:
+            conn.execute("UPDATE processing_jobs SET lease_until=0 WHERE id=?", (old["id"],))
+        current = processing._claim("enrich", 1)[0]
+        processing._finish(old, trace={"committed": True})
+        with processing._connection() as conn:
+            self.assertEqual(conn.execute("SELECT agent_trace_json FROM processing_jobs WHERE id=?", (current["id"],)).fetchone()[0], "{}")
+
+    def test_completion_failure_does_not_erase_actual_commit_fact(self):
+        store.upsert([self.record])
+        finish = processing._finish
+        calls = 0
+        def fail_first_finish(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("Synthetic queue completion failure after commit")
+            return finish(*args, **kwargs)
+        a, b, c, d = self._providers()
+        with a, b, c, d, patch("automation.processing._finish", side_effect=fail_first_finish):
+            processing.run_batch()
+        self.assertEqual(store.get_record(self.record["item"]["cve_id"])["epss"]["score"], "0.31")
+        entry = processing.state()["agent_traces"][0]
+        self.assertEqual(entry["status"], "retry")
+        self.assertTrue(entry["trace"]["committed"])
+
+    def test_concurrent_old_queue_migration_preserves_existing_jobs(self):
+        store.upsert([self.record])
+        processing.enqueue(store.load_kb())
+        with processing._connection() as conn:
+            conn.execute("ALTER TABLE processing_jobs DROP COLUMN agent_trace_json")
+        barrier = threading.Barrier(4)
+        errors = []
+        def open_old():
+            try:
+                barrier.wait(timeout=5)
+                processing.state()
+            except Exception as exc:
+                errors.append(exc)
+        threads = [threading.Thread(target=open_old) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        with processing._connection() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM processing_jobs").fetchone()[0], 2)
+            self.assertEqual(conn.execute("SELECT count(*) FROM processing_jobs WHERE agent_trace_json='{}'").fetchone()[0], 2)
+
     def test_partial_document_and_configured_index_failures_retry_and_recover(self):
         store.upsert([self.record])
         a, b, c, d = self._providers(document_error=True, index_error=True)
@@ -112,6 +204,9 @@ class ProcessingTest(unittest.TestCase):
         self.assertIsNone(store.get_record(cve))
         ingest.assert_not_called()
         self.assertEqual(processing.state()["counts"], {"skipped": 2})
+        trace = processing.state()["agent_traces"][0]["trace"]
+        self.assertFalse(trace["committed"])
+        self.assertEqual(trace["reflection"]["status"], "skipped")
 
     def test_evidence_commit_guard_rejects_upstream_change_and_scope_withdrawal(self):
         store.upsert([self.record])

@@ -8,6 +8,9 @@ import uuid
 from contextlib import contextmanager
 
 from database import store
+from agents.planning import enrichment_plan, PUBLIC_FEEDS, PAPERS
+from agents.tool_registry import (ToolRegistry, validate_records, validate_mapping,
+                                  validate_papers, validate_paper_result)
 
 _STOP = threading.Event()
 _THREAD = None
@@ -24,13 +27,18 @@ def _connection():
     try:
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute("PRAGMA journal_mode=WAL")
+        # Serialize old-schema inspection and ALTER across startup workers.
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute("""CREATE TABLE IF NOT EXISTS processing_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, cve_id TEXT NOT NULL,
             revision TEXT NOT NULL, stage TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
             available_at REAL NOT NULL, lease_until REAL, lease_token TEXT,
             error TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL, updated_at REAL NOT NULL,
+            agent_trace_json TEXT NOT NULL DEFAULT '{}',
             UNIQUE(cve_id,revision,stage))""")
+        if "agent_trace_json" not in {row[1] for row in conn.execute("PRAGMA table_info(processing_jobs)")}:
+            conn.execute("ALTER TABLE processing_jobs ADD COLUMN agent_trace_json TEXT NOT NULL DEFAULT '{}'")
         conn.execute("CREATE INDEX IF NOT EXISTS processing_due ON processing_jobs(status,available_at)")
         conn.commit()
         yield conn
@@ -106,16 +114,26 @@ def _claim(stage, limit=10, lease_seconds=900):
     return [dict(row, lease_token=token, attempts=row["attempts"] + 1) for row in rows]
 
 
-def _finish(job, error="", *, skipped=False):
+def _finish(job, error="", *, skipped=False, trace=None):
     now = time.time()
     exhausted = job["attempts"] >= int(os.environ.get("PROCESSING_MAX_ATTEMPTS", "6"))
     status = "skipped" if skipped else (("failed" if exhausted else "retry") if error else "done")
     delay = min(3600, 30 * 2 ** min(job["attempts"] - 1, 7)) if error else 0
+    if trace is not None:
+        reflection = dict(trace.get("reflection") or {}, task_status=status)
+        if skipped:
+            reflection.update(status="skipped", reason="记录已撤回、修订改变或任务校验未通过；未提交该任务结果。")
+        elif status == "failed":
+            reflection.update(status="failed", reason="已保存成功维度；重试次数已耗尽，失败任务等待排查或手动重新排队。")
+        trace = dict(trace, reflection=reflection)
     with _connection() as conn:
         conn.execute("""UPDATE processing_jobs SET status=?,error=?,available_at=?,
+            agent_trace_json=COALESCE(?,agent_trace_json),
             lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?
             AND status='running' AND lease_until>=?""",
-                     (status, str(error)[:500], now + delay, now, job["id"], job["lease_token"], now))
+                     (status, str(error)[:500], now + delay,
+                      json.dumps(trace, ensure_ascii=False) if trace is not None else None,
+                      now, job["id"], job["lease_token"], now))
 
 
 def _current(job):
@@ -155,9 +173,31 @@ def run_batch(batch_size=10):
                 jobs.append(job)
                 records.append(record)
         if jobs:
+            trace = enrichment_plan(records, [job.get("error", "") for job in jobs])
+            updated = []
             try:
-                feed = apply_public_feeds(records)
-                papers, paper_error = fetch_papers([job["cve_id"] for job in jobs])
+                registry = ToolRegistry()
+                registry.register(PUBLIC_FEEDS, role="impact_enrichment", handler=apply_public_feeds,
+                                  validate=validate_records, validate_result=validate_mapping)
+                registry.register(PAPERS, role="research_enrichment", handler=fetch_papers,
+                                  validate=validate_papers, validate_result=validate_paper_result)
+                feed, papers, errors = {}, {}, []
+                arguments = {PUBLIC_FEEDS: {"records": records},
+                             PAPERS: {"cve_ids": [job["cve_id"] for job in jobs]}}
+                for name in trace["decision"]["tools"]:
+                    call = registry.execute(name, arguments[name], trace)
+                    if name == PUBLIC_FEEDS:
+                        if call.ok:
+                            feed = call.value
+                            errors.extend(key for key in ("epss_error", "kev_error") if feed.get(key))
+                        else:
+                            errors.append("public_feeds_error")
+                    elif call.ok:
+                        papers, paper_error = call.value
+                        if paper_error:
+                            errors.append("papers_error")
+                    else:
+                        errors.append("papers_error")
                 for job, record in zip(jobs, records):
                     if papers.get(job["cve_id"]):
                         record["papers"] = papers[job["cve_id"]]
@@ -165,15 +205,20 @@ def run_batch(batch_size=10):
                     expected_revisions={job["cve_id"]: job["revision"] for job in jobs},
                     job_tokens={job["cve_id"]: {"id": job["id"], "lease_token": job["lease_token"]}
                                 for job in jobs})
-                errors = [key for key in ("epss_error", "kev_error") if feed.get(key)]
-                if paper_error:
-                    errors.append("papers_error")
+                trace["reflection"] = {"status": "retry" if errors else "complete",
+                                       "failed_dimensions": errors,
+                                       "reason": "已保存成功维度；失败维度由持久队列退避重试。" if errors else "注册工具已完成，写入通过版本与租约校验。"}
                 for job in jobs:
-                    _finish(job, ",".join(errors), skipped=job["cve_id"] not in updated)
+                    job_trace = dict(trace, cve_id=job["cve_id"], revision=job["revision"],
+                                     attempt=job["attempts"], committed=job["cve_id"] in updated)
+                    _finish(job, ",".join(errors), skipped=job["cve_id"] not in updated, trace=job_trace)
                 processed += len(jobs)
             except Exception as exc:
+                trace["reflection"] = {"status": "retry", "error_type": type(exc).__name__,
+                                       "reason": "写入或编排失败，未报告任务完成。"}
                 for job in jobs:
-                    _finish(job, type(exc).__name__)
+                    _finish(job, type(exc).__name__, trace=dict(trace, cve_id=job["cve_id"],
+                            revision=job["revision"], attempt=job["attempts"], committed=job["cve_id"] in updated))
         for job in _claim("documents", batch_size):
             record = _current(job)
             if not record:
@@ -211,7 +256,16 @@ def state():
             "SELECT status,count(*) FROM processing_jobs GROUP BY status")}
         failures = [dict(row) for row in conn.execute("""SELECT id,cve_id,stage,status,attempts,error
             FROM processing_jobs WHERE status IN ('retry','failed') ORDER BY updated_at DESC LIMIT 20""")]
-    return {"counts": counts, "failures": failures}
+        traces = []
+        for row in conn.execute("""SELECT id,cve_id,stage,status,agent_trace_json FROM processing_jobs
+            WHERE agent_trace_json != '{}' ORDER BY updated_at DESC,id DESC LIMIT 20"""):
+            try:
+                trace = json.loads(row["agent_trace_json"])
+            except (ValueError, TypeError):
+                continue
+            traces.append({"job_id": row["id"], "cve_id": row["cve_id"], "stage": row["stage"],
+                           "status": row["status"], "trace": trace})
+    return {"counts": counts, "failures": failures, "agent_traces": traces}
 
 
 def retry_failed():

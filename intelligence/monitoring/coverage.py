@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .metrics import parse_timestamp
 
@@ -34,10 +34,13 @@ def _summary(seconds):
         "samples": len(values),
         "p50_hours": percentile(.50),
         "p95_hours": percentile(.95),
+        "mean_hours": round(math.fsum(values) / (len(values) * 3600), 6) if values else None,
         "max_hours": round(values[-1] / 3600, 6) if values else None,
         "max_seconds": values[-1] if values else None,
         "under_6h": sum(value < STRICT_DEADLINE_SECONDS for value in values),
         "breached_6h": sum(value >= STRICT_DEADLINE_SECONDS for value in values),
+        "contest_within_6h": sum(value <= STRICT_DEADLINE_SECONDS for value in values),
+        "contest_breaches_gt_6h": sum(value > STRICT_DEADLINE_SECONDS for value in values),
     }
 
 
@@ -116,6 +119,12 @@ def _freshness(runs, now, threshold):
     age = (now - stamp).total_seconds() if stamp else None
     status = (latest or {}).get("status") or "never_run"
     timed_out = "timeout" in str((latest or {}).get("error_text") or "").lower() or "timed out" in str((latest or {}).get("error_text") or "").lower()
+    error_class = str((latest or {}).get("error_text") or "").split(":", 1)[0].strip()
+    error_category = ("timeout" if timed_out else
+                      "validation_failure" if error_class in {"ValueError", "TypeError", "ParseError", "JSONDecodeError"} else
+                      "http_failure" if error_class == "HTTPError" else
+                      "request_failure" if error_class in {"ConnectionError", "RequestException", "SSLError"} else
+                      "collection_failure" if status == "failed" else None)
     if latest is None:
         health = "never_run"
     elif status != "success":
@@ -137,7 +146,80 @@ def _freshness(runs, now, threshold):
         "freshness_limit_seconds": threshold,
         "latest_fetched_count": (latest or {}).get("fetched_count"),
         "timed_out": timed_out,
+        "latest_error_category": error_category,
     }
+
+
+def _polling_history(runs, now, threshold):
+    """Describe recorded attempts, never infer process uptime or human absence.
+
+    A source cycle can commit several incremental windows, so rows and distinct
+    start times are explicitly *attempts*, not successful polling cycles. The
+    previous recorded attempt anchors a gap crossing the seven-day boundary.
+    """
+    boundary = now - timedelta(days=7)
+    valid = []
+    invalid = 0
+    for row in runs:
+        started = parse_timestamp(row.get("started_at"))
+        finished = parse_timestamp(row.get("finished_at"))
+        if started is None or finished is None or finished < started or finished > now:
+            invalid += 1
+            continue
+        valid.append((started, row))
+    timestamps = sorted({started for started, _ in valid})
+    anchors = [stamp for stamp in timestamps if stamp <= boundary]
+    recent = [stamp for stamp in timestamps if stamp > boundary]
+    points = ([anchors[-1]] if anchors else []) + recent
+    gaps = []
+    for start, end in zip(points, points[1:] + [now]):
+        gaps.append((end - max(start, boundary)).total_seconds())
+    maximum = max(gaps) if gaps else None
+    recent_rows = [row for started, row in valid if started >= boundary]
+    breaches = sum(gap > threshold for gap in gaps)
+    covers_window = bool(anchors)
+    if breaches:
+        evidence = "observed_polling_gaps"
+    elif not covers_window or invalid or not recent_rows:
+        evidence = "insufficient_history"
+    else:
+        evidence = "recorded_attempts_within_limit"
+    return {
+        "window_started_at": boundary.isoformat(),
+        "window_ended_at": now.isoformat(),
+        "recorded_attempts": len(recent_rows),
+        "recorded_successes": sum(row.get("status") == "success" for row in recent_rows),
+        "recorded_failures": sum(row.get("status") == "failed" for row in recent_rows),
+        "distinct_attempt_start_times": len(recent),
+        "invalid_run_timestamps": invalid,
+        "oldest_recorded_attempt_at": timestamps[0].isoformat() if timestamps else None,
+        "latest_recorded_attempt_at": timestamps[-1].isoformat() if timestamps else None,
+        "has_seven_day_history": covers_window,
+        "poll_gap_limit_seconds": threshold,
+        "max_observed_gap_seconds": maximum,
+        "observed_gaps_over_limit": breaches,
+        "cadence_evidence": evidence,
+        "continuous_uptime_verified": False,
+        "unattended_operation_verified": False,
+    }
+
+
+def _source_alerts(freshness, histories):
+    """Return stable, non-secret diagnostics that dashboards can act on."""
+    alerts = []
+    for source, health in freshness.items():
+        status = health["status"]
+        if status != "fresh":
+            alerts.append({"source": source, "code": "source_" + status,
+                           "severity": "warning" if status in {"never_run", "unknown"} else "error"})
+        if health["latest_run_status"] == "failed" and health["latest_error_category"] == "validation_failure":
+            alerts.append({"source": source, "code": "source_validation_failure", "severity": "error",
+                           "note": "来源响应或配置校验失败；检查字段、分页和解析日志，不能仅凭错误类型认定上游结构已变化。"})
+        if histories[source]["observed_gaps_over_limit"]:
+            alerts.append({"source": source, "code": "source_polling_gap", "severity": "warning",
+                           "gap_count": histories[source]["observed_gaps_over_limit"],
+                           "max_gap_seconds": histories[source]["max_observed_gap_seconds"]})
+    return alerts
 
 
 def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15,
@@ -182,6 +264,7 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
         configured[name] = category
 
     records = {name: [] for name in configured}
+    ai_records = {name: [] for name in configured}
     runs = {name: [] for name in configured}
     counts = {name: {"source_records": 0, "ai_records": 0} for name in configured}
     unregistered, mismatched = set(), 0
@@ -204,6 +287,7 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
             records[name].append(row)
             if row["cve_id"] in positive_cves:
                 ai_cves_by_source[name].add(row["cve_id"])
+                ai_records[name].append(row)
     for name, cves in ai_cves_by_source.items():
         counts[name]["ai_records"] += len(cves)
     positive_documents = set()
@@ -233,6 +317,7 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
                     raise ValueError("invalid document payload")
                 if payload.get("document_id") in positive_documents and raw.get("ai_security_related") is not False:
                     counts[name]["ai_records"] += 1
+                    ai_records[name].append(row)
             except (ValueError, TypeError, AttributeError):
                 pass
     if "collector_runs" in tables:
@@ -256,7 +341,9 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
     observed = sorted({configured[name] for name, count in counts.items() if count["source_records"]})
     ai_observed = sorted({configured[name] for name, count in counts.items() if count["ai_records"]})
     freshness = {name: _freshness(runs[name], now, threshold) for name in configured}
+    histories = {name: _polling_history(runs[name], now, threshold) for name in configured}
     latency = {name: _latency(records[name], name, baselines.get(name), now) for name in configured}
+    ai_latency = {name: _latency(ai_records[name], name, baselines.get(name), now) for name in configured}
     total_samples = sum(data["live"]["samples"] for data in latency.values())
     violations = sum(data["live"]["breached_6h"] for data in latency.values())
     unknown = sum(data["unknown_live_timing"] for data in latency.values())
@@ -279,7 +366,13 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
         "counts_by_source": counts,
         "freshness_by_source": freshness,
         "all_sources_fresh": bool(freshness) and all(item["healthy"] for item in freshness.values()),
+        "recorded_polling_history_by_source": histories,
+        "source_alerts": _source_alerts(freshness, histories),
         "per_source_live_latency": latency,
+        "per_source_ai_live_latency": ai_latency,
+        "ai_live_precise_samples": sum(data["live"]["samples"] for data in ai_latency.values()),
+        "ai_violations_ge_6h": sum(data["live"]["breached_6h"] for data in ai_latency.values()),
+        "ai_unknown_live_timing": sum(data["unknown_live_timing"] for data in ai_latency.values()),
         "strict_deadline_seconds": STRICT_DEADLINE_SECONDS,
         "live_precise_samples": total_samples,
         "violations_ge_6h": violations,
@@ -295,6 +388,7 @@ def coverage_report(con: sqlite3.Connection, specs, *, now=None, poll_minutes=15
         "note": ("类别按真实内容来源计数，空轮询不增加覆盖。CVE AI 覆盖仅计当前有效已完成分类正例；"
                  "文档为来源采集器本地过滤的主题候选，未表示测得的准确率。严格时效使用原始秒数 <21600，"
                  "时效按每源首次入库记录计算，包含未完成 AI 分类记录，不衡量分类或问答可用时间。"
+                 "per_source_ai_live_latency 另列当前有效已分类 AI 正例子集，待复核未计入；逐源统计包含跨源重复，不能当作独立 CVE 数。"
                  "历史回填和不精确时间不能证明实时达标。基线只是观察起点，不证明连续运行；"
                  "已观察样本不能保证所有未知、漏采或上游迟发布内容以及未来时效。"),
     }

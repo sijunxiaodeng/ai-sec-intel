@@ -1089,9 +1089,39 @@ function renderAssessment(panel, report) {
     });
   }
   (report.affected_ranges || []).forEach(function (row) { fact("受影响组件范围：" + row.display, row.evidence_ids); });
+  (report.weaknesses || []).forEach(function (row) {
+    fact("弱点分类：" + row.cwe_id + "；提供者 " + (row.provider || "未提供"), row.evidence_ids);
+  });
   (report.attack_conditions || []).concat(report.technical_impact || []).forEach(function (row) { fact("评分向量解释 · " + row.label + "：" + row.text, row.evidence_ids); });
   (report.fix_records || []).forEach(function (row) { fact("修复记录：" + row.title + "；修复效果尚未由本项目测试。", row.evidence_ids); });
   (report.poc_candidates || []).forEach(function (row) { fact("利用代码候选：" + row.url + "；本项目未运行复现。", row.evidence_ids); });
+  var taxonomy = report.risk_taxonomy;
+  if (taxonomy && (taxonomy.items || []).length) {
+    add(section, "h4", "", "AI 风险机制分类候选");
+    taxonomy.items.forEach(function (row) {
+      var labels = (row.owasp || []).concat(row.mitre_atlas || []).map(function (label) {
+        return label.id + " · " + label.name;
+      });
+      fact(row.mechanism + " · " + labels.join("；"), row.evidence_ids);
+      add(section, "p", "meta", row.match_reason || "根据已存档描述生成，需人工复核。");
+    });
+    if (taxonomy.notice) add(section, "p", "meta", taxonomy.notice);
+  }
+  var history = report.historical_relations;
+  if (history) {
+    add(section, "h4", "", "历史漏洞关联线索");
+    (history.items || []).forEach(function (row) {
+      var reasons = (row.match_basis || []).map(function (basis) {
+        if (basis.kind === "same_component") return "相同组件 " + basis.vendor + "/" + basis.product;
+        if (basis.kind === "same_weakness") return "相同弱点 " + basis.cwe_id;
+        if (basis.kind === "published_before_target") return "发布时间早于当前漏洞";
+        return "";
+      }).filter(Boolean);
+      fact(row.cve_id + " · " + reasons.join("；"), row.evidence_ids);
+    });
+    add(section, "p", "meta", history.detail || "本地存档暂无历史关联线索。");
+    if (history.notice) add(section, "p", "meta", history.notice);
+  }
   add(section, "p", "desc", "此技术报告未进行资产匹配；登记清单后，在「资产影响」查看筛选结果。");
   (report.warnings || []).forEach(function (warning) { add(section, "p", "meta", warning); });
   if (report.source) add(section, "p", "meta", "报告依据获取于 " + dateText(report.source.retrieved_at) + " 的来源快照。");

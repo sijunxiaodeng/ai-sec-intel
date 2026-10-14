@@ -39,6 +39,7 @@ def _summary(values: list[float]) -> dict:
         "samples": len(values),
         "p50_hours": percentile(0.50),
         "p95_hours": percentile(0.95),
+        "mean_hours": round(math.fsum(values) / len(values), 6) if values else None,
         "max_hours": round(values[-1], 3) if values else None,
         "within_6h": sum(v <= 6 for v in values),
         "under_6h": sum(v * 3600 < 21600 for v in values),

@@ -1,0 +1,45 @@
+groups:
+  - name: ai-sec-intel-operational-evidence
+    rules:
+      - alert: IntelligenceExporterUnavailable
+        expr: up{job="ai-sec-intel"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Operational exporter cannot be scraped"
+      - alert: IntelligenceEvidenceUnavailable
+        expr: ai_sec_probe_success == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Intelligence {{ $labels.endpoint }} evidence is unavailable"
+      - alert: IntelligenceSourceStaleOrFailed
+        expr: ai_sec_source_fresh == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Source {{ $labels.source }} is stale, failed or not yet observed"
+      - alert: IntelligenceProcessingFailed
+        expr: ai_sec_processing_jobs{status="failed"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Durable processing queue contains exhausted tasks"
+      - alert: IntelligenceProcessingBacklog
+        expr: sum(ai_sec_processing_jobs{status=~"pending|retry"}) > 100
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Processing backlog exceeds 100 tasks for 30 minutes"
+      - alert: IntelligenceQueueEvidenceUnavailable
+        expr: ai_sec_queue_observation_available == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Processing queue evidence is unavailable; no zero-backlog claim is possible"
