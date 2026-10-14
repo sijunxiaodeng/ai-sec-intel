@@ -36,6 +36,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-up.ps1 
 
 脚本随后从容器内读取 GitHub 的真实最新采集运行编号和完整代码 SHA，等待部署提供该代际。`-Sync` 显式触发已有漏洞与资料变更的本机导入，核对两路已提交的游标都追到该快照的上限。它不会重跑云采集、导入演示样例或发起模型调用。
 
+验收期间会输出 `[deployment-check]` 进度，包括已用时间、快照就绪状态和两个消费者是否追平。默认等待预算为 600 秒（约 10 分钟），进行中的 HTTP 请求结束后才检查是否超时。较早版本只在结束时打印完整报告，因此停在 `Verifying real Actions run ...` 本身不能判断为卡死；另开同目录的 PowerShell，运行下方的 `ps` 和镜像日志命令观察状态，无需重复构建。日志中的 `Verified Actions delivery: run ...` 表示快照已安装，最终仍需核对两路入库验收。
+
 验收 JSON 中必须满足 `deployment_import_loop_verified=true`：指定真实快照已提供、漏洞和资料持久游标均已追平、自动镜像轮询状态正常。报告也分别显示 `snapshot_serving_verified` 与 `consumption_verified`；实际字段、代际切换及失败原因以输出为准。单独 HTTP 200、容器启动或页面能打开，都不算闭环完成。富化和索引处理另有队列，`processing_verified=false` 保留其独立验收边界。报告同时保存在主应用数据卷的 `deployment-proof.json` 中。
 
 成功后打开 **http://127.0.0.1:8023**。如第一次下载较慢，保留服务运行，稍后重试：

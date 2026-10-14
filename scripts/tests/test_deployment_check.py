@@ -1,8 +1,12 @@
 """Desktop deployment proof must follow durable state, not startup or POST 200."""
 import copy
+from contextlib import redirect_stdout
 import importlib.util
+import io
+import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("desktop_check", Path(__file__).resolve().parents[1] / "deployment_check.py")
 CHECK = importlib.util.module_from_spec(SPEC)
@@ -102,6 +106,82 @@ class DeploymentCheckTests(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.check(synchronize=True, **options)
         self.assertEqual(self.posts, [])
+
+    def test_wait_progress_is_immediate_periodic_and_does_not_start_imports(self):
+        updates = []
+        proof = self.check(wait_seconds=25, progress=updates.append)
+        self.assertEqual([item["phase"] for item in updates],
+                         ["verification_started", "waiting", "waiting", "waiting", "wait_expired"])
+        self.assertEqual([item["elapsed_seconds"] for item in updates], [0, 0, 10, 20, 25])
+        self.assertTrue(updates[1]["snapshot_serving_verified"])
+        self.assertEqual(updates[1]["reason_category"], "consumer_import_pending")
+        self.assertFalse(proof["deployment_import_loop_verified"])
+        self.assertEqual(self.posts, [])
+
+    def test_sync_progress_precedes_blocking_posts_and_requires_saved_recheck(self):
+        updates = []
+
+        def delayed_poster(url, body):
+            kind = "cve" if url.endswith("/api/collect") else "document"
+            self.assertEqual(updates[-1]["phase"], kind + "_import_started")
+            self.assertFalse(updates[-1][kind + "_caught_up"])
+            self.elapsed += 3
+            return self.poster(url, body)
+
+        proof = self.check(synchronize=True, wait_seconds=20, poster=delayed_poster, progress=updates.append)
+        self.assertTrue(proof["deployment_import_loop_verified"])
+        self.assertEqual([item["phase"] for item in updates], [
+            "verification_started", "waiting", "cve_import_started", "cve_import_returned",
+            "document_import_started", "document_import_returned", "verified"])
+        self.assertFalse(updates[-2]["document_caught_up"])
+        self.assertTrue(updates[-1]["cve_caught_up"])
+        self.assertTrue(updates[-1]["document_caught_up"])
+        self.assertEqual(updates[-1]["reason_category"], "actions_pull_and_durable_import_verified")
+
+    def test_arbitrary_endpoint_errors_and_metadata_never_enter_progress(self):
+        secret = "fixture-private-token"
+        updates = []
+
+        def failed_reader(url):
+            raise CHECK.DELIVERY.VerificationError("https://example.test/private?token=" + secret)
+
+        self.check(reader=failed_reader, progress=updates.append)
+        safe = CHECK.progress_summary({
+            "reason_category": "error " + secret, "poller_observation": secret,
+            "generation": {"repository": secret}, "url": "https://example.test/" + secret,
+            "consumers": {"cve": {"caught_up": secret}, "document": {"caught_up": True}},
+        }, phase="waiting", elapsed_seconds=3)
+        self.assertEqual(safe["reason_category"], "unverified")
+        self.assertEqual(safe["poller_observation"], "unverified")
+        self.assertFalse(safe["cve_caught_up"])
+        self.assertTrue(safe["document_caught_up"])
+        self.assertNotIn(secret, json.dumps(updates + [safe]))
+        self.assertNotIn("https://", json.dumps(updates + [safe]))
+
+    def test_cli_keeps_default_stdout_json_and_progress_is_explicit(self):
+        proof = self.check(synchronize=True)
+        argv = ["--run-id", "42", "--collector-commit", "a" * 40]
+        for enabled in (False, True):
+            with self.subTest(progress=enabled):
+                output = io.StringIO()
+
+                def run_check(**options):
+                    if options["progress"] is not None:
+                        options["progress"](CHECK.progress_summary({}, phase="verification_started", elapsed_seconds=0))
+                    return proof
+
+                with patch.object(CHECK, "check", side_effect=run_check), redirect_stdout(output):
+                    self.assertEqual(CHECK.main(argv + (["--progress"] if enabled else [])), 0)
+                body = output.getvalue()
+                if enabled:
+                    self.assertTrue(body.startswith("[deployment-check] "))
+                    body = body.split("\n", 1)[1]
+                self.assertEqual(json.loads(body), proof)
+
+    def test_progress_print_flushes_stdout(self):
+        with patch("builtins.print") as printer:
+            CHECK.print_progress(CHECK.progress_summary({}, phase="verification_started", elapsed_seconds=0))
+        self.assertTrue(printer.call_args.kwargs["flush"])
 
 
 if __name__ == "__main__":

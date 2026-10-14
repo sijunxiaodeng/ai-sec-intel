@@ -41,9 +41,11 @@ except Exception:
     $Commit = [string]$Metadata.collector_commit
     if ($RunId -le 0 -or $Commit -notmatch '^[0-9a-f]{40}$') { throw 'Actions metadata response was invalid.' }
     Write-Host "Verifying real Actions run $RunId ($Commit), snapshot serving and both durable consumers."
+    Write-Host "Waiting for snapshot download/import (about $WaitSeconds seconds; an active request may finish later)."
+    Write-Host 'To inspect progress in another PowerShell window: docker compose --env-file .env.production -f docker-compose.actions.yml logs --tail 40 b-mirror'
     $CheckArgs = @('exec', '-T', 'main-app', 'python', 'scripts/deployment_check.py',
         '--run-id', [string]$RunId, '--collector-commit', $Commit, '--wait-seconds', [string]$WaitSeconds,
-        '--output', '/app/data/deployment-proof.json')
+        '--progress', '--output', '/app/data/deployment-proof.json')
     if ($Sync) { $CheckArgs += '--synchronize' }
     & docker @ComposeArgs @CheckArgs
     if ($LASTEXITCODE -ne 0) {

@@ -46,9 +46,10 @@ if ($DockerArgs -contains 'exec' -and $DockerArgs -contains 'b-mirror') {
 }
 if ($DockerArgs -contains 'exec' -and $DockerArgs -contains 'main-app') {
     if (($DockerArgs -contains '--synchronize') -ne ($Case -ne 'read-only')) { exit 3 }
-    foreach ($Expected in @('scripts/deployment_check.py', '--run-id', '38515772960', '--collector-commit', ('a' * 40), '--output', '/app/data/deployment-proof.json')) {
+    foreach ($Expected in @('scripts/deployment_check.py', '--run-id', '38515772960', '--collector-commit', ('a' * 40), '--progress', '--output', '/app/data/deployment-proof.json')) {
         if (-not ($DockerArgs -contains $Expected)) { exit 3 }
     }
+    Write-Output '[deployment-check] stage=complete elapsed_seconds=2 snapshot_verified=true cve_caught_up=true document_caught_up=true'
     Write-Output '{"snapshot_serving_verified":true,"consumption_verified":true,"deployment_import_loop_verified":true,"processing_verified":false}'
     if ($Case -eq 'check-fail') { exit 1 }; exit 0
 }
@@ -140,6 +141,7 @@ exit 3
             }
             if ($Case.Name -eq 'happy' -or $Case.Name -eq 'read-only') {
                 if (-not @($Calls | Where-Object { $_ -contains 'scripts/deployment_check.py' }).Count) { throw ('No delivery proof invoked: ' + $Case.Name) }
+                if (-not $Output.Contains('[deployment-check]')) { throw ('No progress reached the console: ' + $Case.Name) }
             }
             if ($Case.Name -eq 'read-only' -and @($Calls | Where-Object { $_ -contains '--synchronize' }).Count) { throw 'Read-only check requested synchronization.' }
             if ($Case.Name -eq 'missing-env' -and -not (Test-Path -LiteralPath (Join-Path $CaseRoot '.env.production'))) { throw 'Missing environment template was not prepared.' }

@@ -16,6 +16,36 @@ SPEC = importlib.util.spec_from_file_location("actions_delivery_check", Path(__f
 DELIVERY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DELIVERY)
 
+PROGRESS_REASONS = frozenset({
+    "unverified", "invalid_response", "invalid_endpoint_configuration",
+    "redirect_not_allowed", "response_too_large", "endpoint_unavailable_or_invalid_response",
+    "expected_generation_not_served", "main_and_b_generations_differ",
+    "feed_generation_unverified", "generation_changed_during_verification",
+    "consumer_upstream_generation_unverified", "durable_import_verified",
+    "consumer_import_pending", "actions_pull_and_durable_import_verified",
+    "import_verified_recent_pull_unverified",
+})
+PROGRESS_POLLERS = frozenset({"ready", "degraded", "stale", "not_observed", "generation_mismatch"})
+
+
+def progress_summary(facts, *, phase, elapsed_seconds):
+    """Expose only fixed categories and booleans, never response or error text."""
+    consumers = facts.get("consumers") or {}
+    return {
+        "phase": phase,
+        "elapsed_seconds": round(elapsed_seconds, 1),
+        "reason_category": facts.get("reason_category") if facts.get("reason_category") in PROGRESS_REASONS else "unverified",
+        "snapshot_serving_verified": facts.get("snapshot_serving_verified") is True,
+        "poller_observation": facts.get("poller_observation") if facts.get("poller_observation") in PROGRESS_POLLERS else "unverified",
+        "cve_caught_up": (consumers.get("cve") or {}).get("caught_up") is True,
+        "document_caught_up": (consumers.get("document") or {}).get("caught_up") is True,
+    }
+
+
+def print_progress(summary):
+    # stdout avoids PowerShell 5.1 treating native stderr as a terminating error.
+    print("[deployment-check] " + json.dumps(summary, ensure_ascii=True), flush=True)
+
 
 def post_json(url, body):
     """Import from configured B only; no cloud collection or model invocation."""
@@ -35,7 +65,7 @@ def post_json(url, body):
 
 def check(*, b_base, main_base, run_id, collector_commit, wait_seconds=180,
           synchronize=False, reader=DELIVERY.request_json, poster=post_json,
-          clock=time.monotonic, sleeper=time.sleep):
+          clock=time.monotonic, sleeper=time.sleep, progress=None):
     if type(wait_seconds) is not int or not 5 <= wait_seconds <= 3600:
         raise ValueError("wait_seconds must be 5..3600")
     if type(run_id) is not int or run_id <= 0 or not re.fullmatch(r"[0-9a-f]{40}", collector_commit):
@@ -45,6 +75,20 @@ def check(*, b_base, main_base, run_id, collector_commit, wait_seconds=180,
     deadline = started + wait_seconds
     attempts, imports = 0, 0
     sync_failure = False
+    last_progress_at, last_progress_state = None, None
+
+    def report(facts, phase, *, force=False):
+        nonlocal last_progress_at, last_progress_state
+        if progress is None:
+            return
+        now = clock()
+        summary = progress_summary(facts, phase=phase, elapsed_seconds=now - started)
+        state = {key: value for key, value in summary.items() if key != "elapsed_seconds"}
+        if force or state != last_progress_state or last_progress_at is None or now - last_progress_at >= 10:
+            progress(summary)
+            last_progress_at, last_progress_state = now, state
+
+    report({}, "verification_started", force=True)
     while True:
         attempts += 1
         facts = DELIVERY.verify(b_base=b_base, main_base=main_base, run_id=run_id,
@@ -65,13 +109,22 @@ def check(*, b_base, main_base, run_id, collector_commit, wait_seconds=180,
                 facts["reason_category"] = "actions_pull_and_durable_import_verified"
             elif facts.get("consumption_verified") and not pull:
                 facts["reason_category"] = "import_verified_recent_pull_unverified"
+            report(facts, "verified" if complete else "wait_expired", force=True)
             return facts
+        report(facts, "waiting")
         # Do not write until both B and the main proxy serve the expected run.
         if synchronize and facts.get("snapshot_serving_verified") and not facts.get("consumption_verified"):
             imports += 1
             consumers = facts.get("consumers") or {}
-            cve_ok = True if (consumers.get("cve") or {}).get("caught_up") else poster(main_base + "/api/collect", {"keyword": ""})
-            document_ok = True if (consumers.get("document") or {}).get("caught_up") else poster(main_base + "/api/library/team-sync", {"max_documents": 200})
+            cve_ok, document_ok = True, True
+            if not (consumers.get("cve") or {}).get("caught_up"):
+                report(facts, "cve_import_started", force=True)
+                cve_ok = poster(main_base + "/api/collect", {"keyword": ""})
+                report(facts, "cve_import_returned", force=True)
+            if not (consumers.get("document") or {}).get("caught_up"):
+                report(facts, "document_import_started", force=True)
+                document_ok = poster(main_base + "/api/library/team-sync", {"max_documents": 200})
+                report(facts, "document_import_returned", force=True)
             sync_failure = sync_failure or not cve_ok or not document_ok
         remaining = deadline - clock()
         if remaining > 0:
@@ -88,12 +141,13 @@ def main(argv=None):
     parser.add_argument("--collector-commit", required=True)
     parser.add_argument("--wait-seconds", type=int, default=180)
     parser.add_argument("--synchronize", action="store_true")
+    parser.add_argument("--progress", action="store_true", help="Print safe progress summaries to stdout before the final JSON proof")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     try:
         facts = check(b_base=args.b_base, main_base=args.main_base, run_id=args.run_id,
                       collector_commit=args.collector_commit, wait_seconds=args.wait_seconds,
-                      synchronize=args.synchronize)
+                      synchronize=args.synchronize, progress=print_progress if args.progress else None)
     except (ValueError, TypeError):
         parser.error("Invalid endpoint, expected generation or waiting period; no import was started")
     body = json.dumps(facts, ensure_ascii=False, indent=2) + "\n"
