@@ -40,6 +40,9 @@ def _documents_step(records):
 
 def run_documents(record):
     result = ingest(record)
+    if result.get("ok", 0):
+        from automation.investigation_queue import evidence_updated
+        result["investigations_queued"] = evidence_updated(record)
     steps = [{"role": "富化", "action": "抓取关联资料并更新证据索引",
               "detail": "%s：尝试 %d 个来源，成功 %d 个，新增/更新 %d 段。" %
               (result["cve_id"], result["attempted"], result["ok"], result["chunks"])}]

@@ -30,6 +30,11 @@
           情报富集
           <small>EPSS / KEV / 资产</small>
         </button>
+        <button type="button" data-view="risks">
+          <span class="node" aria-hidden="true"></span>
+          资产风险
+          <small>自动研判与处置</small>
+        </button>
         <button type="button" data-view="library">
           <span class="node" aria-hidden="true"></span>
           资料库
@@ -123,6 +128,32 @@
         <ol class="flow" id="flow" hidden></ol>
       </section>
 
+      <section id="risks" class="view" hidden>
+        <article class="panel">
+          <header class="panel-head"><h2>资产风险与研判</h2></header>
+          <p class="hint">新情报和资产变更会自动触发相关评估。结论依据登记信息与来源证据；版本命中尚不代表已验证可利用。</p>
+          <div class="live-actions">
+            <button type="button" class="primary" id="risk-refresh">刷新结果</button>
+            <button type="button" class="ghost" id="risk-inventory">管理资产清单</button>
+            <button type="button" class="ghost" id="risk-reassess">重新评估相关情报</button>
+            <label for="risk-filter">结论</label>
+            <select id="risk-filter"><option value="">全部</option><option value="matched_version">版本命中</option><option value="unknown">待确认</option><option value="not_matched">当前范围未命中</option><option value="invalidated">结论已过期</option></select>
+          </div>
+          <p id="risk-summary" class="hint" role="status"></p>
+          <div id="risk-list"></div>
+          <div class="live-actions"><button type="button" class="ghost" id="risk-prev">上一页</button><span id="risk-page"></span><button type="button" class="ghost" id="risk-next">下一页</button></div>
+        </article>
+        <article class="panel">
+          <header class="panel-head"><h2>研判任务与证据轨迹</h2></header>
+          <form id="investigation-form" class="live-actions">
+            <label for="investigation-cve">研究已收录情报</label>
+            <input id="investigation-cve" placeholder="CVE-2026-12345" required pattern="[Cc][Vv][Ee]-[0-9]{4}-[0-9]{4,7}" maxlength="20" />
+            <button type="submit" class="ghost" id="investigation-submit">创建研判任务</button>
+          </form>
+          <p class="hint" id="investigation-worker"></p>
+          <div id="investigation-list"></div>
+        </article>
+      </section>
       <section id="monitor" class="view" hidden>
         <div class="ia-banner">
           <div>
@@ -462,6 +493,7 @@
       </section>
     </div>
   </div>
-  <script src="/assets/app.js?v=20261013-monitor-refresh2"></script>
+  <script src="/assets/app.js?v=20261014-investigations"></script>
+  <script src="/assets/risks.js?v=20261014-investigations"></script>
 </body>
 </html>

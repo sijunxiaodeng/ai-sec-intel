@@ -117,7 +117,7 @@ class HybridTest(unittest.TestCase):
             from api.app import app
         except ImportError:
             self.skipTest("API 验收需要 requirements-test.txt")
-        with patch("api.app.knowledge_records", side_effect=lambda: knowledge_records(self.db)), patch("api.app.get_record", side_effect=lambda cve: get_record(cve, self.db)), patch("rag.prepare.prepare", side_effect=lambda: real_prepare(self.db)), patch("agents.orchestrator.append_run"):
+        with patch("api.app.knowledge_records", side_effect=lambda: knowledge_records(self.db)), patch("api.app.get_record", side_effect=lambda cve: get_record(cve, self.db)), patch("rag.prepare.prepare", side_effect=lambda **kwargs: real_prepare(self.db, **kwargs)), patch("agents.orchestrator.append_run"):
             client = TestClient(app)
             self.assertEqual(client.post("/api/sample").status_code, 200)
             self.assertEqual(client.get("/api/items/CVE-2024-37032").status_code, 200)

@@ -1,7 +1,7 @@
 import os
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictBool, StrictStr
@@ -1138,9 +1138,76 @@ def assets():
 @app.post("/api/assets/import")
 def assets_import(body: AssetImport):
     try:
-        return import_assets(body.model_dump())
+        result = import_assets(body.model_dump())
+        from automation.investigation_queue import reconcile
+        result["investigations_queued"] = reconcile(reason="assets_changed")
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+class RiskDispositionBody(BaseModel):
+    status: Literal["pending", "in_progress", "pending_review", "resolved", "accepted_risk"]
+    note: str = Field("", max_length=1000)
+    expected_fingerprint: str = Field(..., min_length=1, max_length=128)
+
+
+@app.get("/api/risks")
+def asset_risks(status: str = "", asset_id: str = "", cve_id: str = "",
+                limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    from enrichment.risk_register import list_risks
+    try:
+        return list_risks(status=status or None, asset_id=asset_id or None,
+                          cve_id=cve_id or None, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/api/risks/{asset_id}/{cve_id}")
+def asset_risk_detail(asset_id: str, cve_id: str):
+    from enrichment.risk_register import get_risk
+    result = get_risk(asset_id, cve_id.upper())
+    if not result:
+        raise HTTPException(status_code=404, detail="未找到资产风险记录")
+    return result
+
+
+@app.post("/api/risks/reassess")
+def reassess_assets():
+    from automation.investigation_queue import reconcile
+    return {"queued": reconcile(reason="manual_reassessment", force=True)}
+
+
+@app.post("/api/risks/{asset_id}/{cve_id}/disposition")
+def risk_disposition(asset_id: str, cve_id: str, body: RiskDispositionBody):
+    from enrichment.risk_register import update_disposition
+    try:
+        return update_disposition(asset_id, cve_id.upper(), body.status,
+            note=body.note, expected_fingerprint=body.expected_fingerprint)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/api/investigations")
+def investigation_tasks(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    from automation.investigation_queue import tasks
+    return tasks(limit=limit, offset=offset)
+
+
+@app.get("/api/investigations/{job_id}/runs")
+def investigation_history(job_id: int):
+    from automation.investigation_queue import history
+    return {"items": history(job_id)}
+
+
+@app.post("/api/investigations/{cve_id}")
+def request_investigation(cve_id: str):
+    from database import store
+    from automation.investigation_queue import reconcile
+    record = store.get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="知识库中没有这条情报")
+    return {"queued": reconcile([record], reason="user_research", force=True, explicit=True)}
 
 
 @app.get("/api/assets/demo")
@@ -1845,7 +1912,7 @@ def ask(body: AskBody):
 @app.post("/api/sample")
 def sample():
     from rag.prepare import prepare
-    return prepare()  # 只载入人工历史样例；不下载模型、不运行采集。
+    return prepare(demo=True)  # 显式样例入口；生产索引入口不导入演示数据。
 
 
 @app.get("/api/settings")

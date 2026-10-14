@@ -58,7 +58,7 @@ class ProcessingTest(unittest.TestCase):
         a, b, c, d = self._providers()
         with a, b, c, d:
             processing.run_batch()
-        self.assertEqual(processing.state()["counts"], {"done": 3})
+        self.assertEqual(processing.state()["counts"], {"done": 2, "deferred": 1})
         self.assertEqual(processing.enqueue(store.load_kb()), 0)
         self.assertEqual(store.get_record(self.record["item"]["cve_id"])["epss"]["score"], "0.31")
 
@@ -164,7 +164,7 @@ class ProcessingTest(unittest.TestCase):
         a, b, c, d = self._providers()
         with a, b, c, d:
             processing.run_batch()
-        self.assertEqual(processing.state()["counts"], {"done": 3})
+        self.assertEqual(processing.state()["counts"], {"done": 2, "deferred": 1})
 
     def test_expired_worker_cannot_complete_reclaimed_task(self):
         store.upsert([self.record])

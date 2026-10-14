@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import os
 from pathlib import Path
+
+try:
+    from ..monitoring.lock import ProcessFileLock
+except ImportError:  # Top-level deployment package or direct script invocation.
+    if not __package__:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from monitoring.lock import ProcessFileLock
 
 
 def claim_role(directory, role):
@@ -12,8 +19,7 @@ def claim_role(directory, role):
         raise ValueError("Unknown state role")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / ".runtime-role.lock").open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with ProcessFileLock(directory / ".runtime-role.lock", timeout=30):
         marker = directory / ".writer-mode"
         if marker.exists() and marker.read_text().strip() != role:
             raise RuntimeError("This volume belongs to a different writer mode; use a separate volume")

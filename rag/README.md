@@ -58,7 +58,7 @@ result = answer("如何修复？", cve_id=record["item"]["cve_id"])
 ```powershell
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements-rag.txt
-.venv\Scripts\python.exe -m rag.prepare --semantic
+.venv\Scripts\python.exe -m rag.prepare --semantic --demo
 .venv\Scripts\python.exe main.py
 ```
 
@@ -72,6 +72,28 @@ python -m venv .venv
 ```
 
 下载脚本固定官方仓库修订 46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59，并核对仓库提供的 LFS 文件 SHA256；不降低 TLS 校验。
+
+### 正式数据库与 Docker 的语义索引
+
+`rag.prepare` 默认只处理已有证据，不再自动导入历史样例。需要演示样例时显式加 `--demo`。正式数据应先通过采集、导入和正文处理入库，再分别建立漏洞证据库和资料库的索引：
+
+```powershell
+python -m rag.prepare --semantic --db data/task_c.sqlite3
+python -m rag.prepare --semantic --db data/library.sqlite3
+```
+
+这两个命令首次可下载 BGE 模型；离线使用时分别追加 `--model-dir` 指向已下载目录。未设置 `--semantic` 时不下载模型、不创建向量。空证据库会报错并保持为空。`MAIN_DATA_DIR` 自定义时，请将 `--db` 改为实际数据目录。
+
+生产/Actions Compose 的主镜像支持 `INSTALL_SEMANTIC=1` 构建参数。把该值写入本地 `.env.production` 后，以生产 Compose 为例执行：
+
+```powershell
+docker compose --env-file .env.production -f docker-compose.production.yml build main-app
+docker compose --env-file .env.production -f docker-compose.production.yml up -d main-app
+docker compose --env-file .env.production -f docker-compose.production.yml exec main-app python -m rag.prepare --semantic --db /app/data/task_c.sqlite3
+docker compose --env-file .env.production -f docker-compose.production.yml exec main-app python -m rag.prepare --semantic --db /app/data/library.sqlite3
+```
+
+Actions 部署将文件名换成 `docker-compose.actions.yml`。默认 `INSTALL_SEMANTIC=0` 保留 BM25；安装嵌入依赖不代表模型或索引已经就绪。应分别验证两类资料的真实查询返回 `mode=hybrid`，才能记录语义检索已启用。模型、索引配置及向量保存在持久数据卷，日常增量更新不主动下载模型。
 
 向量检索使用 [FastEmbed](https://qdrant.github.io/fastembed/) 的 [BAAI/bge-small-zh-v1.5 中文模型](https://qdrant.github.io/fastembed/examples/Supported_Models/)，CPU 推理，512 维。BM25 与向量检索的名次通过 RRF 合并；余弦相似度门槛 0.45 是初始工程参数，不是准确率或可信度。SQLite 持久保存片段、向量、模型名称与文本摘要，避免旧向量被用于新证据。查询时只加载本机模型；缺依赖、索引未准备好或文本更新时明确回退到 BM25，重新运行准备命令即可重建。
 
@@ -98,7 +120,7 @@ python -m venv .venv
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -r requirements-rag.txt
-.venv\Scripts\python.exe -m rag.prepare
+.venv\Scripts\python.exe -m rag.prepare --demo
 .venv\Scripts\python.exe -m rag.ingest --cve CVE-2024-37032
 .venv\Scripts\python.exe main.py
 ```

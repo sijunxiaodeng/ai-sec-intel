@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import math
 from pathlib import Path
+import time
 
 
 class AlreadyRunning(RuntimeError):
@@ -10,8 +12,12 @@ class AlreadyRunning(RuntimeError):
 
 
 class ProcessFileLock:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, timeout: float = 0):
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or not 0 <= timeout <= 300):
+            raise ValueError("Lock timeout must be between 0 and 300 seconds")
         self.path = Path(path)
+        self.timeout = timeout
         self._file = None
 
     def __enter__(self):
@@ -26,18 +32,26 @@ class ProcessFileLock:
                 f.write(b'0')
                 f.flush()
             f.seek(0)
-            if os.name == 'nt':
-                import msvcrt
+            deadline = time.monotonic() + self.timeout
+            while True:
                 try:
-                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    if os.name == 'nt':
+                        import msvcrt
+                        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as exc:
-                    raise AlreadyRunning('另一轮监测尚未结束，跳过本次任务') from exc
-            else:
-                import fcntl
-                try:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as exc:
-                    raise AlreadyRunning('另一轮监测尚未结束，跳过本次任务') from exc
+                    # Preserve immediate failure for existing monitoring callers;
+                    # publication/role callers opt into bounded serialization.
+                    if os.name != 'nt' and not isinstance(exc, BlockingIOError):
+                        raise
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise AlreadyRunning('另一轮任务尚未释放状态锁') from exc
+                    time.sleep(min(0.05, remaining))
+                else:
+                    break
             self._file = f
             return self
         except BaseException:

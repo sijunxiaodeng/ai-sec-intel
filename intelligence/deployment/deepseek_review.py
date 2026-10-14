@@ -260,13 +260,8 @@ def _worker(db_path, progress_path, model, max_calls):
         with ProcessFileLock(Path(db_path).parent / ".ai_classification.lock"):
             # Same code digest as the existing worker/API, without importing the
             # CLI modules that automatically read a local .env file.
-            import hashlib
-            digest = hashlib.sha256()
-            for name in ("ai_relevance.py", "hybrid_classifier.py", "semantic_judge.py"):
-                source = ROOT / "classification" / name
-                digest.update(source.name.encode())
-                digest.update(source.read_bytes())
-            version = "hybrid-v3.1-" + digest.hexdigest()[:12]
+            from classification.version import classifier_version
+            version = classifier_version(ROOT)
             run_priority_batch(db_path, version, 300, max_calls,
                                HybridAIClassifier(BoundedJudge()), verbose=False)
         if progress["retry"]:

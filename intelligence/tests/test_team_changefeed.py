@@ -155,7 +155,12 @@ class TeamChangefeedTests(unittest.TestCase):
     def test_atomic_mirror_link_swap_is_visible_without_api_restart(self):
         self.add()
         link = self.root / "current"
-        os.symlink(self.root, link, target_is_directory=True)
+        try:
+            os.symlink(self.root, link, target_is_directory=True)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows account lacks directory symlink privilege (WinError 1314)")
+            raise
         feed = ChangeRepository(IntelligenceRepository(link / "intelligence.db", self.root))
         original = feed.page(kind="cve")
         replacement = self.root / "next"

@@ -7,7 +7,6 @@ connection while subsequent requests open the new generation.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import re
@@ -22,10 +21,10 @@ from pathlib import Path
 
 try:
     from .actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
-    from .state_role import claim_role
+    from .state_role import claim_role, ProcessFileLock
 except ImportError:  # Direct script invocation in the B container.
     from actions_state import ARTIFACT_PREFIX, GitHubClient, MAX_SNAPSHOT_BYTES, StateError, restore_archive, validate_deployment_state
-    from state_role import claim_role
+    from state_role import claim_role, ProcessFileLock
 
 
 def _read_json(path):
@@ -103,8 +102,7 @@ def install_snapshot(payload, directory, *, repository, branch, run_id,
         raise StateError("Snapshot exceeds size limit")
     directory = Path(directory).absolute()
     claim_role(directory, "actions-mirror")
-    with (directory / ".publication.lock").open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with ProcessFileLock(directory / ".publication.lock", timeout=120):
         current = directory / "current"
         if current.exists() and not current.is_symlink():
             raise StateError("Current generation must be a managed symlink")
@@ -145,19 +143,28 @@ def install_snapshot(payload, directory, *, repository, branch, run_id,
                 verify_history(previous, staged)
             (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
             target = snapshots / str(int(run_id))
-            if target.exists():
-                if previous and target.resolve() == previous:
-                    raise StateError("A conflicting active snapshot generation exists")
-                target.chmod(0o755)
-                shutil.rmtree(target)
-            staged.replace(target)
-            for path in target.iterdir():
-                path.chmod(0o444)
-            target.chmod(0o555)
             temporary_link = directory / ".current-next"
             temporary_link.unlink(missing_ok=True)
-            temporary_link.symlink_to(Path("snapshots") / str(int(run_id)), target_is_directory=True)
-            temporary_link.replace(current)
+            try:
+                # Test link permission before moving or making the validated
+                # generation immutable. Never fall back to copying live DBs.
+                temporary_link.symlink_to(Path("snapshots") / str(int(run_id)), target_is_directory=True)
+            except OSError as exc:
+                raise StateError("Atomic snapshot publication requires directory symlink permission; "
+                                 "on Windows enable Developer Mode or use the Linux Docker deployment") from exc
+            try:
+                if target.exists():
+                    if previous and target.resolve() == previous:
+                        raise StateError("A conflicting active snapshot generation exists")
+                    target.chmod(0o755)
+                    shutil.rmtree(target)
+                staged.replace(target)
+                for path in target.iterdir():
+                    path.chmod(0o444)
+                target.chmod(0o555)
+                temporary_link.replace(current)
+            finally:
+                temporary_link.unlink(missing_ok=True)
         generations = sorted((path for path in snapshots.iterdir() if path.is_dir() and path.name.isdigit()),
                              key=lambda path: int(_read_json(path / "manifest.json")["run_number"]), reverse=True)
         for old in generations[8:]:
@@ -199,11 +206,7 @@ def main(argv=None):
     try:
         claim_role(directory, "actions-mirror")
         client = GitHubClient(os.getenv("GITHUB_TOKEN"), args.repository)
-        with (directory / ".mirror.lock").open("a+") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise StateError("Another mirror already owns this volume") from None
+        with ProcessFileLock(directory / ".mirror.lock"):
             while True:
                 try:
                     result = deliver_latest(client, directory, workflow=args.workflow)

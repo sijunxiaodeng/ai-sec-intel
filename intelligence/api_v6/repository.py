@@ -1,7 +1,6 @@
 """Read-only access to the V2/V5.1 SQLite store, with hash/version freshness checks."""
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -10,14 +9,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from monitoring.metrics import baseline, latency_report
+from classification.version import CLASSIFIER_FILES, classifier_version
 
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
-CLASSIFIER_FILES = (
-    "classification/ai_relevance.py",
-    "classification/hybrid_classifier.py",
-    "classification/semantic_judge.py",
-    "classification/scope_policy.py",
-)
 
 
 def current_classifier_version(root: Path) -> str | None:
@@ -26,14 +20,10 @@ def current_classifier_version(root: Path) -> str | None:
     None means source code was not found, so no historical classification is
     assumed current. We never fall back to a potentially stale DB version.
     """
-    paths = [root / item for item in CLASSIFIER_FILES]
-    if not all(path.is_file() for path in paths):
+    try:
+        return classifier_version(root)
+    except FileNotFoundError:
         return None
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
-    return "hybrid-v3.1-" + digest.hexdigest()[:12]
 
 
 def escape_like(text: str) -> str:

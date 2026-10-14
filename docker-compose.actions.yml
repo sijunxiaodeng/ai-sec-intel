@@ -43,6 +43,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_SEMANTIC: ${INSTALL_SEMANTIC:-0}
     image: ai-sec-intel-main:production
     restart: unless-stopped
     init: true
@@ -67,6 +69,7 @@ services:
       MAIN_IMPORT_DEMO_CARDS: "0"
       TEAM_ONLY_COLLECT: "1"
       AUTO_INGEST_ON_COLLECT: "1"
+      INVESTIGATION_USE_MODEL: ${INVESTIGATION_USE_MODEL:-0}
       MONITOR_INTERVAL_MINUTES: "15"
       PUBLIC_LIBRARY_INTERVAL_HOURS: "6"
       PYTHONUTF8: "1"

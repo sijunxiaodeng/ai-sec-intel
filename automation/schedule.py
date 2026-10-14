@@ -546,6 +546,9 @@ def _loop():
 
 def start():
     global _STARTED
+    # Asset and explicit research tasks also run with public monitoring disabled.
+    from automation.processing import start as start_processing
+    start_processing()
     if _STARTED:
         return
     if not AUTO_ENABLED:
@@ -554,8 +557,6 @@ def start():
     _STARTED = True
     _STOP.clear()
     ensure_state()
-    from automation.processing import start as start_processing
-    start_processing()
     threading.Thread(target=_loop, name="monitor-schedule", daemon=True).start()
     threading.Thread(target=_public_loop, name="public-library-schedule", daemon=True).start()
 

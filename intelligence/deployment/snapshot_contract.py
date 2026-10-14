@@ -1,26 +1,27 @@
 """Read-only deployment contract checks; usable before dependencies install."""
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+try:
+    from classification.version import CLASSIFIER_FILES, classifier_version
+except ModuleNotFoundError as exc:
+    if exc.name != "classification":
+        raise
+    # actions_state.py also runs directly, before pip installs and without the
+    # intelligence root on sys.path. Load the same stdlib-only helper by path.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("_snapshot_classifier_version", Path(__file__).resolve().parents[1] / "classification" / "version.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    CLASSIFIER_FILES, classifier_version = module.CLASSIFIER_FILES, module.classifier_version
 
 CONTRACT_VERSION = 1
-CLASSIFIER_FILES = (
-    "classification/ai_relevance.py", "classification/hybrid_classifier.py",
-    "classification/semantic_judge.py", "classification/scope_policy.py",
-)
 
 
 def runtime_classifier_version(root: Path | None = None) -> str:
-    root = root or Path(__file__).resolve().parents[1]
-    digest = hashlib.sha256()
-    for name in CLASSIFIER_FILES:
-        path = root / name
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
-    return "hybrid-v3.1-" + digest.hexdigest()[:12]
+    return classifier_version(root)
 
 
 def database_contract(path: Path, *, classifier_version: str | None = None) -> dict:

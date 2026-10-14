@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -96,7 +97,7 @@ class HistoryTest(unittest.TestCase):
         self.save(*self.source(self.TARGET, "2026-02-01T00:00:00Z"))
         self.save(*self.source("CVE-2025-90001"))
         self.save(*self.source("CVE-2025-90002"))
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             conn.execute("UPDATE source_snapshots SET body=? WHERE cve_id=?", (b"{}", "CVE-2025-90001"))
             payload = json.loads(conn.execute("SELECT payload FROM documents WHERE cve_id=?", ("CVE-2025-90002",)).fetchone()[0])
             payload["url"] = "https://example.org/untrusted"
@@ -109,7 +110,7 @@ class HistoryTest(unittest.TestCase):
         self.save(*self.source(self.TARGET, "2026-02-01T00:00:00Z"))
         record, cve = self.source("CVE-2025-90001")
         self.save(record, cve)
-        with sqlite3.connect(self.db) as conn:
+        with closing(sqlite3.connect(self.db)) as conn, conn:
             body = json.dumps({"vulnerabilities": [{"cve": dict(cve, id="CVE-2025-90002")}]}).encode()
             sha = hashlib.sha256(body).hexdigest()
             doc = json.loads(conn.execute("SELECT payload FROM documents WHERE cve_id=?", (cve["id"],)).fetchone()[0])

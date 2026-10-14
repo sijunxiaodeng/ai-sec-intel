@@ -17,9 +17,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt ./
+ARG INSTALL_SEMANTIC=0
+COPY requirements.txt requirements-rag.txt ./
 COPY intelligence/requirements.lock.txt ./intelligence/requirements.lock.txt
 RUN pip install --no-cache-dir -r requirements.txt \
+    && if [ "$INSTALL_SEMANTIC" = "1" ]; then pip install --no-cache-dir -r requirements-rag.txt; fi \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home app
 

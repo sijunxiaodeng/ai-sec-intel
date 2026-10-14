@@ -1,6 +1,7 @@
 """Regression checks for migration, field updates and concurrent main writers."""
 
 import copy
+from contextlib import closing
 from concurrent.futures import ProcessPoolExecutor
 import json
 import os
@@ -64,7 +65,7 @@ class MainStoreTest(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def sql(self, statement):
-        with sqlite3.connect(store.database_path()) as con:
+        with closing(sqlite3.connect(store.database_path())) as con, con:
             return con.execute(statement).fetchall()
 
     def test_legacy_migration_runs_once_and_preserves_first_seen(self):
@@ -285,7 +286,7 @@ class MainStoreTest(unittest.TestCase):
         snapshot = store.load_kb()[0]
         expected = {"CVE-2026-12345": store.source_revision(snapshot)}
         snapshot["epss"] = {"status": "ok", "score": .5}
-        with sqlite3.connect(store.database_path()) as con:
+        with closing(sqlite3.connect(store.database_path())) as con, con:
             con.execute("CREATE TABLE processing_jobs (id INTEGER PRIMARY KEY,cve_id TEXT,status TEXT,lease_token TEXT,lease_until REAL,revision TEXT)")
             con.execute("INSERT INTO processing_jobs VALUES(1,?,'running','current',?,?)",
                         ("CVE-2026-12345", time.time() + 60, expected["CVE-2026-12345"]))
@@ -293,7 +294,7 @@ class MainStoreTest(unittest.TestCase):
         good = {"CVE-2026-12345": {"id": 1, "lease_token": "current"}}
         self.assertEqual(store.apply_enrichment([snapshot], expected, bad), [])
         self.assertEqual(store.apply_enrichment([snapshot], expected, good), ["CVE-2026-12345"])
-        with sqlite3.connect(store.database_path()) as con:
+        with closing(sqlite3.connect(store.database_path())) as con, con:
             con.execute("UPDATE processing_jobs SET lease_until=?", (time.time() - 1,))
         self.assertEqual(store.apply_enrichment([snapshot], expected, good), [])
 

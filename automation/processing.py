@@ -15,7 +15,7 @@ from agents.tool_registry import (ToolRegistry, validate_records, validate_mappi
 _STOP = threading.Event()
 _THREAD = None
 _RUN_LOCK = threading.Lock()
-STAGES = ("enrich", "documents", "index")
+STAGES = ("enrich", "documents", "investigate", "index")
 
 
 @contextmanager
@@ -39,6 +39,12 @@ def _connection():
             UNIQUE(cve_id,revision,stage))""")
         if "agent_trace_json" not in {row[1] for row in conn.execute("PRAGMA table_info(processing_jobs)")}:
             conn.execute("ALTER TABLE processing_jobs ADD COLUMN agent_trace_json TEXT NOT NULL DEFAULT '{}'")
+        if "context_json" not in {row[1] for row in conn.execute("PRAGMA table_info(processing_jobs)")}:
+            conn.execute("ALTER TABLE processing_jobs ADD COLUMN context_json TEXT NOT NULL DEFAULT '{}'")
+        conn.execute("""CREATE TABLE IF NOT EXISTS processing_runs (
+            run_id TEXT PRIMARY KEY, job_id INTEGER NOT NULL, cve_id TEXT NOT NULL,
+            stage TEXT NOT NULL, status TEXT NOT NULL, completed_at REAL NOT NULL,
+            trace_json TEXT NOT NULL)""")
         conn.execute("CREATE INDEX IF NOT EXISTS processing_due ON processing_jobs(status,available_at)")
         conn.commit()
         yield conn
@@ -83,6 +89,7 @@ def _commit_guard(job):
 
 def enqueue(records):
     """Idempotent reconciliation also closes a crash between saving a record and enqueueing."""
+    records = list(records)
     now = time.time()
     rows = []
     for record in records:
@@ -95,7 +102,10 @@ def enqueue(records):
         before = conn.total_changes
         conn.executemany("""INSERT OR IGNORE INTO processing_jobs
             (cve_id,revision,stage,available_at,created_at,updated_at) VALUES (?,?,?,?,?,?)""", rows)
-        return conn.total_changes - before
+        inserted = conn.total_changes - before
+    from automation.investigation_queue import reconcile
+    reconcile(records)
+    return inserted
 
 
 def _claim(stage, limit=10, lease_seconds=900):
@@ -105,7 +115,15 @@ def _claim(stage, limit=10, lease_seconds=900):
         conn.execute("""UPDATE processing_jobs SET status='retry',lease_token=NULL,lease_until=NULL
             WHERE status='running' AND lease_until < ?""", (now,))
         rows = conn.execute("""SELECT * FROM processing_jobs WHERE stage=?
-            AND status IN ('pending','retry') AND available_at <= ? ORDER BY id LIMIT ?""",
+            AND status IN ('pending','retry','deferred') AND available_at <= ?
+            AND (stage != 'investigate' OR NOT EXISTS (
+                SELECT 1 FROM processing_jobs prerequisite
+                WHERE prerequisite.cve_id=processing_jobs.cve_id
+                  AND prerequisite.revision=processing_jobs.revision
+                  AND prerequisite.stage IN ('enrich','documents')
+                  AND (prerequisite.status='running' OR
+                       (prerequisite.status='pending' AND prerequisite.attempts=0))))
+            ORDER BY id LIMIT ?""",
                             (stage, now, limit)).fetchall()
         for row in rows:
             conn.execute("""UPDATE processing_jobs SET status='running',attempts=attempts+1,
@@ -114,11 +132,15 @@ def _claim(stage, limit=10, lease_seconds=900):
     return [dict(row, lease_token=token, attempts=row["attempts"] + 1) for row in rows]
 
 
-def _finish(job, error="", *, skipped=False, trace=None):
+def _finish(job, error="", *, skipped=False, trace=None, deferred=False):
     now = time.time()
     exhausted = job["attempts"] >= int(os.environ.get("PROCESSING_MAX_ATTEMPTS", "6"))
     status = "skipped" if skipped else (("failed" if exhausted else "retry") if error else "done")
+    if deferred and not skipped:
+        status = "deferred"
     delay = min(3600, 30 * 2 ** min(job["attempts"] - 1, 7)) if error else 0
+    if deferred:
+        delay = 300
     if trace is not None:
         reflection = dict(trace.get("reflection") or {}, task_status=status)
         if skipped:
@@ -127,13 +149,18 @@ def _finish(job, error="", *, skipped=False, trace=None):
             reflection.update(status="failed", reason="已保存成功维度；重试次数已耗尽，失败任务等待排查或手动重新排队。")
         trace = dict(trace, reflection=reflection)
     with _connection() as conn:
-        conn.execute("""UPDATE processing_jobs SET status=?,error=?,available_at=?,
+        changed = conn.execute("""UPDATE processing_jobs SET status=?,error=?,available_at=?,
             agent_trace_json=COALESCE(?,agent_trace_json),
-            lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_token=?
+            lease_token=NULL,lease_until=NULL,attempts=CASE WHEN ? THEN 0 ELSE attempts END,
+            updated_at=? WHERE id=? AND lease_token=?
             AND status='running' AND lease_until>=?""",
                      (status, str(error)[:500], now + delay,
                       json.dumps(trace, ensure_ascii=False) if trace is not None else None,
-                      now, job["id"], job["lease_token"], now))
+                      deferred, now, job["id"], job["lease_token"], now)).rowcount
+        if changed and trace is not None:
+            conn.execute("""INSERT OR IGNORE INTO processing_runs VALUES (?,?,?,?,?,?,?)""",
+                         (str(job["id"]) + "-" + job["lease_token"], job["id"], job["cve_id"],
+                          job["stage"], status, now, json.dumps(trace, ensure_ascii=False)))
 
 
 def _current(job):
@@ -227,6 +254,9 @@ def run_batch(batch_size=10):
                 result = ingest(record, max_sources=5, update_index_on_ingest=False,
                                 commit_guard=lambda: _commit_guard(job))
                 _enqueue_index(job)
+                if int(result.get("ok", 0)) > 0:
+                    from automation.investigation_queue import evidence_updated
+                    evidence_updated(record)
                 failed = int(result.get("attempted", 0)) - int(result.get("ok", 0))
                 _finish(job, "%d document sources failed" % failed if failed else "")
                 processed += 1
@@ -234,13 +264,15 @@ def run_batch(batch_size=10):
                 _finish(job, skipped=True)
             except Exception as exc:
                 _finish(job, type(exc).__name__)
+        from automation.investigation_queue import run_pending
+        processed += run_pending(limit=min(batch_size, 2))
         index_jobs = [job for job in _claim("index", batch_size) if _current(job)]
         if index_jobs:
             try:
                 result = update_index()
                 error = "index_error" if result.get("status") == "error" else ""
                 for job in index_jobs:
-                    _finish(job, error)
+                    _finish(job, error, deferred=result.get("status") == "deferred")
                 processed += len(index_jobs)
             except Exception as exc:
                 for job in index_jobs:
@@ -255,7 +287,7 @@ def state():
         counts = {row[0]: row[1] for row in conn.execute(
             "SELECT status,count(*) FROM processing_jobs GROUP BY status")}
         failures = [dict(row) for row in conn.execute("""SELECT id,cve_id,stage,status,attempts,error
-            FROM processing_jobs WHERE status IN ('retry','failed') ORDER BY updated_at DESC LIMIT 20""")]
+            FROM processing_jobs WHERE status IN ('retry','failed','deferred') ORDER BY updated_at DESC LIMIT 20""")]
         traces = []
         for row in conn.execute("""SELECT id,cve_id,stage,status,agent_trace_json FROM processing_jobs
             WHERE agent_trace_json != '{}' ORDER BY updated_at DESC,id DESC LIMIT 20"""):

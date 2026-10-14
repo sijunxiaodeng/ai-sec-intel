@@ -2,6 +2,7 @@ var titles = {
   overview: "总览",
   monitor: "情报监测",
   enrich: "情报富集",
+  risks: "资产风险",
   library: "资料库",
   assets: "情报富集",
   ask: "证据问答",
@@ -11,6 +12,7 @@ var eyebrows = {
   overview: "工作台",
   monitor: "CVE + 资料情报流",
   enrich: "EPSS / KEV / 论文 / 影响资产",
+  risks: "自动关联 · 证据研判 · 处置跟踪",
   library: "可检索原文与片段",
   assets: "EPSS / KEV / 论文 / 影响资产",
   ask: "先证据后回答",
@@ -509,6 +511,7 @@ function setView(name, opts) {
     if (!monitorRefreshing && !opts.skipFeed) loadItems("monitor");
   }
   if (name === "enrich") loadItems(name);
+  if (name === "risks") loadRisks().catch(showError);
   if (name === "ask") loadAsk();
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
@@ -1691,7 +1694,7 @@ on("asset-save", "click", function () {
       assetImpactRequestVersions.declared += 1;
       $("asset-message").textContent = "已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条；其他已登记资产保留。";
       clear($("asset-impact"));
-      add($("asset-impact"), "p", "empty", "清单已更新，请重新评估已保存清单。");
+      add($("asset-impact"), "p", "empty", "清单已更新，已安排 " + (data.investigations_queued || 0) + " 项相关研判；请在资产风险页面查看进度与结论。");
       return loadAssets();
     }).catch(showError).then(function () { button.disabled = false; });
   } catch (error) { showError(error); }

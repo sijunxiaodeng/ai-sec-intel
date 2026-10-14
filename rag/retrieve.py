@@ -1,6 +1,7 @@
 """保持整条情报返回格式，附加片段；样例库独立于监测库。"""
 
 import copy
+import re
 from pathlib import Path
 from enrichment.guidance import library_for, report as guidance_report
 from database.store import load_kb
@@ -108,7 +109,14 @@ def search(query, top_k=5, *, cve_id="", db_path=DEFAULT_DB, library_db=None, po
         records = [row for row in records if row["item"]["cve_id"].upper() in requested]
     product_terms = set(_tokens(text)) & {"ollama", "vllm", "triton", "torchserve", "langchain", "ray"}
     if product_terms:
-        records = [row for row in records if product_terms <= set(_tokens(str(row["item"].get("product") or "")))]
+        # Listing/comparing named products is a union; an intersection must be
+        # requested explicitly. CVE-scoped comparison subqueries retain this
+        # union so a second product name cannot hide the selected CVE.
+        joint = bool(re.search(r"共同|同时.{0,16}(?:影响|受影响|适用)|(?:影响|适用).{0,16}同时|\b(?:both|all)\b.*\b(?:affect|impact)|\b(?:affect|impact)\w*\b.*\bboth\b", text, re.I))
+        def matches_product(row):
+            names = set(_tokens(str(row["item"].get("product") or "")))
+            return product_terms <= names if joint else bool(product_terms & names)
+        records = [row for row in records if matches_product(row)]
     if not records:
         return []
     if not text or text in ("全部", "所有", "列表"):

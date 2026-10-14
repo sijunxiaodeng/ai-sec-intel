@@ -3,6 +3,7 @@ from rag.retrieve import search
 from agents.verifier_agent import run as verify_answer, required_fields
 from rag.evidence import CVE, DEFAULT_DB
 import json
+import re
 from urllib.parse import urlsplit
 from agents.citation_guard import claim_issues
 from agents.question_scope import topics as question_topics, positive_question, compare_scores
@@ -316,8 +317,11 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, libra
         requested = [cve_id.upper()]
     if len(requested) > 4:
         return {"answer": "一次最多比较 4 条漏洞，请缩小范围。", "evidence": [], "used_model": False, "steps": []}
-    asset_words = ("资产", "哪些ip", "哪些 ip", "部署清单", "组件清单")
-    refers_to_assets = any(word in (question or "").lower() for word in ("我的", "我们", "本公司", "我公司") + asset_words)
+    asset_words = ("资产", "哪些ip", "哪些 ip", "部署清单", "组件清单", "asset", "inventory")
+    # Possessive/polite wording is not an asset intent by itself.
+    asset_text = (question or "").lower()
+    owned_deployment = bool(re.search(r"(?:我们|本公司|我公司|我的)(?:的)?(?:当前|正在|已|现有)?(?:部署|服务器|主机)", asset_text))
+    refers_to_assets = any(word in asset_text for word in asset_words) or owned_deployment
     if refers_to_assets and not ("poc" in question_topics(question) and not any(word in question.lower() for word in asset_words)):
         from enrichment.assets import answer_assets
         if len(requested) > 1:

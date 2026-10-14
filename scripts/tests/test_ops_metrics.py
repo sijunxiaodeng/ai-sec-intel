@@ -1,5 +1,6 @@
 import importlib.util
 import json
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -49,13 +50,13 @@ class OperationalMetricsTests(unittest.TestCase):
     def test_queue_is_read_without_creating_missing_tables(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "main.sqlite3"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection, connection:
                 connection.execute("CREATE TABLE untouched (id INTEGER)")
             before = path.read_bytes()
             with self.assertRaises(ValueError):
                 OPS.read_queue(path)
             self.assertEqual(before, path.read_bytes())
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection, connection:
                 connection.execute("CREATE TABLE processing_jobs (status TEXT)")
                 connection.executemany("INSERT INTO processing_jobs VALUES (?)", [("pending",), ("pending",), ("failed",)])
             self.assertEqual(OPS.read_queue(path)["pending"], 2)

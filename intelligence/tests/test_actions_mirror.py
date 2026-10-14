@@ -1,14 +1,17 @@
 """A deployment mirror must deliver authentic, monotonic, immutable history."""
 import io
 import json
+import os
+import shutil
 import sqlite3
 import tempfile
 import unittest
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 from api_v6.repository import IntelligenceRepository
-from deployment.actions_mirror import deliver_latest
+from deployment.actions_mirror import deliver_latest, verify_history
 from deployment.actions_state import StateError, save_state
 from deployment.state_role import claim_role
 from deployment.snapshot_contract import runtime_classifier_version
@@ -57,7 +60,7 @@ class ActionsMirrorTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.source = self.root / "source"
         self.source.mkdir()
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.executescript("""
                 CREATE TABLE source_items(source TEXT,source_id TEXT,first_seen_at TEXT);
                 CREATE TABLE unified_vulnerabilities(cve_id TEXT,first_seen_at TEXT,content_sha256 TEXT);
@@ -81,9 +84,32 @@ class ActionsMirrorTests(unittest.TestCase):
     def tearDown(self):
         # The production generations are immutable even to their owning API UID.
         for path in self.root.rglob("*"):
-            if path.is_dir() and not path.is_symlink():
-                path.chmod(0o755)
+            if not path.is_symlink():
+                path.chmod(0o755 if path.is_dir() else 0o644)
         self.temporary.cleanup()
+
+    def require_directory_symlink(self):
+        probe = self.root / "symlink-probe"
+        try:
+            probe.symlink_to(self.source, target_is_directory=True)
+        except OSError as exc:
+            if os.name == "nt" and exc.winerror == 1314:
+                self.skipTest("Windows directory symlink privilege is not available")
+            raise
+        else:
+            probe.unlink()
+
+    @staticmethod
+    def rewrite_archive(incoming, transform):
+        with zipfile.ZipFile(io.BytesIO(incoming.payload)) as archive:
+            contents = {name: archive.read(name) for name in archive.namelist()}
+        transform(contents)
+        rewritten = io.BytesIO()
+        with zipfile.ZipFile(rewritten, "w") as archive:
+            for name, payload in contents.items():
+                archive.writestr(name, payload)
+        incoming.payload = rewritten.getvalue()
+        return incoming
 
     def client(self, number=1, run_id=42, *, commit="a" * 40):
         snapshot = self.root / f"snapshot-{number}-{run_id}"
@@ -99,11 +125,12 @@ class ActionsMirrorTests(unittest.TestCase):
         return deliver_latest(client, self.mirror)
 
     def test_new_requests_follow_atomic_generation_switch_and_old_reader_can_finish(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         repo = IntelligenceRepository(self.mirror / "current/intelligence.db", self.root)
         with repo.read() as old_reader:
             self.assertEqual(old_reader.execute("SELECT COUNT(*) FROM source_items").fetchone()[0], 1)
-            with sqlite3.connect(self.source / "intelligence.db") as db:
+            with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
                 db.execute("INSERT INTO source_items VALUES (?,?,?)", ("NVD", "CVE-2026-10002", FIRST_SEEN))
             self.deliver(self.client(2, 43))
             self.assertEqual(old_reader.execute("SELECT COUNT(*) FROM source_items").fetchone()[0], 1)
@@ -116,6 +143,7 @@ class ActionsMirrorTests(unittest.TestCase):
         self.assertEqual(json.loads((self.mirror / "current/monitoring_baseline.json").read_text())["started_at"], BASELINE)
 
     def test_corrupt_download_retains_current_generation(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         incoming = self.client(2, 43)
         memory = io.BytesIO(incoming.payload)
@@ -132,6 +160,7 @@ class ActionsMirrorTests(unittest.TestCase):
         self.assertEqual((self.mirror / "current").resolve().name, "42")
 
     def test_missing_latest_writer_artifact_does_not_fall_back(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         incoming = self.client(2, 43)
         incoming.artifact = None
@@ -149,29 +178,33 @@ class ActionsMirrorTests(unittest.TestCase):
                     incoming.artifact["workflow_run"]["id"] = 999
                 else:
                     incoming.metadata["head_sha"] = "b" * 40
-                with self.assertRaises(StateError):
+                expected = "lineage" if case == "code" else "provenance"
+                with self.assertRaisesRegex(StateError, expected):
                     self.deliver(incoming)
                 self.assertFalse((self.mirror / "current").exists())
 
     def test_later_first_seen_or_deleted_record_cannot_reset_history(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.execute("UPDATE source_items SET first_seen_at='2026-10-09T00:00:00+00:00'")
         with self.assertRaisesRegex(StateError, "history"):
             self.deliver(self.client(2, 43))
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.execute("DELETE FROM source_items")
         with self.assertRaisesRegex(StateError, "history"):
             self.deliver(self.client(3, 44))
         self.assertEqual((self.mirror / "current").resolve().name, "42")
 
     def test_monitoring_baseline_cannot_be_restarted(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         (self.source / "monitoring_baseline.json").write_text(json.dumps({"started_at": FIRST_SEEN}))
         with self.assertRaisesRegex(StateError, "baseline"):
             self.deliver(self.client(2, 43))
 
     def test_older_run_is_rejected_and_same_run_is_idempotent(self):
+        self.require_directory_symlink()
         current = self.client(2, 43)
         self.deliver(current)
         self.assertFalse(self.deliver(current)["changed"])
@@ -179,6 +212,7 @@ class ActionsMirrorTests(unittest.TestCase):
             self.deliver(self.client())
 
     def test_restart_after_unpublished_staging_retries_and_bounds_local_snapshots(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         orphan = self.mirror / "snapshots/43"
         orphan.mkdir()
@@ -200,13 +234,14 @@ class ActionsMirrorTests(unittest.TestCase):
             claim_role(other, "collector")
 
     def test_incompatible_old_classifier_or_missing_feed_keeps_previous_generation(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.execute("UPDATE ai_classifications SET classifier_version='old-classifier'")
         with self.assertRaisesRegex(StateError, "classifier_version_stale"):
             self.deliver(self.client(2, 43))
         self.assertEqual((self.mirror / "current").resolve().name, "42")
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.execute("UPDATE ai_classifications SET classifier_version=?", (runtime_classifier_version(),))
             db.execute("DROP TRIGGER team_feed_knowledge_documents_update")
         with self.assertRaisesRegex(StateError, "missing_changefeed_triggers"):
@@ -214,8 +249,9 @@ class ActionsMirrorTests(unittest.TestCase):
         self.assertEqual((self.mirror / "current").resolve().name, "42")
 
     def test_normal_new_content_classification_backlog_can_be_delivered(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.execute("UPDATE unified_vulnerabilities SET content_sha256='updated-content'")
             db.execute("INSERT INTO knowledge_documents VALUES (?,?,?)", ("blog-2", FIRST_SEEN, "new-document"))
         self.assertTrue(self.deliver(self.client(2, 43))["changed"])
@@ -225,6 +261,7 @@ class ActionsMirrorTests(unittest.TestCase):
         self.assertEqual(contract["classification"]["document"]["missing"], 1)
 
     def test_missing_or_forged_manifest_contract_cannot_be_published(self):
+        self.require_directory_symlink()
         self.deliver(self.client())
         for run_id, contract in ((43, None), (44, {"ready": True})):
             incoming = self.client(run_id - 41, run_id)
@@ -244,6 +281,67 @@ class ActionsMirrorTests(unittest.TestCase):
             with self.assertRaisesRegex(StateError, "contract"):
                 self.deliver(incoming)
             self.assertEqual((self.mirror / "current").resolve().name, "42")
+
+    def test_corrupt_initial_download_is_rejected_before_publication(self):
+        incoming = self.rewrite_archive(self.client(), lambda contents: contents.update(
+            {"monitoring_baseline.json": b'{"started_at":"2026-10-09T00:00:00Z"}'}))
+        with self.assertRaisesRegex(StateError, "checksum"):
+            self.deliver(incoming)
+        self.assertFalse((self.mirror / "current").exists())
+
+    def test_missing_initial_artifact_is_rejected_before_publication(self):
+        incoming = self.client()
+        incoming.artifact = None
+        with self.assertRaisesRegex(StateError, "missing"):
+            self.deliver(incoming)
+        self.assertFalse((self.mirror / "current").exists())
+
+    def test_incompatible_initial_classifier_or_feed_is_rejected_before_publication(self):
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
+            db.execute("UPDATE ai_classifications SET classifier_version='old-classifier'")
+        with self.assertRaisesRegex(StateError, "classifier_version_stale"):
+            self.deliver(self.client())
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
+            db.execute("UPDATE ai_classifications SET classifier_version=?", (runtime_classifier_version(),))
+            db.execute("DROP TRIGGER team_feed_knowledge_documents_update")
+        with self.assertRaisesRegex(StateError, "missing_changefeed_triggers"):
+            self.deliver(self.client(2, 43))
+        self.assertFalse((self.mirror / "current").exists())
+
+    def test_initial_missing_or_forged_manifest_contract_is_rejected_before_publication(self):
+        for run_id, contract in ((42, None), (43, {"ready": True})):
+            with self.subTest(contract=contract):
+                def change_contract(contents):
+                    manifest = json.loads(contents["manifest.json"])
+                    if contract is None:
+                        manifest.pop("compatibility")
+                    else:
+                        manifest["compatibility"] = contract
+                    contents["manifest.json"] = json.dumps(manifest).encode()
+
+                incoming = self.rewrite_archive(self.client(run_id=run_id), change_contract)
+                with self.assertRaisesRegex(StateError, "contract"):
+                    self.deliver(incoming)
+                self.assertFalse((self.mirror / "current").exists())
+
+    def test_history_validation_rejects_later_first_seen_and_deleted_records_without_publication(self):
+        previous = self.root / "previous"
+        shutil.copytree(self.source, previous)
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
+            db.execute("UPDATE source_items SET first_seen_at='2026-10-09T00:00:00+00:00'")
+        with self.assertRaisesRegex(StateError, "history"):
+            verify_history(previous, self.source)
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
+            db.execute("DELETE FROM source_items")
+        with self.assertRaisesRegex(StateError, "history"):
+            verify_history(previous, self.source)
+
+    def test_history_validation_rejects_restarted_baseline_without_publication(self):
+        previous = self.root / "previous"
+        shutil.copytree(self.source, previous)
+        (self.source / "monitoring_baseline.json").write_text(json.dumps({"started_at": FIRST_SEEN}))
+        with self.assertRaisesRegex(StateError, "baseline"):
+            verify_history(previous, self.source)
 
 
 if __name__ == "__main__":

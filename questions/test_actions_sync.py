@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 import importlib.util
 import os
 import sqlite3
@@ -44,7 +45,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("_b_test_changefeed", INTEL / "storage/changefeed.py")
         changefeed = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(changefeed)
-        with sqlite3.connect(self.source / "intelligence.db") as db:
+        with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
             db.executescript("""
                 CREATE TABLE source_items(source TEXT, source_id TEXT, first_seen_at TEXT);
                 CREATE TABLE unified_vulnerabilities(cve_id TEXT, first_seen_at TEXT, content_sha256 TEXT);
@@ -79,6 +80,20 @@ class ActionsSyncInstallTest(unittest.TestCase):
                         workflow="intelligence-collect.yml", collector_commit="a" * 40, run_number=number)
         return self.sync.zip_directory(snapshot)
 
+    def require_directory_symlinks(self):
+        if os.name != "nt":
+            return
+        probe = self.root / ".symlink-capability"
+        try:
+            os.symlink(self.source, probe, target_is_directory=True)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) == 1314:
+                self.skipTest("Windows account lacks directory symlink privilege (WinError 1314)")
+            raise
+        finally:
+            if probe.is_symlink():
+                probe.unlink()
+
     def install(self, payload, run_id=9001):
         return self.sync.install_archive(payload, self.destination, repository=REPOSITORY,
                                          branch="main", run_id=run_id, source="unittest")
@@ -104,6 +119,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
                 "X-Actions-Run-Id": str(run_id)}
 
     def test_install_publishes_isolated_generation_and_preserves_unrelated_files(self):
+        self.require_directory_symlinks()
         self.destination.mkdir()
         (self.destination / "keep-me.log").write_text("unrelated", encoding="utf-8")
         marker = self.install(self.archive())
@@ -122,6 +138,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
         self.assertEqual(manifest["run_number"], 1)
 
     def test_same_archive_is_idempotent_and_old_run_cannot_roll_back_current(self):
+        self.require_directory_symlinks()
         older = self.archive()
         latest = self.archive(run_id=9002, number=2)
         self.assertTrue(self.install(latest, 9002)["changed"])
@@ -144,6 +161,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
         self.assertFalse((self.destination / "current").exists())
 
     def test_bad_run_id_is_rejected_and_previous_generation_retained(self):
+        self.require_directory_symlinks()
         self.install(self.archive())
         from deployment.actions_state import StateError
         with self.assertRaises(StateError):
@@ -172,6 +190,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
         self.assertFalse(self.destination.exists())
 
     def test_api_rejects_foreign_manifest_even_when_request_headers_match(self):
+        self.require_directory_symlinks()
         self.install(self.archive())
         payload = self.archive(run_id=9002, number=2, repository="another/team")
         with self.environment(), self.client() as client:
@@ -180,6 +199,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
         self.assertEqual(self.sync.read_sync_marker(self.destination)["run_id"], 9001)
 
     def test_api_publishes_current_and_existing_repository_sees_new_data_next_query(self):
+        self.require_directory_symlinks()
         from api_v6.repository import IntelligenceRepository
         repository = IntelligenceRepository(self.destination / "current/intelligence.db", self.root)
         with self.environment(), self.client() as client:
@@ -188,7 +208,7 @@ class ActionsSyncInstallTest(unittest.TestCase):
             self.assertFalse(response.json()["restart_recommended"])
             with repository.read() as old_reader:
                 self.assertEqual(old_reader.execute("SELECT COUNT(*) FROM source_items").fetchone()[0], 1)
-                with sqlite3.connect(self.source / "intelligence.db") as db:
+                with closing(sqlite3.connect(self.source / "intelligence.db")) as db, db:
                     db.execute("INSERT INTO source_items VALUES (?,?,?)", ("NVD", "CVE-2026-10002", FIRST_SEEN))
                 response = client.post("/api/admin/actions-sync", content=self.archive(9002, 2),
                                        headers=self.headers(9002))

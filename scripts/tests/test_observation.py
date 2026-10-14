@@ -1,5 +1,6 @@
 """Synthetic boundary tests, not independently labelled contest results."""
 from copy import deepcopy
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -23,7 +24,7 @@ class ObservationTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.db = Path(temp.name) / "observations.sqlite3"
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.executescript("""
               CREATE TABLE source_items(source,source_id,payload_json,first_seen_at);
               CREATE TABLE unified_vulnerabilities(cve_id,payload_json,first_seen_at);
@@ -32,7 +33,7 @@ class ObservationTest(unittest.TestCase):
 
     def record(self, identity, published, seen, source="NVD"):
         payload = json.dumps({"published_at": published, "publication_source": source, "sources": [source]})
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.execute("INSERT INTO source_items VALUES(?,?,?,?)", (source, identity, payload, seen))
             con.execute("INSERT INTO unified_vulnerabilities VALUES(?,?,?)", (identity, payload, seen))
 
@@ -77,7 +78,7 @@ class ObservationTest(unittest.TestCase):
 
     def test_nvd_documented_utc_and_document_precise_time(self):
         self.record("nvd", "2026-10-10T00:00:00.000", "2026-10-10T01:00:00Z")
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.execute("INSERT INTO knowledge_documents VALUES(?,?,?,?,?)",
                         ("BLOG", "document-1", "{}", "2026-10-10T08:00:00+08:00", "2026-10-10T01:00:00Z"))
         self.assertEqual(self.report()["metrics"]["source_items"]["window"]["samples"], 1)
@@ -88,12 +89,12 @@ class ObservationTest(unittest.TestCase):
         before = hashlib.sha256(self.db.read_bytes()).hexdigest()
         self.report()
         self.assertEqual(hashlib.sha256(self.db.read_bytes()).hexdigest(), before)
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.execute("DROP TABLE knowledge_documents")
         self.assertFalse(self.report()["metrics"]["knowledge_documents"]["available"])
 
     def test_malformed_payload_is_excluded_without_breaking_report(self):
-        with sqlite3.connect(self.db) as con:
+        with closing(sqlite3.connect(self.db)) as con, con:
             con.execute("INSERT INTO source_items VALUES(?,?,?,?)", ("NVD", "broken", "[]", START))
             con.execute("INSERT INTO unified_vulnerabilities VALUES(?,?,?)",
                         ("bad-source", json.dumps({"publication_source": {}, "published_at": START}), START))

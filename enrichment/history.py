@@ -5,6 +5,7 @@ variant, a shared root cause, a working exploit or a bypass of an earlier fix.
 The catalogue is bounded and built once for a bulk assessment view.
 """
 from datetime import datetime, timezone
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -124,7 +125,7 @@ def catalogue(db_path=DEFAULT_DB, *, max_candidates=250):
     path = Path(db_path)
     if not path.is_file():
         return result
-    with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
         conn.execute("BEGIN")
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not {"documents", "source_snapshots"} <= tables:

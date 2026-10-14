@@ -3,7 +3,7 @@
 All records, migrations and child-process databases use synthetic temporary state.
 """
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 import json
 import os
 from pathlib import Path
@@ -74,7 +74,7 @@ class StoreFixture(unittest.TestCase):
                 "exports": {path: path.read_bytes() for path in (store.CARDS_PATH, store.CARDS_JS_PATH)}}
 
     def sql(self, statement):
-        with sqlite3.connect(store.database_path()) as con:
+        with closing(sqlite3.connect(store.database_path())) as con, con:
             return con.execute(statement).fetchall()
 
     def assert_ids(self, expected):

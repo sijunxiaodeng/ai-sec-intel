@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -12,26 +11,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 from ai_pipeline.store import ClassificationStore, utc_now
 from ai_pipeline.worker import run_batch
+from classification.version import classifier_version as _classifier_version
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 
 def classifier_version() -> str:
-    """Code hash changes automatically when Rule/Hybrid/Prompt source changes."""
-    files = (
-        ROOT / "classification" / "ai_relevance.py",
-        ROOT / "classification" / "hybrid_classifier.py",
-        ROOT / "classification" / "semantic_judge.py",
-        ROOT / "classification" / "scope_policy.py",
-    )
-    digest = hashlib.sha256()
-    for p in files:
-        if not p.is_file():
-            raise FileNotFoundError(f"Missing classifier file: {p}")
-        digest.update(p.name.encode("utf-8"))
-        digest.update(p.read_bytes())
-    return "hybrid-v3.1-" + digest.hexdigest()[:12]
+    return _classifier_version(ROOT)
 
 
 def atomic_status(path: Path, payload: dict):

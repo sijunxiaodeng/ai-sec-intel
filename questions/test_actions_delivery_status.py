@@ -1,5 +1,6 @@
 """Serving a snapshot and consuming it are separate durable facts."""
 import json
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -19,15 +20,15 @@ class ConsumerDeliveryStatusTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.knowledge = self.root / "knowledge.sqlite3"
         self.library = self.root / "library.sqlite3"
-        with sqlite3.connect(self.knowledge) as connection:
+        with closing(sqlite3.connect(self.knowledge)) as connection, connection:
             connection.execute("CREATE TABLE sync_cursors(source TEXT,cursor_json TEXT,updated_at TEXT)")
-        with sqlite3.connect(self.library) as connection:
+        with closing(sqlite3.connect(self.library)) as connection, connection:
             connection.execute("CREATE TABLE team_sync_cursors(base_url TEXT,payload TEXT)")
 
     def save(self, cve=None, document=None):
         for path, table, values in ((self.knowledge, "sync_cursors", ("b_intelligence", cve, "2026-10-13")),
                                     (self.library, "team_sync_cursors", (BASE, document))):
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection, connection:
                 connection.execute("DELETE FROM " + table)
                 if values[1] is not None:
                     connection.execute("INSERT INTO " + table + " VALUES (" + ",".join("?" for _ in values) + ")",

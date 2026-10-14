@@ -284,14 +284,17 @@ def documents(db_path=LIBRARY_DB, document_type=""):
                   key=lambda r: (r.get("published_at") or "", r["document_id"]), reverse=True)
 
 
-def _valid_evidence(db_path):
-    """Re-extract every source from archived bytes; mutable index hashes are not proof.
+def _valid_evidence(db_path, *, document_ids=None, document_type=""):
+    """Re-extract selected sources; mutable index hashes are not proof.
 
     Bind document identity/metadata and each chunk's ID/text/locator to the
     parser's current output. A forged index sentence with a recomputed checksum
     must not become an exact quote just because the raw response is unchanged.
     """
     if not Path(db_path).exists():
+        return []
+    selected_ids = tuple(dict.fromkeys(document_ids)) if document_ids is not None else None
+    if selected_ids == ():
         return []
     def object_payload(payload):
         try:
@@ -304,13 +307,23 @@ def _valid_evidence(db_path):
         _schema(conn)
         if not conn.in_transaction:
             conn.execute("BEGIN")  # Read index/doc/raw bytes from one SQLite snapshot.
-        invalidated = {r.get("document_id") for (payload,) in conn.execute("SELECT payload FROM library_attempts")
+        predicates, parameters = [], []
+        if selected_ids is not None:
+            predicates.append("document_id IN (%s)" % ",".join("?" for _ in selected_ids))
+            parameters.extend(selected_ids)
+        if document_type:
+            predicates.append("CASE WHEN json_valid(payload) THEN json_extract(payload,'$.document_type') END = ?")
+            parameters.append(document_type)
+        selected = "SELECT document_id FROM library_documents" + (" WHERE " + " AND ".join(predicates) if predicates else "")
+        scope = " WHERE document_id IN (" + selected + ")"
+        invalidated = {r.get("document_id") for (payload,) in conn.execute("SELECT payload FROM library_attempts" + scope, parameters)
                        if (r := object_payload(payload)) and r.get("invalidated_previous")}
-        snapshots = {doc_id: (sha, body) for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots")
+        snapshots = {doc_id: (sha, body) for doc_id, sha, body in conn.execute("SELECT document_id,digest,body FROM library_snapshots" + scope, parameters)
                      if doc_id not in invalidated and isinstance(body, bytes) and hashlib.sha256(body).hexdigest() == sha}
-        rows = [row for cve, eid, payload in conn.execute("SELECT cve_id,evidence_id,payload FROM evidence")
+        evidence_scope = " WHERE CASE WHEN json_valid(payload) THEN json_extract(payload,'$.document_id') END IN (" + selected + ")"
+        rows = [row for cve, eid, payload in conn.execute("SELECT cve_id,evidence_id,payload FROM evidence" + evidence_scope, parameters)
                 if (row := object_payload(payload)) and cve == row.get("cve_id") == "" and eid == row.get("evidence_id")]
-        docs = {doc_id: row for doc_id, payload in conn.execute("SELECT document_id,payload FROM library_documents")
+        docs = {doc_id: row for doc_id, payload in conn.execute("SELECT document_id,payload FROM library_documents" + scope, parameters)
                 if (row := object_payload(payload)) and row.get("document_id") == doc_id}
     expected = {}
     keys = ("document_id", "source_id", "url", "title", "document_type", "content_type", "content_scope", "publisher", "source_snapshot_kind",
@@ -404,7 +417,7 @@ def detail(document_id, db_path=LIBRARY_DB):
     doc = next((r for r in documents(db_path) if r["document_id"] == document_id), None)
     if not doc:
         return None
-    rows = _valid_evidence(db_path)
+    rows = _valid_evidence(db_path, document_ids=[document_id])
     chunks = sorted([r for r in rows if r["document_id"] == document_id], key=lambda r: r["evidence_id"])
     complete = type(doc.get("chunk_count")) is int and doc["chunk_count"] > 0 and len(chunks) == doc["chunk_count"]
     full_text = [r for r in documents(db_path) if r.get("parent_document_id") == document_id]
@@ -455,14 +468,13 @@ def search(query, top_k=8, *, document_type="", cve_id="", document_ids=None, db
         raise ValueError("未知资料类型")
     if cve_id and not CVE.fullmatch(cve_id.upper()):
         raise ValueError("无效 CVE 编号")
-    rows = _valid_evidence(db_path)
+    # Select before reading snapshots or re-parsing. detail/search calls for a
+    # handful of documents can now reuse the bounded parser cache even in a
+    # large library. Index metadata is still compared with the archived bytes.
+    rows = _valid_evidence(db_path, document_ids=document_ids, document_type=document_type)
     requested = {v.upper() for v in CVE.findall(query)} | ({cve_id.upper()} if cve_id else set())
     if requested:
         rows = [r for r in rows if requested & {a["entity_id"] for a in r["associations"]}]
-    if document_type:
-        rows = [r for r in rows if r["document_type"] == document_type]
-    if document_ids is not None:
-        rows = [r for r in rows if r["document_id"] in set(document_ids)]
     wanted = {tag for tag in QUERY_ALIASES if re.search(TOPICS[tag][0], query, re.I | re.S)}
     if wanted:
         # 具体安全主题不能由“AI 风险”这类泛化段落替代；标签按片段原文重新判断。

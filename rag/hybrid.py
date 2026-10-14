@@ -72,7 +72,7 @@ def _commit_embeddings(db_path, rows, changed, vectors, *, replace=False):
 def build_index(db_path=DEFAULT_DB, model_dir=None):
     rows = candidates("", db_path=db_path)
     if not rows:
-        raise ValueError("证据库为空，请先载入样例")
+        raise ValueError("证据库为空，请先采集或导入已授权的真实证据")
     cache_dir = str(Path(db_path).parent / "models")
     model = _model(cache_dir, bool(model_dir), str(model_dir) if model_dir else None)
     vectors = [_normal(vector) for vector in model.passage_embed([row["text"] for row in rows])]

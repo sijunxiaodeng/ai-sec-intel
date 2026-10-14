@@ -1,6 +1,8 @@
 # AI 安全知识情报
 
-漏洞监测、知识库、关联富化与证据问答。**对外只开一个端口：http://127.0.0.1:8023**。
+漏洞监测、知识库、关联富化、自动资产研判与证据问答。**对外只开一个端口：http://127.0.0.1:8023**。
+
+新情报和资产变更会自动创建相关研判任务，按证据缺口选择工具并保存风险结论、出处和处置记录。在“资产风险”页查看结果和任务轨迹。可选启用受约束的 LLM 工具选择；默认使用规则规划。实现、开关与边界见 [智能体编排与工具轨迹](docs/智能体编排与工具轨迹.md)。
 
 ## 一键启动（Docker）
 
@@ -70,11 +72,11 @@ python intelligence/run_monitor.py --once
 
 ```powershell
 python -m pip install -r requirements-rag.txt
-python -m rag.prepare --semantic
+python -m rag.prepare --semantic --demo
 python main.py
 ```
 
-首次准备会下载模型。向量索引尚未就绪时，页面会明确显示使用 BM25。Windows 下载替代入口及测试方法见 [rag/README.md](rag/README.md)。
+此演示命令用 `--demo` 显式载入人工样例。正式库仅运行 `python -m rag.prepare --semantic --db data/task_c.sqlite3`，另对 `data/library.sqlite3` 建索引；不加 `--demo` 就不会导入样例。首次准备会下载模型。向量索引尚未就绪时，页面会明确显示使用 BM25。Docker 可选构建和 Windows 本地模型入口见 [rag/README.md](rag/README.md)。
 
 ## 第三步：自动处理关联资料
 
