@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tail logs for the active demo started by demo-up / make up.
+# Tail logs for the active demo started by demo-up / compose.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=demo-lib.sh
@@ -23,10 +23,10 @@ case "$mode" in
         tail -n 200 -f "$DEMO_DIR/main-api.log"
       fi
     else
-      die "无日志文件；请先 make up。当前 mode=${mode:-unknown}"
+      die "无日志文件；请先启动演示（docker compose -f docker-compose.offline.yml up -d 或 ./scripts/demo-up.sh）。当前 mode=${mode:-unknown}"
     fi
     ;;
   *)
-    die "未知 mode=$mode；请先 make up"
+    die "未知 mode=$mode；请先启动演示"
     ;;
 esac

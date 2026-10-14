@@ -2,22 +2,19 @@
 
 漏洞监测、知识库、关联富化与证据问答。**对外只开一个端口：http://127.0.0.1:8023**。
 
-## 一键启动
+## 一键启动（Docker）
 
 ```bash
-make help          # 查看目标
-make up            # 默认离线演示（Docker 或本地）
-make status        # 探测 :8023
-make down          # 停止
-make demo          # up + 冒烟
-make online        # 联网演示（需上游可达）
+docker compose -f docker-compose.offline.yml up --build -d
+# 浏览器打开 http://127.0.0.1:8023
+docker compose -f docker-compose.offline.yml down
 ```
 
-浏览器打开 **http://127.0.0.1:8023**。依赖、数据落盘、正式环境见 **[DEPLOY.md](DEPLOY.md)**。
+依赖、端口、数据卷与正式环境见 **[DEPLOY.md](DEPLOY.md)**。离线演示为合成样例（约 5 条漏洞 + 7 份资料），不访问公网采集/模型；数据在 Docker 卷 `offline-demo-data`。
 
-无 Make 时等价：`./scripts/demo-up.sh` / `demo-down.sh` / `demo-smoke.sh`。无 Docker 时先 `python3 -m pip install -r requirements.txt`。离线演示自动准备合成样例（约 5 条漏洞 + 7 份资料），不访问公网采集/模型；数据在 `.demo/offline/` 或 Docker 卷 `offline-demo-data`。
+便捷脚本（有 Docker 时同样走 offline compose）：`./scripts/demo-up.sh` / `demo-down.sh` / `demo-smoke.sh`。联网演示：`DEMO_NETWORK=online ./scripts/demo-up.sh` 或 `docker compose -f docker-compose.yml up --build -d`。无 Docker 时可 `python3 -m pip install -r requirements.txt && python scripts/offline_demo.py`（数据在 `.demo/offline/`）。
 
-正式数据与演示分开：`make prod-actions` / `make prod-collector`（详见 [正式数据部署与交付](docs/正式数据部署与交付.md)）。直接 `python main.py` 不会偷偷灌演示样例。
+正式数据与演示分开：`bash scripts/production-up.sh actions|collector`（详见 [正式数据部署与交付](docs/正式数据部署与交付.md)）。直接 `python main.py` 不会偷偷灌演示样例。
 
 页面可做监测、富化、提问；模型密钥在「模型设置」填写。接口见 `接口说明.md`。工程细节见 [INTEGRATION.md](INTEGRATION.md)。
 

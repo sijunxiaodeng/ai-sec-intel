@@ -10,16 +10,17 @@ source "$SCRIPT_DIR/demo-lib.sh"
 
 MODE="${DEMO_MODE:-auto}"
 # Offline data is the default demo. Online collection remains explicit.
-# Prefer: make up / make offline  →  single product surface :8023
+# Happy path: docker compose -f docker-compose.offline.yml up --build -d  (:8023)
 if [[ "${DEMO_NETWORK:-offline}" == "offline" && "$DEMO_ACTIONS_MODE" == "0" ]]; then
   if [[ "$MODE" != "local" ]] && have_docker; then
-    log "starting offline compose (project=$COMPOSE_PROJECT-offline)"
+    log "starting offline compose (-f docker-compose.offline.yml)"
     docker compose -p "$COMPOSE_PROJECT-offline" -f "$ROOT/docker-compose.offline.yml" up --build --detach --wait
     printf '%s\n' offline-compose > "$DEMO_DIR/mode"
     wait_http "$MAIN_URL/api/overview" "offline demo" 90
     log "offline synthetic demo ready; external collection/model calls disabled"
     log "  Open only:     $MAIN_URL"
-    log "  Stop:          make down   # or ./scripts/demo-down.sh"
+    log "  Stop:          docker compose -f docker-compose.offline.yml down"
+    log "                # or ./scripts/demo-down.sh"
     exit 0
   fi
   ensure_venvs
@@ -41,8 +42,8 @@ if [[ "${DEMO_NETWORK:-offline}" == "offline" && "$DEMO_ACTIONS_MODE" == "0" ]];
   wait_http "$MAIN_URL/api/overview" "offline demo" 120
   log "offline synthetic demo ready; external collection/model calls disabled"
   log "  Open only:     $MAIN_URL"
-  log "  Logs:          $DEMO_DIR/offline-demo.log   # or make logs"
-  log "  Stop:          make down   # or ./scripts/demo-down.sh"
+  log "  Logs:          $DEMO_DIR/offline-demo.log"
+  log "  Stop:          ./scripts/demo-down.sh"
   exit 0
 fi
 AUTO_INGEST_ON_COLLECT="${AUTO_INGEST_ON_COLLECT:-0}"
@@ -88,8 +89,9 @@ start_compose() {
     -o "$DEMO_DIR/auto-monitor-boot.json" \
     && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
     || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
-  log "Keep running: make logs   # or docker compose -p $COMPOSE_PROJECT logs -f"
-  log "Stop:           make down   # or ./scripts/demo-down.sh"
+  log "Keep running: docker compose -p $COMPOSE_PROJECT -f docker-compose.yml logs -f"
+  log "Stop:           docker compose -p $COMPOSE_PROJECT -f docker-compose.yml down"
+  log "                # or ./scripts/demo-down.sh"
 }
 
 start_local_sidecar() {
@@ -197,8 +199,8 @@ start_local() {
     -o "$DEMO_DIR/auto-monitor-boot.json" \
     && log "auto monitor OK → open $MAIN_URL （情报监测应已有流）" \
     || log "auto monitor soft-fail (UI still up; check $DEMO_DIR/auto-monitor-boot.json / logs)"
-  log "Logs: make logs   # or $DEMO_DIR/main-api.log"
-  log "Stop: make down   # or ./scripts/demo-down.sh"
+  log "Logs: $DEMO_DIR/main-api.log"
+  log "Stop: ./scripts/demo-down.sh"
 }
 
 case "$MODE" in

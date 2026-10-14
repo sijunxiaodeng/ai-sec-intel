@@ -1,5 +1,7 @@
-# 默认演示路径（make up / make offline）。单端口 :8023，合成样例，不联网采集。
-# 数据卷: offline-demo-data。停止: make down
+# 默认演示路径。单端口 :8023，合成样例，不联网采集。
+# 启动: docker compose -f docker-compose.offline.yml up --build -d
+# 停止: docker compose -f docker-compose.offline.yml down
+# 数据卷: offline-demo-data
 name: ai-sec-intel-offline-demo
 services:
   app:
