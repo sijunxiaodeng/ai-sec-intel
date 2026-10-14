@@ -119,7 +119,11 @@ exit 3
             $Process.Refresh()
             $Output = [System.IO.File]::ReadAllText($Stdout) + [System.IO.File]::ReadAllText($Stderr)
             if ($Output.Contains($FixtureSecret)) { throw ('Secret appeared in output: ' + $Case.Name) }
-            if ($Process.ExitCode -ne $Case.Expected) { throw ('Unexpected exit code: ' + $Case.Name + ' (' + $Process.ExitCode + ')') }
+            if ($Process.ExitCode -ne $Case.Expected) {
+                # This fixture cannot call real Docker and the secret check ran
+                # first. Preserve safe native-host diagnostics for platform bugs.
+                throw ('Unexpected exit code: ' + $Case.Name + ' (' + $Process.ExitCode + ')' + "`n" + $Output)
+            }
             $Calls = @(Get-Content -LiteralPath $env:AISEC_TEST_CALLS | ForEach-Object { ,($_ | ConvertFrom-Json) })
             foreach ($Call in $Calls) {
                 if ($Call -contains 'down' -or $Call -contains '-v' -or $Call -contains '--volumes' -or ($Call -contains 'volume' -and $Call -contains 'rm')) {
