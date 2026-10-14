@@ -41,6 +41,22 @@ if ($DockerArgs -contains 'up') { if ($Case -eq 'build-fail') { exit 1 }; exit 0
 if ($DockerArgs -contains 'exec' -and $DockerArgs -contains 'b-mirror') {
     $InputCode = [Console]::In.ReadToEnd()
     if (-not $InputCode.Contains('from deployment.actions_mirror import latest_snapshot')) { exit 3 }
+    if ($Case -eq 'metadata-network-fail') {
+        Write-Output '{"error_category":"github_network_unavailable","http_status":null}'
+        exit 1
+    }
+    if ($Case -eq 'metadata-http-fail') {
+        Write-Output '{"error_category":"github_access_denied_or_rate_limited","http_status":403}'
+        exit 1
+    }
+    if ($Case -eq 'metadata-secret-fail') {
+        Write-Output '{"error_category":"fixture-secret-never-print","http_status":"fixture-secret-never-print","details":"fixture-secret-never-print"}'
+        exit 1
+    }
+    if ($Case -eq 'metadata-invalid-json') {
+        Write-Output '{invalid metadata fixture-secret-never-print'
+        exit 1
+    }
     @{ run_id = [long]38515772960; collector_commit = ('a' * 40) } | ConvertTo-Json -Compress
     exit 0
 }
@@ -87,6 +103,10 @@ exit 3
         @{ Name = 'other-project'; Expected = 1 },
         @{ Name = 'build-fail'; Expected = 1 },
         @{ Name = 'check-fail'; Expected = 1 },
+        @{ Name = 'metadata-network-fail'; Expected = 1 },
+        @{ Name = 'metadata-http-fail'; Expected = 1 },
+        @{ Name = 'metadata-secret-fail'; Expected = 1 },
+        @{ Name = 'metadata-invalid-json'; Expected = 1 },
         @{ Name = 'port-conflict'; Expected = 1 },
         @{ Name = 'read-only'; Expected = 0 }
     )
@@ -144,6 +164,11 @@ exit 3
                 if (-not $Output.Contains('[deployment-check]')) { throw ('No progress reached the console: ' + $Case.Name) }
             }
             if ($Case.Name -eq 'read-only' -and @($Calls | Where-Object { $_ -contains '--synchronize' }).Count) { throw 'Read-only check requested synchronization.' }
+            if ($Case.Name -like 'metadata-*') {
+                if (@($Calls | Where-Object { $_ -contains 'main-app' }).Count) { throw ('Import verification ran without trusted metadata: ' + $Case.Name) }
+                if ($Case.Name -eq 'metadata-network-fail' -and -not $Output.Contains('github_network_unavailable')) { throw 'Network failure category was lost.' }
+                if ($Case.Name -eq 'metadata-http-fail' -and -not $Output.Contains('github_access_denied_or_rate_limited (HTTP 403)')) { throw 'HTTP failure category was lost.' }
+            }
             if ($Case.Name -eq 'missing-env' -and -not (Test-Path -LiteralPath (Join-Path $CaseRoot '.env.production'))) { throw 'Missing environment template was not prepared.' }
             Write-Output ('PASS: ' + $Case.Name)
         }

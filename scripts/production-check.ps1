@@ -22,7 +22,7 @@ try {
     $MetadataCode = @'
 import json, os, re, sys
 from deployment.actions_mirror import latest_snapshot
-from deployment.actions_state import GitHubClient
+from deployment.actions_state import GitHubClient, StateError
 try:
     repository = os.environ.get("GITHUB_REPOSITORY", "sijunxiaodeng/ai-sec-intel")
     run, artifact = latest_snapshot(GitHubClient(os.environ.get("GITHUB_TOKEN"), repository))
@@ -30,13 +30,43 @@ try:
     if type(run_id) is not int or run_id <= 0 or not re.fullmatch(r"[0-9a-f]{40}", str(commit)):
         raise ValueError()
     print(json.dumps({"run_id": run_id, "collector_commit": commit}))
+except StateError as exc:
+    message = str(exc)
+    status = re.fullmatch(r"GitHub state API failed: HTTP ([1-5][0-9]{2}); no collection was started", message)
+    http_status = int(status.group(1)) if status else None
+    if message == "GitHub state API unavailable; no collection was started":
+        category = "github_network_unavailable"
+    elif http_status == 401:
+        category = "github_authentication_failed"
+    elif http_status == 403:
+        category = "github_access_denied_or_rate_limited"
+    elif http_status == 429:
+        category = "github_rate_limited"
+    elif http_status is not None and http_status >= 500:
+        category = "github_http_unavailable"
+    elif http_status is not None:
+        category = "github_resource_unavailable"
+    else:
+        category = "snapshot_metadata_unverified"
+    print(json.dumps({"error_category": category, "http_status": http_status}))
+    sys.exit(1)
 except Exception:
-    print("Could not establish the latest trusted Actions generation. Check token permissions, network and collector workflow status.", file=sys.stderr)
+    print(json.dumps({"error_category": "unexpected_metadata_failure"}))
     sys.exit(1)
 '@
+    Write-Host 'Reading the latest trusted Actions metadata from GitHub.'
     $MetadataJson = $MetadataCode | & docker @ComposeArgs exec -T b-mirror python -
-    if ($LASTEXITCODE -ne 0) { throw 'Latest Actions metadata could not be verified; no successful deployment claim was made.' }
-    $Metadata = ($MetadataJson -join "`n") | ConvertFrom-Json
+    $MetadataExitCode = $LASTEXITCODE
+    try { $Metadata = ($MetadataJson -join "`n") | ConvertFrom-Json }
+    catch { throw 'Latest Actions metadata response was invalid; its contents were not printed.' }
+    if ($MetadataExitCode -ne 0 -or $Metadata.error_category) {
+        $SafeCategories = @('github_network_unavailable', 'github_authentication_failed',
+            'github_access_denied_or_rate_limited', 'github_rate_limited', 'github_http_unavailable',
+            'github_resource_unavailable', 'snapshot_metadata_unverified', 'unexpected_metadata_failure')
+        $Category = if ([string]$Metadata.error_category -in $SafeCategories) { [string]$Metadata.error_category } else { 'metadata_unverified' }
+        $HttpHint = if (($Metadata.http_status -is [int] -or $Metadata.http_status -is [long]) -and $Metadata.http_status -ge 100 -and $Metadata.http_status -le 599) { " (HTTP $($Metadata.http_status))" } else { '' }
+        throw "Latest Actions metadata could not be verified: $Category$HttpHint. No successful deployment claim was made."
+    }
     $RunId = [long]$Metadata.run_id
     $Commit = [string]$Metadata.collector_commit
     if ($RunId -le 0 -or $Commit -notmatch '^[0-9a-f]{40}$') { throw 'Actions metadata response was invalid.' }

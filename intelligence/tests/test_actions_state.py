@@ -4,12 +4,16 @@ import json
 import os
 import sqlite3
 import tempfile
+import traceback
 import unittest
+import urllib.error
 import urllib.request
 import zipfile
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 from deployment.actions_state import (
     ARTIFACT_PREFIX, BOOTSTRAP_ASSET, GitHubClient, SafeRedirect, StateError, main, prune_states, restore_archive, restore_latest, save_state,
@@ -100,6 +104,190 @@ def run(run_id=42, run_number=1, event='schedule'):
 
 def artifact(run_id=42, expired=False):
     return {'id': 90, 'name': ARTIFACT_PREFIX + str(run_id), 'expired': expired}
+
+
+class GitHubClientRetryTests(unittest.TestCase):
+    def setUp(self):
+        self.client = GitHubClient('fixture-token', REPOSITORY)
+        self.client.opener.open = Mock()
+        sleeper = patch('deployment.actions_state.time.sleep')
+        self.sleep = sleeper.start()
+        self.addCleanup(sleeper.stop)
+
+    @staticmethod
+    def response(payload=b'{"id": 47}'):
+        return io.BytesIO(payload)
+
+    @staticmethod
+    def http_error(code, headers=None):
+        return urllib.error.HTTPError('https://storage.example/archive?sig=fixture-sensitive', code,
+                                      'fixture-sensitive message', headers or {},
+                                      io.BytesIO(b'fixture-sensitive body'))
+
+    def assert_safe_failure(self, error):
+        rendered = ''.join(traceback.format_exception(type(error), error, error.__traceback__))
+        self.assertNotIn('fixture-sensitive', rendered)
+        self.assertNotIn('fixture-token', rendered)
+        self.assertNotIn('storage.example', rendered)
+        self.assertTrue(error.__suppress_context__)
+
+    def test_get_network_failure_recovers_with_same_repo_headers_and_timeout(self):
+        self.client.opener.open.side_effect = [urllib.error.URLError('fixture-sensitive'),
+                                               OSError('fixture-sensitive'), self.response()]
+        self.assertEqual(self.client.request('actions/runs/47'), {'id': 47})
+        self.assertEqual(self.sleep.call_args_list, [call(1), call(2)])
+        self.assertEqual(self.client.opener.open.call_count, 3)
+        for invocation in self.client.opener.open.call_args_list:
+            request = invocation.args[0]
+            self.assertEqual(request.full_url, 'https://api.github.com/repos/team/public-repo/actions/runs/47')
+            self.assertEqual(request.get_header('Authorization'), 'Bearer fixture-token')
+            self.assertEqual(request.get_header('X-github-api-version'), '2022-11-28')
+            self.assertEqual(invocation.kwargs['timeout'], 60)
+
+    def test_network_failures_stop_after_three_attempts_without_sensitive_traceback(self):
+        for failure in (OSError('fixture-sensitive'), urllib.error.URLError('fixture-sensitive')):
+            with self.subTest(kind=type(failure).__name__):
+                self.client.opener.open.reset_mock()
+                self.sleep.reset_mock()
+                self.client.opener.open.side_effect = failure
+                with self.assertRaisesRegex(StateError, 'API unavailable') as caught:
+                    self.client.request('actions/runs/47')
+                self.assert_safe_failure(caught.exception)
+                self.assertEqual(self.client.opener.open.call_count, 3)
+                self.assertEqual(self.sleep.call_args_list, [call(1), call(2)])
+
+    def test_each_temporary_http_status_can_recover(self):
+        for status in (429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                self.client.opener.open.reset_mock()
+                self.sleep.reset_mock()
+                failure = self.http_error(status)
+                self.client.opener.open.side_effect = [failure, self.response()]
+                self.assertEqual(self.client.request('actions/runs/47'), {'id': 47})
+                self.assertTrue(failure.closed)
+                self.assertEqual(self.client.opener.open.call_count, 2)
+                self.sleep.assert_called_once_with(1)
+
+    def test_http_failures_stop_after_three_attempts_with_safe_status_message(self):
+        self.client.opener.open.side_effect = [self.http_error(503) for _ in range(3)]
+        with self.assertRaisesRegex(StateError, 'HTTP 503; no collection was started') as caught:
+            self.client.request('actions/runs/47')
+        self.assert_safe_failure(caught.exception)
+        self.assertEqual(self.client.opener.open.call_count, 3)
+        self.assertEqual(self.sleep.call_args_list, [call(1), call(2)])
+
+    def test_auth_permission_not_found_and_other_http_errors_are_not_retried(self):
+        for status in (400, 401, 403, 404, 409, 422, 501):
+            with self.subTest(status=status):
+                self.client.opener.open.reset_mock()
+                self.sleep.reset_mock()
+                self.client.opener.open.side_effect = self.http_error(status)
+                with self.assertRaisesRegex(StateError, f'HTTP {status}') as caught:
+                    self.client.request('actions/runs/47')
+                self.assert_safe_failure(caught.exception)
+                self.assertEqual(self.client.opener.open.call_count, 1)
+                self.sleep.assert_not_called()
+
+    def test_mutating_requests_and_head_are_never_automatically_retried(self):
+        for method in ('DELETE', 'POST', 'PUT', 'PATCH', 'HEAD'):
+            for failure in (self.http_error(503), urllib.error.URLError('fixture-sensitive')):
+                with self.subTest(method=method, kind=type(failure).__name__):
+                    self.client.opener.open.reset_mock()
+                    self.sleep.reset_mock()
+                    self.client.opener.open.side_effect = failure
+                    with self.assertRaises(StateError) as caught:
+                        self.client.request('actions/artifacts/47', method=method)
+                    self.assert_safe_failure(caught.exception)
+                    self.assertEqual(self.client.opener.open.call_count, 1)
+                    self.sleep.assert_not_called()
+
+    def test_retry_after_seconds_are_respected_within_bounded_waits(self):
+        self.client.opener.open.side_effect = [self.http_error(429, {'Retry-After': '5'}),
+                                               self.http_error(503, {'Retry-After': '0'}), self.response()]
+        self.assertEqual(self.client.request('actions/runs/47'), {'id': 47})
+        self.assertEqual(self.sleep.call_args_list, [call(5), call(2)])
+
+    def test_retry_after_http_date_is_respected(self):
+        now = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+        retry_at = format_datetime(now + timedelta(seconds=4), usegmt=True)
+        self.client.opener.open.side_effect = [self.http_error(429, {'Retry-After': retry_at}), self.response()]
+        with patch('deployment.actions_state.datetime') as clock:
+            clock.now.return_value = now
+            self.assertEqual(self.client.request('actions/runs/47'), {'id': 47})
+        self.sleep.assert_called_once_with(4)
+
+    def test_large_invalid_and_timezone_free_retry_after_values_stop_without_hammering(self):
+        now = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+        for retry_after in ('6', '3600', 'invalid fixture-sensitive', '', '-1', '1.5',
+                            format_datetime(now + timedelta(seconds=30), usegmt=True),
+                            'Wed, 14 Oct 2026 12:00:04'):
+            with self.subTest(retry_after=retry_after), patch('deployment.actions_state.datetime') as clock:
+                clock.now.return_value = now
+                self.client.opener.open.reset_mock()
+                self.sleep.reset_mock()
+                self.client.opener.open.side_effect = self.http_error(429, {'Retry-After': retry_after,
+                                                                           'Authorization': 'fixture-token'})
+                with self.assertRaisesRegex(StateError, 'HTTP 429') as caught:
+                    self.client.request('actions/runs/47')
+                self.assert_safe_failure(caught.exception)
+                self.assertEqual(self.client.opener.open.call_count, 1)
+                self.sleep.assert_not_called()
+
+    def test_partial_read_network_failure_retries_and_closes_old_response(self):
+        class FailedRead(io.BytesIO):
+            def read(self, count=-1):
+                raise OSError('fixture-sensitive')
+        failed = FailedRead()
+        self.client.opener.open.side_effect = [failed, self.response()]
+        self.assertEqual(self.client.request('actions/runs/47'), {'id': 47})
+        self.assertTrue(failed.closed)
+        self.sleep.assert_called_once_with(1)
+
+    def test_invalid_json_is_safe_and_not_retried(self):
+        self.client.opener.open.return_value = self.response(b'fixture-sensitive malformed JSON')
+        with self.assertRaisesRegex(StateError, 'returned invalid JSON') as caught:
+            self.client.request('actions/runs/47')
+        self.assert_safe_failure(caught.exception)
+        self.assertEqual(self.client.opener.open.call_count, 1)
+        self.sleep.assert_not_called()
+
+    def test_invalid_header_request_construction_and_open_are_safe_and_not_retried(self):
+        with patch('deployment.actions_state.urllib.request.Request',
+                   side_effect=ValueError('Authorization: Bearer fixture-token fixture-sensitive')):
+            with self.assertRaisesRegex(StateError, 'request is invalid') as caught:
+                self.client.request('actions/runs/47')
+        self.assert_safe_failure(caught.exception)
+        self.client.opener.open.assert_not_called()
+        self.client.opener.open.side_effect = ValueError('Authorization: Bearer fixture-token fixture-sensitive')
+        with self.assertRaisesRegex(StateError, 'request is invalid') as caught:
+            self.client.request('actions/runs/47')
+        self.assert_safe_failure(caught.exception)
+        self.assertEqual(self.client.opener.open.call_count, 1)
+        self.sleep.assert_not_called()
+
+    def test_oversized_response_is_not_retried(self):
+        self.client.opener.open.return_value = self.response(b'1234567')
+        with patch('deployment.actions_state.MAX_SNAPSHOT_BYTES', 6):
+            with self.assertRaisesRegex(StateError, 'snapshot size limit'):
+                self.client.request('actions/runs/47', binary=True)
+        self.assertEqual(self.client.opener.open.call_count, 1)
+        self.sleep.assert_not_called()
+
+    def test_binary_artifact_retry_still_drops_auth_on_each_cross_host_redirect(self):
+        redirects = []
+        def download(request, **kwargs):
+            redirected = SafeRedirect().redirect_request(request, None, 302, 'found', {},
+                                                          'https://storage.example/archive?sig=fixture-sensitive')
+            redirects.append(redirected)
+            if len(redirects) == 1:
+                raise urllib.error.URLError('fixture-sensitive')
+            return self.response(b'fixture-archive')
+        self.client.opener.open.side_effect = download
+        self.assertEqual(self.client.download(47), b'fixture-archive')
+        self.assertEqual(len(redirects), 2)
+        for request in redirects:
+            self.assertIsNone(request.get_header('Authorization'))
+        self.sleep.assert_called_once_with(1)
 
 
 class ActionsStateTests(unittest.TestCase):

@@ -55,6 +55,8 @@ docker compose --env-file .env.production -f docker-compose.actions.yml logs --t
 
 可以提供验收 JSON 或错误摘要供诊断；先检查其中没有令牌，不要发送 `.env.production`、完整 Compose 配置或 `docker inspect` 输出。
 
+若在读取最新 Actions 元数据时失败，更新后的脚本会给出安全类别：`github_network_unavailable` 是网络请求失败，`github_authentication_failed` 对应 HTTP 401，`github_access_denied_or_rate_limited` 对应 HTTP 403（还可能是限流，不能只凭 403 判断权限），`snapshot_metadata_unverified` 是可信快照元数据未通过检查。普通权限错误不自动重试；临时 GET 网络错误和部分服务端错误有最多三次总尝试。没有可信元数据时不会继续同步或报告成功。较早版本只显示 `Could not establish the latest trusted Actions generation`，此消息本身无法区分这些原因。
+
 ## 基础镜像下载失败时
 
 如果构建停在 `FROM python:3.12-slim`，并报 `auth.docker.io/token` 的连接超时，表示 Docker 尚未取得基础镜像。此时还没有运行项目服务，修改 GitHub 令牌不能解决这一错误。

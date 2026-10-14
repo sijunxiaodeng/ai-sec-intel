@@ -14,12 +14,14 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from contextlib import closing
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 try:
@@ -34,6 +36,9 @@ STATE_FILES = {"intelligence.db", "monitoring_baseline.json", "monitoring_status
                "deepseek_status.json", "actions_report.json", "migration_status.json"}
 REQUIRED_FILES = {"intelligence.db", "monitoring_baseline.json"}
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
+READ_RETRY_DELAYS = (1, 2)
+MAX_READ_RETRY_DELAY = 5
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
 class StateError(RuntimeError):
@@ -48,6 +53,33 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
+def _read_retry_delay(error, attempt):
+    """Bound GET recovery without shortening a server's requested cooldown."""
+    if attempt >= len(READ_RETRY_DELAYS):
+        return None
+    delay = READ_RETRY_DELAYS[attempt]
+    if isinstance(error, urllib.error.HTTPError):
+        if error.code not in RETRYABLE_HTTP_STATUSES:
+            return None
+        retry_after = error.headers.get("Retry-After") if error.headers is not None else None
+        if retry_after is not None:
+            try:
+                value = retry_after.strip()
+                if value.isascii() and value.isdecimal():
+                    cooldown = int(value)
+                else:
+                    timestamp = parsedate_to_datetime(value)
+                    if timestamp.utcoffset() is None:
+                        return None
+                    cooldown = max(0, (timestamp - datetime.now(timezone.utc)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if cooldown > MAX_READ_RETRY_DELAY:
+                return None
+            delay = max(delay, cooldown)
+    return delay
+
+
 class GitHubClient:
     def __init__(self, token, repository, api_url="https://api.github.com"):
         if not token or len(repository.split("/")) != 2:
@@ -59,22 +91,43 @@ class GitHubClient:
 
     def request(self, path, *, binary=False, accept="application/vnd.github+json", method="GET"):
         url = f"{self.api_url}/repos/{self.repository}/{path}"
-        req = urllib.request.Request(url, method=method, headers={
-            "Authorization": f"Bearer {self.token}",
-            "Accept": accept,
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "ai-sec-intel-state",
-        })
-        try:
-            with self.opener.open(req, timeout=60) as response:
-                payload = response.read(MAX_SNAPSHOT_BYTES + 1)
-        except urllib.error.HTTPError as exc:
-            raise StateError(f"GitHub state API failed: HTTP {exc.code}; no collection was started") from None
-        except (OSError, urllib.error.URLError):
-            raise StateError("GitHub state API unavailable; no collection was started") from None
+        read_only = method.upper() == "GET"
+        for attempt in range(len(READ_RETRY_DELAYS) + 1 if read_only else 1):
+            try:
+                # Restart at the fixed repository endpoint. SafeRedirect still
+                # strips Authorization from each cross-host artifact redirect.
+                req = urllib.request.Request(url, method=method, headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": accept,
+                    "X-GitHub-Api-Version": "2022-11-28",
+                    "User-Agent": "ai-sec-intel-state",
+                })
+                with self.opener.open(req, timeout=60) as response:
+                    payload = response.read(MAX_SNAPSHOT_BYTES + 1)
+            except urllib.error.HTTPError as exc:
+                delay = _read_retry_delay(exc, attempt) if read_only else None
+                exc.close()
+                if delay is None:
+                    raise StateError(f"GitHub state API failed: HTTP {exc.code}; no collection was started") from None
+            except (OSError, urllib.error.URLError) as exc:
+                delay = _read_retry_delay(exc, attempt) if read_only else None
+                if delay is None:
+                    raise StateError("GitHub state API unavailable; no collection was started") from None
+            except ValueError:
+                raise StateError("GitHub state API request is invalid; no collection was started") from None
+            else:
+                break
+            # At most two waits, each at most five seconds. A longer cooldown
+            # fails closed so the scheduler can try again later.
+            time.sleep(delay)
         if len(payload) > MAX_SNAPSHOT_BYTES:
             raise StateError("State response exceeds the snapshot size limit")
-        return payload if binary else json.loads(payload) if payload else None
+        if binary or not payload:
+            return payload if binary else None
+        try:
+            return json.loads(payload)
+        except ValueError:
+            raise StateError("GitHub state API returned invalid JSON; no collection was started") from None
 
     def runs(self, workflow, branch):
         # At most 500 recent runs. An older-only snapshot is not silently trusted.
