@@ -105,7 +105,12 @@ def run_b_monitor_cycle(
     summary: dict[str, Any] = {"status": "failed", "mode": "embed", "execution": "subprocess"}
     child = None
     try:
-        from api.b_embed import INTEL_ROOT, db_path
+        from api.b_embed import INTEL_ROOT, db_path, ensure_intelligence_path
+        # claim_role lives under intelligence.*; restore ROOT on sys.path before
+        # that import. Calling prefer_root only after the import left a window
+        # where ModuleNotFoundError: No module named 'intelligence' was wrapped
+        # as "B collector worker could not complete" on 一键监测.
+        ensure_intelligence_path()
         from intelligence.deployment.state_role import claim_role
         db = db_path()
         # A mirror generation is immutable, even if its caller has write permission.
@@ -170,7 +175,10 @@ def run_b_monitor_cycle(
     except Exception as exc:
         if child is not None and child.poll() is None:
             summary["termination_confirmed"] = _stop_process_tree(child)
+        detail = str(exc).strip()
         summary["error"] = "%s: B collector worker could not complete" % type(exc).__name__
+        if detail:
+            summary["error"] = "%s (%s)" % (summary["error"], detail[:160])
         return summary
     finally:
         _CYCLE_LOCK.release()

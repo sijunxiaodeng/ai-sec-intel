@@ -55,3 +55,40 @@ class BMonitorTest(unittest.TestCase):
             result = b_monitor.run_b_monitor_cycle()
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["source_names"], ["NVD"])
+
+    def test_cycle_restores_root_path_before_claim_role_import(self):
+        """Regression: missing repo root on sys.path used to raise ModuleNotFoundError
+        before the worker started (UI: ModuleNotFoundError: B collector worker…)."""
+        import sys
+
+        from api.b_embed import ROOT as REPO_ROOT
+
+        root = str(REPO_ROOT.resolve())
+        intel = str((REPO_ROOT / "intelligence").resolve())
+        saved_path = list(sys.path)
+        saved_modules = {
+            key: sys.modules[key]
+            for key in list(sys.modules)
+            if key == "intelligence" or key.startswith("intelligence.")
+        }
+        def launch(command, **kwargs):
+            path = Path(command[command.index("--result") + 1])
+            path.write_text(json.dumps({"status": "success", "sources": {"NVD": {}}}))
+            return Mock(returncode=0)
+        try:
+            for key in list(saved_modules):
+                sys.modules.pop(key, None)
+            sys.path[:] = [p for p in sys.path if p not in {root, intel, ""}]
+            sys.path.insert(0, intel)
+            with patch("api.b_monitor.subprocess.Popen", side_effect=launch) as spawn:
+                result = b_monitor.run_b_monitor_cycle()
+            self.assertEqual(result["status"], "success", result)
+            self.assertNotIn("ModuleNotFoundError", result.get("error") or "")
+            spawn.assert_called_once()
+            self.assertIn(root, sys.path)
+        finally:
+            sys.path[:] = saved_path
+            for key in list(sys.modules):
+                if key == "intelligence" or key.startswith("intelligence."):
+                    sys.modules.pop(key, None)
+            sys.modules.update(saved_modules)
