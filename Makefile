@@ -1,3 +1,4 @@
+# 可选短别名（部署主路径见 DEPLOY.md：docker compose）
 .PHONY: demo demo-up demo-down demo-smoke demo-collect
 
 demo: demo-up demo-smoke

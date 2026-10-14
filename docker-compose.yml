@@ -1,8 +1,8 @@
-# Unified demo: ONE public entry on :8023; B queries are embedded.
-# B collection uses an isolated, deadline-bounded child process.
-# Seed job writes intelligence.db; main-app reads it (no forever :8765 sidecar).
-# One-click: ./scripts/demo-up.sh
-# Smoke:     ./scripts/demo-smoke.sh
+# 联网演示（非默认）。产品面仅 :8023；查询 embed，采集为有界子进程。
+# 默认一键: docker compose -f docker-compose.offline.yml up --build -d
+# 本文件:   docker compose -f docker-compose.yml up --build -d
+# 冒烟:     ./scripts/demo-smoke.sh
+# 种子写演示卷；正式数据见 docker-compose.production.yml / actions.yml
 #
 # Host ports are fixed (127.0.0.1 only). Do not change casually.
 # Legacy sidecar: set COMPOSE_PROFILES=sidecar (or docker compose --profile sidecar).

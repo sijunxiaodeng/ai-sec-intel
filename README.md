@@ -1,46 +1,26 @@
-# AI 安全知识情报（赛题九）
+# AI 安全知识情报
 
-三人共用的仓库。目前支持 NVD/OSV 漏洞监测、关联资料抓取与证据入库、结构化富化与影响说明、登记资产版本匹配，以及带来源引用的检索问答。
+漏洞监测、知识库、关联富化与证据问答。**对外只开一个端口：http://127.0.0.1:8023**。
 
-正式数据运行使用独立配置，避免演示种子覆盖采集历史。有持续在线机器时使用 `bash scripts/production-up.sh collector`；继续由 GitHub Actions 采集时使用 `bash scripts/production-up.sh actions` 自动校验交付云端快照。两种模式及数据迁移见 [正式数据部署与交付](docs/正式数据部署与交付.md)。
-
-本轮工程修复、验证结果及尚未完成的比赛验收见 [修复与验收说明](docs/修复与验收说明.md)。资料问答新增可选的 [跨资料证据推理](docs/通用证据推理.md)，默认仍展示原文摘录。
-
-云环境测试失败与离线启动的修复结果、完整回归命令见 [测试修复与回归记录](docs/测试修复与回归记录.md)。
-
-真实云快照的迁移、交付证据和历史更新追赶修复见 [云快照兼容与历史补采修复](docs/云快照兼容与历史补采修复.md)。
-
-六模块得分要点的逐项核查、已补能力与待完成证据见 [赛题核查与补强](docs/赛题得分要点逐项核查.md)。本轮新增 [可查询的智能体工具轨迹](docs/智能体编排与工具轨迹.md)、[独立问答计分](docs/问答独立评测与计分.md) 和 [Prometheus/Grafana 与可校验备份](docs/运维监控与备份.md)。
-
-## 怎么打开系统（一键演示）
-
-默认只打开 **http://127.0.0.1:8023**。B 查询嵌入主应用，采集由独立子进程执行；`8765` 仅供显式启用的旧 HTTP 服务模式使用。
-
-首次安装依赖后，离线演示会自动生成隔离的 **5 条合成漏洞 + 7 份合成资料**，无需先连接 NVD 或配置模型密钥：
+## 一键启动（Docker）
 
 ```bash
-./scripts/demo-up.sh      # Bash：Docker Compose，或本地 embed 模式
-./scripts/demo-smoke.sh   # 健康检查 + collect→enrich→ask
+docker compose -f docker-compose.offline.yml up --build -d
+# 浏览器打开 http://127.0.0.1:8023
+docker compose -f docker-compose.offline.yml down
 ```
 
-浏览器打开 http://127.0.0.1:8023 。停止：`./scripts/demo-down.sh`。详见 [INTEGRATION.md](INTEGRATION.md)。
+依赖、端口、数据卷与正式环境见 **[DEPLOY.md](DEPLOY.md)**。离线演示为合成样例（约 5 条漏洞 + 7 份资料），不访问公网采集/模型；数据在 Docker 卷 `offline-demo-data`。
 
-手动仅起主应用 / 离线演示时：
+便捷脚本（有 Docker 时同样走 offline compose）：`./scripts/demo-up.sh` / `demo-down.sh` / `demo-smoke.sh`。联网演示：`DEMO_NETWORK=online ./scripts/demo-up.sh` 或 `docker compose -f docker-compose.yml up --build -d`。无 Docker 时可 `python3 -m pip install -r requirements.txt && python scripts/offline_demo.py`（数据在 `.demo/offline/`）。
 
-```bash
-python -m pip install -r requirements.txt
-python scripts/offline_demo.py
-```
+正式数据与演示分开：`bash scripts/production-up.sh actions|collector`（详见 [正式数据部署与交付](docs/正式数据部署与交付.md)）。直接 `python main.py` 不会偷偷灌演示样例。
 
-浏览器打开 http://127.0.0.1:8023 ，保持终端运行，Ctrl+C 停止。数据保存在 `.demo/offline/`，重复启动保留它，正式数据不受影响。页面明确标注离线合成样例，程序阻止外部联网和模型调用。
+页面可做监测、富化、提问；模型密钥在「模型设置」填写。接口见 `接口说明.md`。工程细节见 [INTEGRATION.md](INTEGRATION.md)。
 
-Docker 方式：`docker compose -f docker-compose.offline.yml up --build`。首次装包、拉基础镜像/构建仍需网络；依赖/镜像已准备后，演示运行无需境外网络。`./scripts/demo-up.sh` 默认使用这个离线流程；旧联网演示须显式设置 `DEMO_NETWORK=online`。
+---
 
-真实采集只有 B 一套实现，入口为 `python intelligence/run_monitor.py`；A 通过 B 变更流入库，C 负责已有情报的原文富化和检索。常驻/Actions 两种正式部署见 [正式数据部署与交付](docs/正式数据部署与交付.md)。直接 `python main.py` 启动正式应用不会偷偷生成样例。
-
-A/B/C 共用 `intelligence/requirements.lock.txt` 的核心依赖版本，根 `requirements.txt` 引用该文件并追加资料解析库。同一个虚拟环境可以安装两份清单，不再混装 FastAPI/Pydantic 的互斥版本。
-
-页面里可以监测、查看富化、提问，并在「模型设置」里填写 DeepSeek 或通义千问的兼容接口。接口约定见 `接口说明.md`。
+本轮工程修复与验收边界见 [修复与验收说明](docs/修复与验收说明.md)。云环境测试与离线启动回归见 [测试修复与回归记录](docs/测试修复与回归记录.md)。云快照与交付见 [云快照兼容与历史补采修复](docs/云快照兼容与历史补采修复.md)。另有 [智能体编排与工具轨迹](docs/智能体编排与工具轨迹.md)、[问答独立评测与计分](docs/问答独立评测与计分.md)、[运维监控与备份](docs/运维监控与备份.md)、[赛题得分要点逐项核查](docs/赛题得分要点逐项核查.md)。
 
 ## 当前验收入口
 

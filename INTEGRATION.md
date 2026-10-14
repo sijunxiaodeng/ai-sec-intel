@@ -6,22 +6,24 @@
 
 根 `requirements.txt` 引用 `intelligence/requirements.lock.txt`，A/B/C 共用同一核心依赖版本。正式数据与交付见 [正式数据部署与交付](docs/正式数据部署与交付.md)。
 
-## Bash 一键演示
+## Bash / Docker 一键演示
+
+部署主路径是 Docker Compose（说明见 [DEPLOY.md](DEPLOY.md)）：
 
 ```bash
 git pull origin main
-python -m pip install -r requirements.txt
-python scripts/offline_demo.py  # 首次自动生成合成数据，不联网采集
-# 或 ./scripts/demo-up.sh（默认离线；首次安装/构建需包网络）
+docker compose -f docker-compose.offline.yml up --build -d
 ./scripts/demo-smoke.sh
+docker compose -f docker-compose.offline.yml down
 ```
 
-脚本优先使用 Docker Compose，无可用 Docker 时使用本地 `.venv`。默认离线演示使用合成样例；联网演示须显式设置 `DEMO_NETWORK=online`。停止自己启动的演示用 `./scripts/demo-down.sh`。
+便捷脚本：`./scripts/demo-up.sh`（有 Docker → offline compose，否则本地 `.venv`）。无 Docker 时先 `python -m pip install -r requirements.txt`；也可 `python scripts/offline_demo.py`。默认离线合成样例；联网演示用 `DEMO_NETWORK=online ./scripts/demo-up.sh` 或 `docker compose -f docker-compose.yml up --build -d`。
 
-只启动离线容器、不触发联网采集时：
+默认离线 compose 已关闭外采；联网演示 compose（`docker-compose.yml`）若需禁自动采集：
 
 ```bash
-AUTO_MONITOR_ENABLED=0 B_MONITOR_ENABLED=0 AUTO_INGEST_ON_COLLECT=0 docker compose up -d --build --wait
+AUTO_MONITOR_ENABLED=0 B_MONITOR_ENABLED=0 AUTO_INGEST_ON_COLLECT=0 \
+  docker compose -f docker-compose.yml up -d --build --wait
 ```
 
 首次启动可生成标注为合成的演示库；以后重复启动 `b-seed` 保留已有数据库。`--force` / `DEMO_FORCE_SEED=1` 会重建演示库，仅用于明确需要重置的可丢弃环境。合成卡片与历史回填不能作为实时监测、准确率或真实资产证据。

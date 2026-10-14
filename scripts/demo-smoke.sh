@@ -7,6 +7,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/demo-lib.sh"
 
 mode="$(cat "$DEMO_DIR/mode" 2>/dev/null || echo local)"
+# Pure compose (`docker compose -f docker-compose.offline.yml up`) may leave no .demo/mode;
+# detect offline demo from the live overview so smoke stays product-correct.
+if [[ "$mode" != offline-* ]]; then
+  if curl -sf --max-time 5 "$MAIN_URL/api/overview" \
+    | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("offline_demo") else 1)' \
+    2>/dev/null; then
+    mode=offline-compose
+  fi
+fi
 if [[ "$mode" == offline-* ]]; then
   python3 "$SCRIPT_DIR/check_container_integration.py" --base-url "$MAIN_URL" --preloaded
   log "offline synthetic smoke passed; no public collection or model calls"
