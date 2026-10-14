@@ -16,6 +16,8 @@ docker compose -f docker-compose.offline.yml down
 
 正式数据与演示分开：`bash scripts/production-up.sh actions|collector`（详见 [正式数据部署与交付](docs/正式数据部署与交付.md)）。直接 `python main.py` 不会偷偷灌演示样例。
 
+Windows Docker Desktop 运行真实情报请按 [Windows 部署与闭环验收](docs/Docker%20Desktop部署闭环.md) 配置只读令牌，并运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-up.ps1 -Sync`；脚本在容器内核对最新真实快照和两路持久游标，无需本机 Python。
+
 页面可做监测、富化、提问；模型密钥在「模型设置」填写。接口见 `接口说明.md`。工程细节见 [INTEGRATION.md](INTEGRATION.md)。
 
 ---

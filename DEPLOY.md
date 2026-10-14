@@ -46,6 +46,8 @@ docker compose -f docker-compose.yml up --build -d
 
 ## 正式数据（进阶）
 
+Windows Docker Desktop 的正式 Actions 拉取部署入口是 `scripts/production-up.ps1 -Sync`，包括引擎/端口/配置检查和真实快照、漏洞/资料两路持久游标验收。具体操作见 [Windows 部署与闭环验收](docs/Docker%20Desktop部署闭环.md)；此模式需要在本机配置仓库 Actions 只读令牌，无需本机 Python。
+
 与演示卷分开，**不要与演示 compose 同时起**。详见 [正式数据部署与交付](docs/正式数据部署与交付.md)。
 
 ```bash

@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "scope": "isolated cloud Docker validation with real GitHub Actions artifacts; not the user Windows computer",
+  "synthetic_data": false,
+  "main_application_commit": "336bb2e6172c559e7d9dd70b2f56d336b9ef2028",
+  "runtime_network_note": "Cloud Docker DNS prevented pip downloads. Identical locked wheels were downloaded on the host and installed offline in temporary validation build contexts. b-mirror used the configured cloud proxy and provided CA; Windows uses the standard Dockerfiles.",
+  "automatic_puller": true,
+  "consumer_import_mode": "explicit bounded synchronization; automatic main polling/enrichment were disabled in this isolated validation",
+  "production_desktop_verified": false,
+  "initial_delivery": {
+    "snapshot_serving_verified": true,
+    "consumption_verified": true,
+    "processing_verified": false,
+    "reason_category": "actions_pull_and_durable_import_verified",
+    "generation": {
+      "repository": "sijunxiaodeng/ai-sec-intel",
+      "branch": "main",
+      "workflow": "intelligence-collect.yml",
+      "run_id": 38515772960,
+      "run_number": 46,
+      "collector_commit": "336bb2e6172c559e7d9dd70b2f56d336b9ef2028"
+    },
+    "changefeed": {
+      "epoch": "53dc8c0640b547e5926bc9555f05ef07",
+      "through": 31614
+    },
+    "poller_observation": "ready",
+    "consumers": {
+      "cve": {
+        "caught_up": true
+      },
+      "document": {
+        "caught_up": true
+      }
+    },
+    "schema_version": 1,
+    "expected_run_id": 38515772960,
+    "expected_collector_commit": "336bb2e6172c559e7d9dd70b2f56d336b9ef2028",
+    "pull_verified": true,
+    "deployment_import_loop_verified": true,
+    "synchronization_requested": true,
+    "synchronization_rounds": 21,
+    "verification_attempts": 22,
+    "synchronization_request_failed": false,
+    "elapsed_seconds": 184.179,
+    "checked_at": "2026-10-14T08:42:23.348945+00:00",
+    "verification_scope": "b_api_main_proxy_and_durable_consumers",
+    "limits": [
+      "Verifies this expected Actions generation, recent mirror observation and committed CVE/document cursors.",
+      "Does not verify asynchronous enrichment/index completion, semantic accuracy, collection SLA or unattended uptime.",
+      "A cloud/container proof does not establish deployment on a separate Windows computer."
+    ]
+  },
+  "after_restart": {
+    "snapshot_serving_verified": true,
+    "consumption_verified": true,
+    "processing_verified": false,
+    "reason_category": "actions_pull_and_durable_import_verified",
+    "generation": {
+      "repository": "sijunxiaodeng/ai-sec-intel",
+      "branch": "main",
+      "workflow": "intelligence-collect.yml",
+      "run_id": 38515772960,
+      "run_number": 46,
+      "collector_commit": "336bb2e6172c559e7d9dd70b2f56d336b9ef2028"
+    },
+    "changefeed": {
+      "epoch": "53dc8c0640b547e5926bc9555f05ef07",
+      "through": 31614
+    },
+    "poller_observation": "ready",
+    "consumers": {
+      "cve": {
+        "caught_up": true
+      },
+      "document": {
+        "caught_up": true
+      }
+    },
+    "schema_version": 1,
+    "expected_run_id": 38515772960,
+    "expected_collector_commit": "336bb2e6172c559e7d9dd70b2f56d336b9ef2028",
+    "pull_verified": true,
+    "deployment_import_loop_verified": true,
+    "synchronization_requested": false,
+    "synchronization_rounds": 0,
+    "verification_attempts": 2,
+    "synchronization_request_failed": false,
+    "elapsed_seconds": 2.533,
+    "checked_at": "2026-10-14T08:45:24.230202+00:00",
+    "verification_scope": "b_api_main_proxy_and_durable_consumers",
+    "limits": [
+      "Verifies this expected Actions generation, recent mirror observation and committed CVE/document cursors.",
+      "Does not verify asynchronous enrichment/index completion, semantic accuracy, collection SLA or unattended uptime.",
+      "A cloud/container proof does not establish deployment on a separate Windows computer."
+    ]
+  },
+  "next_generation": {
+    "snapshot_serving_verified": true,
+    "consumption_verified": true,
+    "processing_verified": false,
+    "reason_category": "actions_pull_and_durable_import_verified",
+    "generation": {
+      "repository": "sijunxiaodeng/ai-sec-intel",
+      "branch": "main",
+      "workflow": "intelligence-collect.yml",
+      "run_id": 38537353141,
+      "run_number": 47,
+      "collector_commit": "f23a264df09a2d1639105095ec02dc4db5019d1b"
+    },
+    "changefeed": {
+      "epoch": "53dc8c0640b547e5926bc9555f05ef07",
+      "through": 33374
+    },
+    "poller_observation": "ready",
+    "consumers": {
+      "cve": {
+        "caught_up": true
+      },
+      "document": {
+        "caught_up": true
+      }
+    },
+    "schema_version": 1,
+    "expected_run_id": 38537353141,
+    "expected_collector_commit": "f23a264df09a2d1639105095ec02dc4db5019d1b",
+    "pull_verified": true,
+    "deployment_import_loop_verified": true,
+    "synchronization_requested": true,
+    "synchronization_rounds": 1,
+    "verification_attempts": 2,
+    "synchronization_request_failed": false,
+    "elapsed_seconds": 7.122,
+    "checked_at": "2026-10-14T08:48:50.815130+00:00",
+    "verification_scope": "b_api_main_proxy_and_durable_consumers",
+    "limits": [
+      "Verifies this expected Actions generation, recent mirror observation and committed CVE/document cursors.",
+      "Does not verify asynchronous enrichment/index completion, semantic accuracy, collection SLA or unattended uptime.",
+      "A cloud/container proof does not establish deployment on a separate Windows computer."
+    ]
+  },
+  "qa_endpoint_smoke": {
+    "scope": "isolated real-snapshot Docker HTTP endpoint smoke, not semantic accuracy",
+    "cve_id": "CVE-2026-84317",
+    "answer_returned": true,
+    "used_model": false,
+    "verdict_passed": true,
+    "evidence_records": 1
+  }
+}
