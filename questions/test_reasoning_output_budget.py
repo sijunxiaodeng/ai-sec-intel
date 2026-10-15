@@ -28,8 +28,8 @@ class ReasoningOutputBudgetTest(unittest.TestCase):
         result = self.ask()
         self.assertTrue(result["used_model"])
         self.assertEqual([tokens for prompt, tokens in captured], [640, 2400, 1200])
-        self.assertIn("12 至 240", captured[1][0])
-        self.assertIn("不重复其 text 或 supports", captured[2][0])
+        self.assertIn("12 至 480", captured[1][0])
+        self.assertIn("不重复其 text 或支持性引文", captured[2][0])
         stages = [row for row in result["reasoning_trace"] if row.get("status") == "received"]
         self.assertEqual(len(stages), 3)
         self.assertTrue(all(row["request_ms"] >= 0 and row["archive_check_ms"] >= 0 for row in stages))

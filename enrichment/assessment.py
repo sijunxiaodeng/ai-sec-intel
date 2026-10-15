@@ -93,7 +93,7 @@ def vector_explanations(metric):
 def _empty(cve_id, detail):
     return {"schema_version": 1, "cve_id": cve_id, "status": "insufficient_evidence",
             "detail": detail, "cvss": None, "cvss_candidates": [], "affected_ranges": [],
-            "attack_conditions": [], "technical_impact": [], "poc_candidates": [], "fix_records": [],
+            "attack_conditions": [], "technical_impact": [], "poc_candidates": [], "patch_candidates": [], "fix_records": [],
             "weaknesses": [], "historical_relations": {"status": "insufficient_evidence", "items": [], "evidence": []},
             "risk_taxonomy": {"status": "insufficient_evidence", "items": [], "evidence": []},
             "warnings": [], "evidence": [], "asset_impact": {"status": "unknown", "reason": "此技术报告未结合具体资产及部署信息；登记清单的匹配结果另行评估"}}
@@ -198,9 +198,17 @@ def assess(cve_id, db_path=DEFAULT_DB, *, history_catalog=None):
     if any(m["requires_environment_review"] for m in report["affected_ranges"]):
         report["warnings"].append("配置包含 AND 或否定条件，组件版本范围不能直接当作资产匹配结论")
     for ref_index, ref in enumerate(cve.get("references") or []):
-        if "Exploit" not in ref.get("tags", []) or not ref.get("url", "").startswith("https://"):
+        tags = {tag for tag in ref.get("tags", []) if tag in ("Exploit", "Patch")}
+        if not tags or not ref.get("url", "").startswith("https://"):
             continue
-        if any(p["url"] == ref["url"] for p in report["poc_candidates"]):
+        destinations = []
+        if "Exploit" in tags:
+            destinations.append(("poc_candidates", "not_run", "poc"))
+        if "Patch" in tags:
+            destinations.append(("patch_candidates", "not_verified", "remediation"))
+        destinations = [(key, validation, topic) for key, validation, topic in destinations
+                        if not any(p["url"] == ref["url"] for p in report[key])]
+        if not destinations:
             continue
         # 此标签来自原始 NVD JSON，不要求候选网页抓取成功，更不代表已复现。
         excerpt = json.dumps(ref, ensure_ascii=False)
@@ -211,8 +219,10 @@ def assess(cve_id, db_path=DEFAULT_DB, *, history_catalog=None):
                                    "url": source_url, "locator": "references/%d；来自已校验的 NVD JSON 字段" % ref_index,
                                    "retrieved_at": doc["retrieved_at"], "relation_type": "vulnerability_record",
                                    "text": excerpt, "text_sha256": digest(excerpt), "source_response_sha256": sha,
-                                   "text_kind": "automatic_structured_extract", "topics": ["poc"]})
-        report["poc_candidates"].append({"url": ref["url"], "status": "candidate_reference", "validation": "not_run", "source_url": source_url, "evidence_ids": [citation_id]})
+                                   "text_kind": "automatic_structured_extract", "topics": [topic for _, _, topic in destinations]})
+        for key, validation, _ in destinations:
+            report[key].append({"url": ref["url"], "status": "candidate_reference", "validation": validation,
+                                "source_url": source_url, "evidence_ids": [citation_id]})
     for related in documents:
         if related.get("relation_type") != "fix_record":
             continue

@@ -48,7 +48,8 @@ class GeneralReasoningTest(unittest.TestCase):
         self.draft = {"claims": [{"text": "Zephyr 使用 Orion 擦除协议；按该协议，缓存向量被删除但审计元数据仍保留。",
                                   "kind": "inference", "supports": self.supports, "assumptions": []}],
                       "conflicts": [], "missing_premises": []}
-        self.verify = {"claims": [{"claim_id": "C1", "verdict": "supported"}],
+        self.verify = {"claims": [{"claim_id": "C1", "verdict": "supported", "scope_verdict": "preserved",
+                                  "counter_supports": [], "reason": "The source scopes and conditions are preserved."}],
                        "conflicts": [], "missing_premises": []}
 
     def model(self, messages, **kwargs):
@@ -122,6 +123,7 @@ class GeneralReasoningTest(unittest.TestCase):
     def test_verifier_can_reject_semantically_false_claim_with_valid_quotes(self):
         self.draft["claims"][0]["text"] = "Zephyr deletes every audit record."
         self.verify["claims"][0]["verdict"] = "contradicted"
+        self.verify["claims"][0]["counter_supports"] = [self.supports[1]]
         result = self.ask()
         self.assertFalse(result["used_model"])
         self.assertEqual(result["fallback_reason"], "no_supported_claims")
@@ -129,7 +131,7 @@ class GeneralReasoningTest(unittest.TestCase):
 
     def test_source_conflict_suppresses_conclusion_instead_of_choosing_a_side(self):
         self.verify["conflicts"] = [{"description": "两份资料对同一部署的保留范围无法统一。",
-                                     "supports": self.supports}]
+                                     "supports": self.supports, "relation": "contradiction", "affected_claim_ids": ["C1"]}]
         result = self.ask()
         self.assertEqual(result["reasoning_status"], "partial")
         self.assertEqual(result["reasoning_claims"], [])
@@ -140,6 +142,8 @@ class GeneralReasoningTest(unittest.TestCase):
     def test_entity_ambiguity_and_missing_version_prevent_unconditional_inference(self):
         self.plan["ambiguities"] = ["Zephyr 可能指不同部署，请明确部署名称。"]
         self.plan["missing_premises"] = ["请提供部署所采用的协议版本。"]
+        self.verify["claims"][0].update(verdict="insufficient", scope_verdict="unclear",
+                                        reason="The deployment and protocol version for this claim are unknown.")
         result = self.ask()
         self.assertEqual(result["reasoning_status"], "partial")
         self.assertEqual(result["reasoning_claims"], [])

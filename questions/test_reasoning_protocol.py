@@ -30,17 +30,18 @@ class ReasoningProtocolTest(unittest.TestCase):
         payload = json.loads(messages[-1]["content"])
         if "quote_options" in payload:
             for item in result.get("claims", []) + result.get("conflicts", []):
-                if "supports" not in item:
-                    continue
-                choices = []
-                for support in item["supports"]:
-                    match = next((option for option in payload["quote_options"]
-                                  if all(option[key] == support.get(key) for key in ("citation_id", "quote"))), None)
-                    selected = {"quote_id": match["quote_id"] if match else "UNKNOWN"}
-                    selected.update({key: value for key, value in support.items()
-                                     if key not in ("citation_id", "quote")})
-                    choices.append(selected)
-                item["supports"] = choices
+                for field in ("supports", "counter_supports"):
+                    if field not in item:
+                        continue
+                    choices = []
+                    for support in item[field]:
+                        match = next((option for option in payload["quote_options"]
+                                      if all(option[key] == support.get(key) for key in ("citation_id", "quote"))), None)
+                        selected = {"quote_id": match["quote_id"] if match else "UNKNOWN"}
+                        selected.update({key: value for key, value in support.items()
+                                         if key not in ("citation_id", "quote")})
+                        choices.append(selected)
+                    item[field] = choices
         return json.dumps(result)
 
     def http_requests(self):
@@ -106,10 +107,12 @@ class ReasoningProtocolTest(unittest.TestCase):
             self.assertEqual(len({documents[by_id[item["quote_id"]]["citation_id"]] for item in pair}), 2)
         verify = schemas[2]["properties"]["claims"]
         self.assertEqual((verify["minItems"], verify["maxItems"]), (1, 1))
-        self.assert_closed_object(verify["items"], ("claim_id", "verdict"))
+        self.assert_closed_object(verify["items"], ("claim_id", "verdict", "scope_verdict", "counter_supports", "reason"))
         self.assertEqual(verify["items"]["properties"]["claim_id"]["enum"], ["C1"])
         self.assertEqual(set(verify["items"]["properties"]["verdict"]["enum"]),
                          {"supported", "contradicted", "insufficient"})
+        self.assertEqual(set(verify["items"]["properties"]["scope_verdict"]["enum"]),
+                         {"preserved", "broadened", "unclear"})
         self.assertEqual(result["reasoning_claims"][0]["supports"], self.supports)
         for body in requests[1:]:
             payload = json.loads(body["messages"][-1]["content"])
@@ -166,8 +169,10 @@ class ReasoningProtocolTest(unittest.TestCase):
 
     def test_local_choices_do_not_override_semantic_contradiction_or_missing_conditions(self):
         self.verify["claims"][0]["verdict"] = "contradicted"
+        self.verify["claims"][0]["counter_supports"] = [self.supports[1]]
         self.assertEqual(self.ask()["fallback_reason"], "no_supported_claims")
         self.verify["claims"][0]["verdict"] = "supported"
+        self.verify["claims"][0]["counter_supports"] = []
         self.draft["claims"][0]["kind"] = "conditional"
         self.assertEqual(self.ask()["fallback_reason"], "invalid_assumptions")
 
@@ -189,8 +194,10 @@ class ReasoningProtocolTest(unittest.TestCase):
 
     def test_identical_draft_and_verifier_differences_are_shown_once_with_uncertainty(self):
         description = "两份资料的保留条件需要进一步核对。"
-        self.draft["conflicts"] = [{"description": description, "supports": copy.deepcopy(self.supports)}]
-        self.verify["conflicts"] = [{"description": description, "supports": copy.deepcopy(self.supports[::-1])}]
+        self.draft["conflicts"] = [{"description": description, "supports": copy.deepcopy(self.supports),
+                                   "relation": "difference", "affected_claim_ids": []}]
+        self.verify["conflicts"] = [{"description": description, "supports": copy.deepcopy(self.supports[::-1]),
+                                    "relation": "difference", "affected_claim_ids": []}]
         result = self.ask()
         self.assertEqual(len(result["conflicts"]), 1, result)
         self.assertEqual(result["reasoning_trace"][-1]["conflicts"], 1)
@@ -200,7 +207,8 @@ class ReasoningProtocolTest(unittest.TestCase):
 
     def test_different_text_or_quoted_support_is_never_merged_as_an_identical_difference(self):
         description = "两份资料的保留条件需要进一步核对。"
-        original = {"description": description, "supports": copy.deepcopy(self.supports)}
+        original = {"description": description, "supports": copy.deepcopy(self.supports),
+                    "relation": "difference", "affected_claim_ids": []}
         different_quote = copy.deepcopy(original)
         different_quote["supports"][1]["quote"] = self.rows[1]["text"].split(". ")[1] + "."
         for changed in (dict(original, description="两份资料的适用版本需要进一步核对。"), different_quote):
@@ -212,7 +220,8 @@ class ReasoningProtocolTest(unittest.TestCase):
                 self.assertEqual(result["answer"].count("模型提示的待核对差异："), 2)
 
     def test_apparently_duplicate_difference_cannot_bypass_verifier_schema_validation(self):
-        original = {"description": "两份资料的保留条件需要进一步核对。", "supports": copy.deepcopy(self.supports)}
+        original = {"description": "两份资料的保留条件需要进一步核对。", "supports": copy.deepcopy(self.supports),
+                    "relation": "difference", "affected_claim_ids": []}
         self.draft["conflicts"] = [original]
         self.verify["conflicts"] = [dict(original, unrequested_field="must reject")]
         result = self.ask()

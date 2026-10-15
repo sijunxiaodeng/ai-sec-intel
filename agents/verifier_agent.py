@@ -83,7 +83,7 @@ def _condition_present(plain, row):
     label, text = re.escape(row["label"]), re.escape(row["text"])
     if re.search(label + r"\s*[:：为是]?\s*" + text, plain):
         return True
-    if re.search(r"\b" + row["metric"].lower() + ":" + row["value"].lower() + r"\b", plain):
+    if row.get("metric") and row.get("value") and re.search(r"\b" + row["metric"].lower() + ":" + row["value"].lower() + r"\b", plain):
         return True
     aliases = {
         ("AV", "N"): r"网络(?:攻击|可达|访问)|(?:通过|经由)网络|远程攻击",
@@ -95,8 +95,25 @@ def _condition_present(plain, row):
         ("UI", "N"): r"(?:无需|不需要|不要求).{0,4}用户交互",
         ("UI", "R"): r"(?<!不)(?:需要|要求).{0,4}用户交互",
     }
-    pattern = aliases.get((row["metric"], row["value"]))
+    pattern = aliases.get((row.get("metric"), row.get("value")))
     return bool(pattern and re.search(pattern, plain))
+
+
+def _limited_impact_fields(question):
+    """Only an explicit list of impact components narrows completeness checks.
+
+    'Only explain technical impact' limits the topic, not the C/I/A components.
+    Do not infer a narrower scope from an arbitrary occurrence of 只 or 仅.
+    """
+    component = r"(?:保密性|完整性|可用性)(?:影响)?"
+    selection = re.compile(r"(?:请)?(?:只|仅)(?:说明|讨论|解释|列出|介绍|比较|关注|分析|回答|看|说)?\s*"
+                           r"(?P<fields>" + component + r"(?:\s*[、和与及]\s*" + component + r")*)"
+                           r"(?:即可|就行)?")
+    for clause in re.split(r"[，,。；;？?！!\n]", question):
+        match = selection.fullmatch(clause.strip())
+        if match:
+            return set(re.findall(r"保密性|完整性|可用性", match["fields"]))
+    return set()
 
 
 def required_fields(answer, evidence, question):
@@ -120,9 +137,9 @@ def required_fields(answer, evidence, question):
                 issues.append("遗漏关联来源的%s信息" % ("条件" if topic == "conditions" else "修复建议"))
         report = record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}
         metric = report.get("cvss")
-        if not metric:
-            continue
-        candidates = [metric] + (report.get("cvss_candidates") or [])
+        # A missing score cannot suppress unrelated source fields such as patch
+        # references, affected versions, or project PoC-validation boundaries.
+        candidates = ([metric] if metric else []) + (report.get("cvss_candidates") or [])
         scoring_rows = [{"source": row.get("source"), "type": row.get("metric_type"),
                          "cvssData": {"version": row.get("version"), "baseScore": row.get("score"),
                                       "baseSeverity": row.get("severity"), "vectorString": row.get("vector")}}
@@ -134,7 +151,7 @@ def required_fields(answer, evidence, question):
                 matches = matching_cvss_metrics(line, scoring_rows)
                 if matches and all(row == matches[0] for row in matches):
                     explicit_profiles.append(matches[0])
-        if any(w in q for w in ("cvss", "评分", "分数", "严重等级", "向量")):
+        if metric and any(w in q for w in ("cvss", "评分", "分数", "严重等级", "向量")):
             matching = [(line, cvss_assertions(line), matches) for line in plain.splitlines()
                         if (facts := cvss_assertions(line))["scores"] and facts["versions"]
                         and (matches := matching_cvss_metrics(line, scoring_rows))]
@@ -173,6 +190,18 @@ def required_fields(answer, evidence, question):
         if any(w in q for w in ("修复", "缓解", "升级", "补丁")) and report.get("fix_records"):
             if not any(row["url"].lower() in plain or (re.search(r"/pull/(\d+)", row["url"]) and re.search(r"/pull/(\d+)", row["url"]).group(1) in plain) for row in report["fix_records"]):
                 issues.append("遗漏了来源中的关联修复记录")
+        if any(w in q for w in ("修复", "缓解", "升级", "补丁")) and report.get("patch_candidates"):
+            if not any(row["url"].lower() in plain for row in report["patch_candidates"]):
+                issues.append("遗漏了来源中标为 Patch 的修复候选线索")
+        limited_impact = _limited_impact_fields(q)
+        if any(w in q for w in ("技术影响", "危害")) or limited_impact:
+            impact_rows = [row for row in report.get("technical_impact", [])
+                           if not limited_impact or any(name in row["label"] for name in limited_impact)]
+            for row in impact_rows:
+                if not _condition_present(plain, row):
+                    issues.append("没有完整保留评分向量中的%s" % row["label"])
+            if impact_rows and not any(w in plain for w in ("cvss", "评分向量")):
+                issues.append("没有说明技术影响来自评分向量解释")
         broad_conditions = any(w in q for w in ("利用条件", "攻击条件"))
         wanted = {"AV", "AC", "AT", "PR", "UI"} if broad_conditions else set()
         if any(w in q for w in ("所需权限", "需要权限")):
@@ -184,7 +213,7 @@ def required_fields(answer, evidence, question):
             from enrichment.assessment import vector_explanations
             data = explicit_profiles[0]["cvssData"]
             condition_rows = vector_explanations({"version": data["version"], "vector": data["vectorString"]})
-        conditions = [row for row in condition_rows if row["metric"] in wanted]
+        conditions = [row for row in condition_rows if row.get("metric") in wanted]
         for row in conditions:
             if not _condition_present(plain, row):
                 issues.append("没有完整保留评分向量中的%s" % row["label"])

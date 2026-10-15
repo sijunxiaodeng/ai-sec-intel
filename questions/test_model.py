@@ -113,7 +113,7 @@ class ModelTest(unittest.TestCase):
         texts += ["按 CVSS 向量解释，%s。" % field for field in (
             "易受攻击系统保密性影响无", "易受攻击系统完整性影响无", "易受攻击系统可用性影响高",
             "后续系统保密性影响无", "后续系统完整性影响无", "后续系统可用性影响无")]
-        texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "参考链接被来源标为 Exploit。"]
+        texts += ["CVSS 4.0 基础分为 8.7。", "评分提供者 vendor@example.org。", "NVD 标为 Exploit 的候选参考：https://example.org/fixture。"]
         record = json.loads(json.dumps(self.record))
         metric4 = {"source": "vendor@example.org", "type": "Secondary", "cvssData": {
             "version": "4.0", "baseScore": 8.7, "baseSeverity": "HIGH",
@@ -122,7 +122,7 @@ class ModelTest(unittest.TestCase):
         version_id, reference_id = self.cve + "/VERSION", self.cve + "/REFERENCE"
         record["evidence_chunks"] += [
             {"citation_id": version_id, "locator": "body", "text": "Synthetic version branches.", "url": "https://example.org/fixture"},
-            {"citation_id": reference_id, "locator": "references/0", "text": '{"tags":["Exploit"]}', "url": "https://example.org/fixture"}]
+            {"citation_id": reference_id, "locator": "references/0", "text": '{"url":"https://example.org/fixture","tags":["Exploit"]}', "url": "https://example.org/fixture"}]
         claims = [{"text": text, "citations": [version_id if i < 8 else reference_id if i == 16 else self.eid]}
                   for i, text in enumerate(texts)]
         self.assertEqual(len(_render_model_json(json.dumps({"claims": claims}), [record]).splitlines()), 17)

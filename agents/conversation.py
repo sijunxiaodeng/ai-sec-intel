@@ -74,8 +74,10 @@ class SessionStore:
                 result = self._empty("资产匹配每次需要唯一的 CVE 编号，请指定其中一条漏洞。")
             else:
                 result = answer_fn(question, cve_ids=scope)
-            # 只承接本轮确认有证据的范围；未知编号不会让下一轮回到更旧的漏洞。
-            session.scope = scope if result.get("evidence") or scope == session.scope else []
+            # Entity resolution records what the user named, not whether the
+            # knowledge base contains it. An unknown new ID must not restore an
+            # older ID or be misreported as an ambiguous pronoun on the next turn.
+            session.scope = scope if len(scope) <= 4 else []
             session.total += 1
             session.turns.append({"turn": session.total, "question": question,
                                   "cve_ids": scope, "answer": result["answer"][:12000],

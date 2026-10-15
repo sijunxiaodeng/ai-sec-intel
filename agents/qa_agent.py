@@ -5,7 +5,7 @@ from rag.evidence import CVE, DEFAULT_DB
 import json
 import re
 from urllib.parse import urlsplit
-from agents.citation_guard import claim_issues
+from agents.citation_guard import claim_issues, ssvc_claims, reference_claims
 from agents.question_scope import topics as question_topics, positive_question, compare_scores
 
 MAX_CLAIMS = 24
@@ -23,6 +23,8 @@ def _local_notes(record, question):
         if all(row.get("validation") == "not_run" for row in report["poc_candidates"]):
             notes.append("系统记录：本项目未运行复现，不能认定已验证可用。")
     if "remediation" in topics and report.get("status") in ("ok", "partial"):
+        if report.get("patch_candidates"):
+            notes.append("系统记录：Patch 标签只提供修复候选线索；本项目尚未据此确认修复效果或修复版本。")
         if report.get("fix_records"):
             if all(row.get("validation", "not_tested") == "not_tested" for row in report["fix_records"]):
                 notes.append("系统记录：本项目未测试修复效果。")
@@ -38,7 +40,7 @@ def _local_notes(record, question):
 def _assessment_lines(record, question):
     report = (record["item"].get("raw_data") or {}).get("automatic_assessment")
     if not report or report["status"] not in ("ok", "partial"):
-        return _poc_code_lines(record, question) + _guidance_lines(record, question)
+        return _poc_code_lines(record, question) + _guidance_lines(record, question) + _ssvc_lines(record, question)
     topics = question_topics(question)
     lines, ids = [], set()
 
@@ -60,6 +62,8 @@ def _assessment_lines(record, question):
             for row in report[key]:
                 add("按 CVSS 向量解释，%s：%s。" % (row["label"], row["text"]), row["evidence_ids"])
     if "remediation" in topics:
+        for row in report.get("patch_candidates", []):
+            add("NVD 标为 Patch 的修复候选参考：%s。" % row["url"], row["evidence_ids"])
         for row in report["fix_records"]:
             add("关联修复记录：%s；%s。" % (row["title"], row["url"]), row["evidence_ids"])
         if not report["fix_records"] and "versions" not in topics:
@@ -91,7 +95,14 @@ def _assessment_lines(record, question):
                     # already selected the same fragment without that context.
                     record["evidence_chunks"] = [chunk if row["citation_id"] == chunk["citation_id"] else row
                                                  for row in record["evidence_chunks"]]
-    return lines + _poc_code_lines(record, question) + _guidance_lines(record, question)
+    return lines + _poc_code_lines(record, question) + _guidance_lines(record, question) + _ssvc_lines(record, question)
+
+
+def _ssvc_lines(record, question):
+    if not re.search(r"ssvc|利用状态|可自动化|automatable|technicalimpact", question, re.I):
+        return []
+    return [text + " [%s]" % chunk["citation_id"]
+            for chunk in record.get("evidence_chunks") or [] for text in ssvc_claims(chunk)]
 
 
 def _poc_code_lines(record, question):
@@ -158,6 +169,10 @@ def _evidence_text(records, question=""):
                 item.get("url") or "",
             )
         )
+        blocks.extend("SSVC 允许逐条照抄的字段事实：" + text for text in _ssvc_lines(record, question))
+        for chunk in record.get("evidence_chunks") or []:
+            blocks.extend("参考标签允许逐条照抄的事实：%s [%s]" % (text, chunk["citation_id"])
+                          for text in reference_claims(chunk))
         blocks.append(item.get("description") or "")
         for chunk in record.get("evidence_chunks") or []:
             blocks.append("[%s] %s | 来源 %s | 定位 %s | %s" % (
@@ -348,9 +363,18 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, libra
         if not question_topics(question) and positive_question(question) != question.strip():
             return {"answer": "请明确本轮需要比较的字段，例如评分、版本范围、利用条件或修复记录。", "evidence": records,
                     "used_model": False, "steps": [{"role": "问答", "action": "确认比较范围", "detail": "没有指定肯定的字段范围，不自动追加被排除字段"}]}
-        detail_question = question if question_topics(question) else question + " CVSS 评分 受影响版本 修复 利用条件 技术影响"
+        broad_risk = (question_topics(question) == {"impact"} and re.search(r"风险|危害", question)
+                      and positive_question(question) == question.strip() and not re.search(r"只|仅", question))
+        detail_question = ("CVSS 受影响版本 利用条件 技术影响" if broad_risk else
+                           question if question_topics(question) else question + " CVSS 评分 受影响版本 修复 利用条件 技术影响")
         answer = _extractive(records, detail_question, fields_only=True)
-        if compare_scores(detail_question):
+        if broad_risk:
+            scope = "以下按来源记录比较评分、版本范围、利用条件和技术影响；实际处置优先级还需资产暴露与业务影响，不能仅据分数排序。"
+            metrics = [(record.get("item", {}).get("raw_data", {}).get("automatic_assessment") or {}).get("cvss") for record in records]
+            if len({metric["version"] for metric in metrics if metric}) > 1:
+                scope += "这些评分使用不同 CVSS 版本，数值不能直接排名。"
+            answer = scope + "\n" + answer
+        elif compare_scores(detail_question):
             answer += "\n" + _comparison(records)
         return {"answer": answer, "evidence": records, "used_model": False,
                 "steps": [{"role": "问答", "action": "按漏洞分别检索并比较", "detail": "分别引用 %d 条漏洞的证据；评分版本不同时不排序" % len(records)}]}
@@ -400,6 +424,10 @@ def run(question, top_k=4, cve_id="", *, cve_ids=None, db_path=DEFAULT_DB, libra
                 "直接回答本轮问题，使用简短段落；不要重复整个证据，不输出 Markdown 表格。"
                 "只回答本轮所问的内容，不补充未询问的 SSVC、修复时间线或资产说明；相同含义的提醒只说一次。"
                 "逐条选择真正支持本句的字段：SSVC 不能支持漏洞成因，版本配置不能支持评分或项目状态。"
+                "SSVC 只能使用给定的允许事实行并保留评估时间，逐条照抄不改写；none 不等于不可利用，"
+                "automatable=no 不证明没有攻击路径，technicalImpact=partial 不能解释成部分功能受损。"
+                "引用 references 字段时只能照抄其允许的候选链接事实，不能把 Exploit/Patch 标签说成已核对页面正文、"
+                "已存在公开利用示例或确认修复效果；页面内容需要另有正文证据。"
                 "关联公告和研究建议必须照抄已格式化的事实行，不能省略来源归属、改写范围、翻译或升级为已验证结论；其余内容按既有规则回答。"
                 "项目执行状态、知识库缺失状态与修复版本边界由系统单独追加，不输出到 claims，也不要替这些说明附外部引用。"
                 "询问利用条件时须覆盖给定的攻击途径、复杂度、附加攻击要求、权限和用户交互，并明确这是 CVSS 向量解释。"

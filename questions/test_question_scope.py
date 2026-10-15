@@ -35,6 +35,17 @@ class QuestionScopeTest(unittest.TestCase):
         for extra in ("所需权限", "可用性影响", "关联修复记录", "修复效果", "修复版本"):
             self.assertNotIn(extra, answer)
 
+    def test_broad_risk_comparison_covers_conditions_and_context_without_ranking(self):
+        answer = self.answer(f"比较 {A} 和 {B} 的风险")
+        for wanted in ("版本范围", "所需权限", "可用性影响", "资产暴露", "业务影响", "基础分为"):
+            self.assertIn(wanted, answer)
+        self.assertNotIn("基础分最高", answer)
+
+    def test_broad_impact_question_requires_all_available_fields_and_vector_scope(self):
+        rows = self.records()[:1]
+        self.assertTrue(required_fields("存在一定风险。", rows, "技术影响和危害是什么？"))
+        self.assertFalse(required_fields("按 CVSS 向量解释，可用性影响：高。", rows, "技术影响和危害是什么？"))
+
     def test_versions_only_does_not_rank_scores_or_add_negated_fields(self):
         answer = self.answer(f"对比 {A} 和 {B} 的版本范围，不要补充评分和修复")
         self.assertIn("< 1.2.3", answer)

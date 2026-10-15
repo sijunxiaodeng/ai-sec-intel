@@ -39,6 +39,75 @@ def field_kind(chunk):
     return None  # 网页正文、人工摘要及未知格式不伪装为已完成字段语义验证。
 
 
+def ssvc_claims(chunk):
+    """Render SSVC values as time-scoped record facts, never exploitability claims.
+
+    CISA/CERT SSVC exploitation describes evidence available at assessment time;
+    `none` does not establish that an attack path is impossible. technicalImpact
+    is an SSVC decision value, not a statement about which product features fail.
+    https://certcc.github.io/SSVC/reference/decision_points/exploitation/
+    """
+    if field_kind(chunk) != "ssvc":
+        return []
+    text = chunk.get("text")
+    if not isinstance(text, str) or (chunk.get("text_sha256") and
+            hashlib.sha256(text.encode("utf-8")).hexdigest() != chunk["text_sha256"]):
+        return []
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(value, dict) or (chunk.get("structured_value") is not None and chunk["structured_value"] != value):
+        return []
+    data = value.get("ssvcData")
+    if not isinstance(data, dict) or not isinstance(data.get("options"), list):
+        return []
+    timestamp = data.get("timestamp")
+    if timestamp is not None and (not isinstance(timestamp, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", timestamp)):
+        return []
+    prefix = "SSVC 数据记录" + ("（评估时间：%s）" % timestamp if timestamp else "")
+    fields = {"exploitation": ("利用状态", {"none", "poc", "active"}),
+              "automatable": ("可自动化性", {"yes", "no"}),
+              "technicalImpact": ("技术影响字段", {"partial", "total"})}
+    options = {}
+    for item in data["options"]:
+        if not isinstance(item, dict):
+            return []
+        for key, selected in item.items():
+            if key not in fields:
+                continue
+            if key in options or not isinstance(selected, str) or selected not in fields[key][1]:
+                return []
+            options[key] = selected
+    return [prefix + fields[key][0] + "为 " + selected + "。" for key, selected in options.items()]
+
+
+def reference_claims(chunk):
+    """A reference label establishes a candidate link, not its page contents."""
+    if field_kind(chunk) != "reference":
+        return []
+    text = chunk.get("text")
+    if not isinstance(text, str) or (chunk.get("text_sha256") and
+            hashlib.sha256(text.encode("utf-8")).hexdigest() != chunk["text_sha256"]):
+        return []
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(value, dict) or (chunk.get("structured_value") is not None and chunk["structured_value"] != value):
+        return []
+    url, tags = value.get("url"), value.get("tags", [])
+    if not isinstance(url, str) or not url.startswith("https://") or not isinstance(tags, list):
+        return []
+    claims = ["来源记录的参考链接：%s。" % url]
+    if "Exploit" in tags:
+        claims.extend(["NVD 标为 Exploit 的候选参考：%s。" % url, "NVD 标为 Exploit 的候选参考为 %s。" % url])
+    if "Patch" in tags:
+        claims.append("NVD 标为 Patch 的修复候选参考：%s。" % url)
+    return claims
+
+
 def _metric(chunk):
     text = chunk.get("text", "")
     if not isinstance(text, str):
@@ -255,6 +324,16 @@ def claim_issues(text, chunks):
     if "ssvc" in categories and not re.search(r"cvss|基础分|评分|向量|保密性|完整性|可用性", plain, re.I):
         categories.discard("cvss")
     kinds = [field_kind(chunk) for chunk in chunks]
+    if "ssvc" in kinds:
+        # Checking that the citation points at an SSVC row is insufficient:
+        # unconstrained prose can turn `none` into a false claim of safety.
+        if any(kind != "ssvc" for kind in kinds) or not all(plain.strip() in ssvc_claims(chunk) for chunk in chunks):
+            return ["SSVC 引用不支持此改写；只能逐条引用保留评估时间的原字段事实，不能推导不可利用、攻击路径或功能受损"]
+        return []
+    if "reference" in kinds:
+        if any(kind != "reference" for kind in kinds) or not all(plain.strip() in reference_claims(chunk) for chunk in chunks):
+            return ["参考字段不支持页面正文或可用代码结论；只能引用来源已标注的候选链接事实"]
+        return []
     issues = []
     for category in categories:
         if all(kind is not None and kind not in SUPPORT[category] for kind in kinds):

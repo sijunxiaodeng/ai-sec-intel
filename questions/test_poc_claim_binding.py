@@ -77,7 +77,8 @@ class PocClaimBindingTest(unittest.TestCase):
         source["evidence_chunks"][0]["locator"] = "references/0"
         answer = A + "：来源声称 PoC 已验证可用 [" + A + "/BODY]"
         self.assertFalse(run(answer, [source])["passed"])
-        self.assertTrue(run(A + "：NVD 将 PoC 候选参考标为 Exploit，本项目未运行。\n候选链接 [" + A + "/BODY]", [source])["passed"])
+        candidate = "NVD 标为 Exploit 的候选参考：https://example.org/candidate-a。 [" + A + "/BODY]\n本项目未运行。"
+        self.assertTrue(run(candidate, [source])["passed"])
 
     def test_unrelated_source_attribution_does_not_authorize_a_project_claim(self):
         source = record(A, text="PoC 已验证可用")

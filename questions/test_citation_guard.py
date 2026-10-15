@@ -63,9 +63,17 @@ class CitationGuardTest(unittest.TestCase):
         self.assertTrue(verify(answer, [self.record])["passed"])
 
     def test_reference_url_words_do_not_become_vulnerability_claims(self):
-        ref = dict(self.desc, locator="references/0")
+        ref = dict(self.desc, locator="references/0", text=json.dumps({
+            "url": "https://example.org/rce/digest/gguf", "tags": ["Exploit"]}))
         self.assertFalse(claim_issues("NVD 标为 Exploit 的候选参考：https://example.org/rce/digest/gguf。", [ref]))
         self.assertTrue(claim_issues("NVD 候选参考：https://example.org/rce。漏洞成因是 digest 校验缺失。", [ref]))
+
+    def test_exploit_reference_tag_does_not_prove_public_code_or_page_contents(self):
+        ref = dict(self.desc, locator="references/0", text=json.dumps({
+            "url": "https://example.org/exploit", "tags": ["Exploit"]}))
+        self.assertTrue(claim_issues("已有第三方公开利用示例。", [ref]))
+        self.assertTrue(claim_issues("NVD 标为 Exploit 的候选参考：https://example.org/other。", [ref]))
+        self.assertFalse(claim_issues("NVD 标为 Exploit 的候选参考：https://example.org/exploit。", [ref]))
 
     def test_free_text_not_claimed_as_fully_verified(self):
         text = dict(self.desc, locator="正文；字符 [0,200)")

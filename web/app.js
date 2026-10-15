@@ -1268,6 +1268,7 @@ function renderAssessment(panel, report) {
   });
   (report.attack_conditions || []).concat(report.technical_impact || []).forEach(function (row) { fact("评分向量解释 · " + row.label + "：" + row.text, row.evidence_ids); });
   (report.fix_records || []).forEach(function (row) { fact("修复记录：" + row.title + "；修复效果尚未由本项目测试。", row.evidence_ids); });
+  (report.patch_candidates || []).forEach(function (row) { fact("补丁来源候选：" + row.url + "；来源标注为 Patch，尚未验证内容、修复版本或修复效果。", row.evidence_ids); });
   (report.poc_candidates || []).forEach(function (row) { fact("利用代码候选：" + row.url + "；本项目未运行复现。", row.evidence_ids); });
   var taxonomy = report.risk_taxonomy;
   if (taxonomy && (taxonomy.items || []).length) {

@@ -14,14 +14,14 @@ from urllib.parse import urlsplit
 
 from config.llm import chat, configured, local_endpoint
 from config.settings import load_settings
+from rag.evidence import rank_bm25
 from rag.library import detail, search
 
 MAX_EVIDENCE = 16
 MAX_TEXT = 2400
-MAX_QUOTE = 240
-MAX_QUOTES_PER_EVIDENCE = 4
-MAX_LOCAL_QUOTE_OPTIONS = 12
-MAX_LOCAL_QUOTE_CHARACTERS = 1800
+MAX_QUOTE = 480
+MAX_LOCAL_QUOTE_OPTIONS = 16
+MAX_LOCAL_QUOTE_CHARACTERS = 3200
 MAX_CLAIMS = 3
 MODEL_OUTPUT_TOKENS = {"decompose": 640, "synthesize": 2400, "verify": 1200}
 
@@ -67,9 +67,22 @@ def _quote_options(evidence):
     punctuation, or remove negations. Choices alone do not establish semantic support.
     """
     result = {}
+    bounds = {}
+    for row in evidence.values():
+        match = re.fullmatch(r"(.+)；字符 \[(\d+),(\d+)\)，相对于存档提取正文，非原网页行号", row.get("locator", ""))
+        if match:
+            field, start, end = match.groups()
+            bounds[(row.get("document_id"), field, int(end))] = row["text"]
     for citation_id, row in evidence.items():
         text = row["text"][:MAX_TEXT]
         sentences = re.split(r"(?<=[.!?])\s+|(?<=[。！？])", text)
+        match = re.fullmatch(r"(.+)；字符 \[(\d+),(\d+)\)，相对于存档提取正文，非原网页行号", row.get("locator", ""))
+        if match and int(match[2]) > 0:
+            previous = bounds.get((row.get("document_id"), match[1], int(match[2])), "")
+            # A chunk boundary is not a sentence boundary. Without the preceding
+            # archived sentence ending, its first fragment cannot stand alone.
+            if not re.search(r"[.!?。！？][\"'”’)]*\s*$", previous):
+                sentences = sentences[1:]
         candidates = []
         for sentence in sentences:
             quote = sentence.strip()
@@ -80,19 +93,21 @@ def _quote_options(evidence):
                 continue
             if 12 <= len(quote) <= MAX_QUOTE and quote not in candidates:
                 candidates.append(quote)
-        # Include context from both ends when a passage contains many sentences.
-        if len(candidates) > MAX_QUOTES_PER_EVIDENCE:
-            candidates = candidates[:2] + candidates[-2:]
         for quote in candidates:
             identifier = "Q%d" % (len(result) + 1)
             result[identifier] = {"citation_id": citation_id, "quote": quote}
     return result
 
 
-def _bounded_quote_options(evidence, preferred_document_ids=()):
-    """Round-robin across sources before adding another quote from one source."""
+def _bounded_quote_options(evidence, preferred_document_ids=(), query=""):
+    """Rank intact sentences for the query, then share the budget across sources."""
     groups = {}
-    for option in _quote_options(evidence).values():
+    options = _quote_options(evidence)
+    ranked = rank_bm25(query, [dict(cve_id="", title="", topics=[], evidence_id=key,
+                                   text=option["quote"]) for key, option in options.items()])
+    order_by_relevance = list(dict.fromkeys([row["evidence_id"] for row in ranked] + list(options)))
+    for key in order_by_relevance:
+        option = options[key]
         doc_id = evidence[option["citation_id"]]["document_id"]
         groups.setdefault(doc_id, []).append(option)
     order = list(dict.fromkeys([key for key in preferred_document_ids if key in groups] + list(groups)))
@@ -124,7 +139,7 @@ def _compact_evidence_payload(evidence, documents, quote_options):
     def metadata(doc_id):
         doc = documents[doc_id]
         result = {"document_id": doc_id}
-        for key, maximum in (("title", 80), ("version", 60)):
+        for key, maximum in (("title", 240), ("version", 60)):
             value = doc.get(key, "")
             result[key] = value if isinstance(value, str) and len(value) <= maximum else ""
         return result
@@ -172,22 +187,33 @@ def _supports(value, evidence, minimum=1, quote_options=None):
     return result
 
 
-def _conflicts(value, evidence, quote_options=None):
+def _conflicts(value, evidence, quote_options=None, claim_ids=()):
     if not isinstance(value, list) or len(value) > 2:
         raise ReasoningError("invalid_conflicts")
     result = []
     for item in value:
-        item = _object(item, ("description", "supports"))
-        result.append({"description": _text(item["description"]),
+        item = _object(item, ("description", "supports", "relation", "affected_claim_ids"))
+        if item["relation"] not in ("difference", "contradiction"):
+            raise ReasoningError("invalid_difference_relation")
+        affected = item["affected_claim_ids"]
+        if (not isinstance(affected, list) or len(affected) > MAX_CLAIMS
+                or any(not isinstance(key, str) or key not in claim_ids for key in affected)
+                or len(set(affected)) != len(affected)):
+            raise ReasoningError("unknown_affected_claim")
+        if item["relation"] == "contradiction" and not affected:
+            raise ReasoningError("unbound_contradiction")
+        result.append({"description": _text(item["description"]), "relation": item["relation"],
+                       "affected_claim_ids": list(affected),
                        "supports": _supports(item["supports"], evidence, minimum=2, quote_options=quote_options)})
     return result
 
 
 def _deduplicate_conflicts(items):
-    """Deduplicate only already-validated identical descriptions and supports."""
+    """Deduplicate only identical text, evidence, relation, and claim targets."""
     result, seen = [], set()
     for item in items:
-        key = (item["description"], tuple(sorted((support["citation_id"], support["quote"])
+        key = (item["description"], item["relation"], tuple(sorted(item["affected_claim_ids"])),
+               tuple(sorted((support["citation_id"], support["quote"])
                                                for support in item["supports"])))
         if key not in seen:
             result.append(item)
@@ -213,7 +239,8 @@ def _synthesis(raw, evidence, quote_options=None):
             raise ReasoningError("cross_document_support_required")
         claims.append({"claim_id": "C%d" % index, "text": _text(item["text"]),
                        "kind": item["kind"], "supports": supports, "assumptions": assumptions})
-    return {"claims": claims, "conflicts": _conflicts(data["conflicts"], evidence, quote_options),
+    return {"claims": claims, "conflicts": _conflicts(data["conflicts"], evidence, quote_options,
+                                                     {item["claim_id"] for item in claims}),
             "missing_premises": _texts(data["missing_premises"])}
 
 
@@ -224,14 +251,44 @@ def _verification(raw, claims, evidence, quote_options=None):
         raise ReasoningError("incomplete_verification")
     decisions = {}
     for value in data["claims"]:
-        item = _object(value, ("claim_id", "verdict"))
+        item = _object(value, ("claim_id", "verdict", "scope_verdict", "counter_supports", "reason"))
         identifier = item["claim_id"]
         if not isinstance(identifier, str) or identifier not in expected or identifier in decisions:
             raise ReasoningError("unknown_verified_claim")
         if item["verdict"] not in ("supported", "contradicted", "insufficient"):
             raise ReasoningError("invalid_verdict")
-        decisions[identifier] = item["verdict"]
-    return decisions, _conflicts(data["conflicts"], evidence, quote_options), _texts(data["missing_premises"])
+        if item["scope_verdict"] not in ("preserved", "broadened", "unclear"):
+            raise ReasoningError("invalid_scope_verdict")
+        counter = _supports(item["counter_supports"], evidence, minimum=0, quote_options=quote_options)
+        if (item["verdict"] == "contradicted" or item["scope_verdict"] == "broadened") and not counter:
+            raise ReasoningError("unsubstantiated_counterevidence")
+        decisions[identifier] = {"verdict": item["verdict"], "scope_verdict": item["scope_verdict"],
+                                 "counter_supports": counter, "reason": _text(item["reason"], 300)}
+    return decisions, _conflicts(data["conflicts"], evidence, quote_options, expected), _texts(data["missing_premises"])
+
+
+def _select_claims(claims, decisions, differences):
+    """Apply claim-level vetoes; sharing a paragraph is not a contradiction."""
+    contradicted = {identifier for item in differences if item["relation"] == "contradiction"
+                    for identifier in item["affected_claim_ids"]}
+    accepted, rejected = [], []
+    for item in claims:
+        review = decisions[item["claim_id"]]
+        reasons = []
+        if review["verdict"] != "supported":
+            reasons.append("verifier_" + review["verdict"])
+        if review["scope_verdict"] != "preserved":
+            reasons.append("scope_" + review["scope_verdict"])
+        if review["counter_supports"]:
+            reasons.append("counterevidence_present")
+        if item["claim_id"] in contradicted:
+            reasons.append("linked_contradiction")
+        if reasons:
+            rejected.append({"claim_id": item["claim_id"], "text": item["text"],
+                             **review, "rejection_reasons": reasons})
+        else:
+            accepted.append(item)
+    return accepted, rejected
 
 
 def _local_schema_enabled():
@@ -279,9 +336,22 @@ def _response_format(stage, data):
             return {"type": "array", "minItems": count, "maxItems": count,
                     "items": support, "enum": choices}
 
-        conflicts = {"type": "array", "maxItems": 2 if pairs else 0, "items": obj({
-            "description": text(100), "supports": supports(pairs, 2) if pairs else {
-                "type": "array", "minItems": 2, "maxItems": 2, "items": support}})}
+        claim_ids = (["C%d" % index for index in range(1, MAX_CLAIMS + 1)] if stage == "synthesize"
+                     else [claim["claim_id"] for claim in data["draft"]["claims"]])
+        identifier = {"type": "string"}
+        if claim_ids:
+            identifier["enum"] = claim_ids
+        difference_kinds = []
+        for relation in ("difference", "contradiction"):
+            if relation == "contradiction" and not claim_ids:
+                continue
+            difference_kinds.append(obj({
+                "description": text(100), "relation": {"type": "string", "enum": [relation]},
+                "affected_claim_ids": {"type": "array", "minItems": int(relation == "contradiction"),
+                                       "maxItems": len(claim_ids), "uniqueItems": True, "items": identifier},
+                "supports": supports(pairs, 2) if pairs else {
+                    "type": "array", "minItems": 2, "maxItems": 2, "items": support}}))
+        conflicts = {"type": "array", "maxItems": 2 if pairs else 0, "items": {"anyOf": difference_kinds}}
         if stage == "synthesize":
             kinds = []
             for kind in ("finding", "inference", "conditional"):
@@ -293,14 +363,14 @@ def _response_format(stage, data):
                     "assumptions": texts(3, minimum=1, length=120) if kind == "conditional" else texts(0)}))
             claims = {"type": "array", "maxItems": MAX_CLAIMS, "items": {"anyOf": kinds}}
         elif stage == "verify":
-            claim_ids = [claim["claim_id"] for claim in data["draft"]["claims"]]
-            identifier = {"type": "string"}
-            if claim_ids:
-                identifier["enum"] = claim_ids
             # Empty drafts require an empty list, avoiding an invalid empty enum.
             claims = {"type": "array", "minItems": len(claim_ids), "maxItems": len(claim_ids),
                       "items": obj({"claim_id": identifier, "verdict": {
-                          "type": "string", "enum": ["supported", "contradicted", "insufficient"]}})}
+                          "type": "string", "enum": ["supported", "contradicted", "insufficient"]},
+                          "scope_verdict": {"type": "string", "enum": ["preserved", "broadened", "unclear"]},
+                          "counter_supports": {"type": "array", "minItems": 0, "maxItems": 2,
+                                               "items": support, "enum": [[], *singletons, *pairs]},
+                          "reason": text(80)})}
         else:
             raise ValueError("Unknown reasoning stage")
         schema = obj({"claims": claims, "conflicts": conflicts, "missing_premises": texts(2)})
@@ -471,7 +541,8 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
         if not evidence:
             return finish_fallback("empty_evidence")
         plan = _object(model("decompose", "将问题分解为 1 至 2 个短检索词组，每项最多60个字符（不是60个英文单词）。"
-                             "英文用3至6个关键词，中文用短词组，不输出未写完的长句。可使用初始证据中的实体继续追索，"
+                             "检索词使用资料正文的主要语言：英文资料用3至6个英文关键词，中文资料用短词组，保留原实体。"
+                             "不输出未写完的长句。可使用初始证据中的实体继续追索，"
                              "不得猜测实体、产品版本或用户部署条件。指出名称歧义和必须补充的前提。"
                              "不得新增问题和证据均未涉及的概念、比较对象或歧义；只有给定资料确实存在指代歧义时才填写 ambiguities，"
                              "不能把普通概念定义或自己联想到的其他安全主题当成歧义，没有依据就用空数组。"
@@ -492,9 +563,9 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
             missing.append("部分指定资料未检索到相关证据，不能据此完成全部指定资料的比较。")
             plan["missing_premises"] = missing
             trace.append({"stage": "document_coverage", "missing_document_ids": sorted(uncovered)})
-        quote_options = _bounded_quote_options(evidence, document_ids) if _local_schema_enabled() else None
+        quote_options = _bounded_quote_options(evidence, document_ids, " ".join([question, *queries])) if _local_schema_enabled() else None
         evidence_payload = {"evidence": payload()}
-        support_instruction = "supports 每项严格为 citation_id、quote；quote 为 text 中12至240字符的连续原文。"
+        support_instruction = "supports 每项严格为 citation_id、quote；quote 为 text 中12至480字符的连续原文。"
         if quote_options is not None:
             if not quote_options:
                 return finish_fallback("no_quote_choices")
@@ -518,14 +589,16 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
             )
         draft = _synthesis(model("synthesize",
             "根据问题和证据生成可逐条核验的简短结论，禁止把资料提及当成事实证明。"
-            "引用只能使用给定证据中的短连续原文（12 至 240 字符），不要抄整段。"
+            "引用只能使用给定证据中的连续原文（12 至 480 字符），保留完整句子的限定条件，不要抄整段。"
             "完整 JSON 字段：claims（1至3项，证据不足可空）、conflicts（最多2项）、missing_premises（最多2项）。"
             "每条结论 text 最多120字，聚焦问题；每条最多2个 supports；missing_premises 每项最多60字。"
             "每条 claim 字段严格为 text、kind、supports、assumptions；kind 是 finding/inference/conditional。"
             "finding 为原文事实，inference 至少有两份不同资料的证据构成明确逻辑关系，不是同文多片段或并列摘录；"
             "conditional 的 assumptions 必须列明尚未证实的条件，其余 kind 的 assumptions 必须为空。"
             "目录仅证明目录，摘要和接口字段不能冒充全文。"
-            "相互冲突的事实不得择一作确定结论；conflicts 每项严格为 description、supports（至少两条不同证据）。"
+            "结论按数组顺序编号为C1、C2、C3。conflicts 每项严格为 description、supports（至少两条不同证据）、"
+            "relation、affected_claim_ids；relation 为 difference（普通差异）或 contradiction（直接反驳某结论）。"
+            "affected_claim_ids 只能列本轮实际存在的结论编号；普通差异可为空，contradiction 必须明确反驳至少一条结论。"
             "仅同一对象、版本及适用条件下不能同时成立的断言才可能冲突；侧重点、研究方法、防御层面或场景不同不是矛盾。"
             "不得把分解阶段未经原文证明的猜测当成来源分歧；无法核对时列为缺证，不生成冲突。"
             "条件、实体、版本或法规适用前提不明时列出 missing_premises，不作无条件适用判断。"
@@ -538,11 +611,20 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
             "还要比较全部 evidence 是否存在被结论忽略的矛盾。"
             "只考虑同一对象、版本及适用条件下不兼容的原文断言；侧重点不同不等于矛盾。"
             "逐项检查草稿所说差异是否由原文支持，不得把计划中的未证实歧义升级为确定来源冲突。"
-            "已有结论只返回 claim_id 和 verdict，不重复其 text 或 supports。新增 conflicts 最多2项，"
-            "description 最多100字，引用每项12至240字符且保留限定词；missing_premises 最多2项，每项最多60字。"
-            "严格 JSON 字段：claims（每个输入 claim_id 恰好一次，每项仅 claim_id、verdict），"
-            "verdict 为 supported/contradicted/insufficient；conflicts（每项 description、supports，"
-            "supports 至少两项不同证据）；missing_premises（字符串数组）。"
+            "逐条先核对原文范围：单个对象不能扩展成多个对象，局部/特定条件不能扩展为普遍事实，"
+            "否定不能变肯定；conditional 必须在结论本身明确限定其适用前提，不能借 assumptions 字段偷渡确定断言。"
+            "每条返回 claim_id、verdict、scope_verdict、counter_supports、reason，不重复其 text 或支持性引文。"
+            "scope_verdict 为 preserved（范围及条件保持）、broadened（扩大范围）或 unclear（无法核对）。"
+            "counter_supports 是反证或被遗漏的限定原文，结构与 supports 一致，0至2条；没有反证才用空数组。"
+            "contradicted 或 broadened 必须给至少一条真实反证；reason 用80字符内说明具体范围/前提检查结果。"
+            "真正影响某条结论的缺口必须使该条 verdict=insufficient 或 scope_verdict=unclear，"
+            "不可只写全局 missing_premises 却把该条标为 supported。新增 conflicts 最多2项，"
+            "description 最多100字，引用每项12至480字符且保留限定词；missing_premises 最多2项，每项最多60字。"
+            "严格 JSON 字段：claims（每个输入 claim_id 恰好一次，每项严格为 claim_id、verdict、scope_verdict、counter_supports、reason），"
+            "verdict 为 supported/contradicted/insufficient；conflicts 每项严格为 description、supports、relation、affected_claim_ids。"
+            "relation 为 difference 或 contradiction；不同研究侧重只能是 difference，不因此否决结论。"
+            "contradiction 必须有两条不同证据，并在 affected_claim_ids 列出实际被反驳的 claim_id；"
+            "不能因为引用同一段落就关联所有结论。普通差异的 affected_claim_ids 可为空。missing_premises 是字符串数组。"
             "目录/摘要不能支持全文结论，缺前提用 insufficient。不要生成替代答案。" + support_instruction,
             {"question": question, "plan": plan,
              "draft": _compact_draft(draft, quote_options) if quote_options is not None else draft,
@@ -550,12 +632,7 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
             draft["claims"], evidence, quote_options)
         conflicts = _deduplicate_conflicts(draft["conflicts"] + extra_conflicts)
         missing = list(dict.fromkeys(missing + draft["missing_premises"] + extra_missing))
-        conflict_ids = {support["citation_id"] for item in conflicts for support in item["supports"]}
-        accepted = [item for item in draft["claims"] if decisions[item["claim_id"]] == "supported"
-                    and not ({s["citation_id"] for s in item["supports"]} & conflict_ids)
-                    and not (item["kind"] == "inference" and (ambiguities or missing))]
-        rejected = [{"claim_id": item["claim_id"], "verdict": decisions[item["claim_id"]]}
-                    for item in draft["claims"] if item not in accepted]
+        accepted, rejected = _select_claims(draft["claims"], decisions, conflicts)
         trace[-1].update(accepted=len(accepted), rejected=rejected, conflicts=len(conflicts))
         if not accepted and not conflicts and not missing and not ambiguities:
             return finish_fallback("no_supported_claims")
@@ -575,7 +652,7 @@ def run(question, *, document_ids, document_type, db_path, fallback_fn):
                 "[%s]" % support["citation_id"] for support in item["supports"]))
             used_ids.update(support["citation_id"] for support in item["supports"])
         if rejected:
-            lines.append("另有 %d 条候选结论未通过证据核验，已省略。" % len(rejected))
+            lines.append("另有 %d 条候选结论因支持、适用范围或关联反证未通过本轮核对，已省略。" % len(rejected))
         scopes = {evidence[key]["content_scope"] for key in used_ids}
         if scopes & {"team_summary", "abstract", "catalog_only"}:
             lines.append("部分依据仅为接口字段、摘要或目录，不能代替原始全文。")

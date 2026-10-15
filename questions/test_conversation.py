@@ -54,11 +54,17 @@ class ConversationTest(unittest.TestCase):
         self.assertEqual(result["evidence"], [])
         self.assertIn("无法确定", result["answer"])
 
-    def test_unknown_answer_clears_context_instead_of_returning_to_old_cve(self):
+    def test_unknown_entity_remains_resolved_without_returning_to_old_cve(self):
         first = self.store.run(A, "", "", self.answer)
         unknown = self.store.run("CVE-2099-99999", "", first["session_id"], lambda *a, **k: SessionStore._empty("没有情报"))
-        following = self.store.run("那怎么修复？", "", unknown["session_id"], self.answer)
-        self.assertIn("无法确定", following["answer"])
+        def missing(question, *, cve_ids):
+            self.assertEqual(cve_ids, ["CVE-2099-99999"])
+            return SessionStore._empty("当前知识库缺少该编号资料")
+        following = self.store.run("那怎么修复？", "", unknown["session_id"], missing)
+        self.assertEqual(following["context"]["cve_ids"], ["CVE-2099-99999"])
+        self.assertIn("缺少", following["answer"])
+        self.assertNotIn("无法确定", following["answer"])
+        self.assertNotIn(A, following["answer"])
 
     def test_product_question_does_not_inherit_previous_cve(self):
         self.assertEqual(resolve("vllm 的风险", previous=[A])[0], [])
