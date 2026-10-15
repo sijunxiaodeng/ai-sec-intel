@@ -3,6 +3,7 @@ var riskOffset = 0;
 var riskPageSize = 30;
 var riskRequest = 0;
 var riskEditing = false;
+var lastInvestigationRender = "";
 var taskLabels = {pending: "排队中", running: "研判中", retry: "等待重试", done: "已完成", failed: "失败待处理", skipped: "输入已变化，旧任务跳过"};
 var dispositionLabels = {pending: "待处理", in_progress: "处理中", pending_review: "待复核", resolved: "已解决", accepted_risk: "接受风险"};
 var gapLabels = {evidence_archive: "来源正文", cvss: "评分", affected_versions: "受影响版本", deployment_conditions: "部署条件", source_conflict: "来源冲突", exploit_probability: "EPSS", known_exploitation: "已知利用状态", research_evidence: "关联研究"};
@@ -19,7 +20,7 @@ function renderRiskEvidence(target, row) {
     add(detail, "p", "desc", check.range + "；" + check.reason);
   });
   (row.evidence || []).forEach(function (evidence) {
-    add(detail, "p", "meta", (evidence.citation_id || "") + " · " + (evidence.retrieved_at || ""));
+    add(detail, "p", "meta", (evidence.citation_id || "") + " · " + formatStamp(evidence.retrieved_at));
     add(detail, "p", "desc", evidence.text || evidence.locator || "");
     var url = evidence.url || "";
     if (/^https:\/\//i.test(url)) {
@@ -48,7 +49,7 @@ function renderRisks(data) {
     var card = add(target, "article", "asset-card");
     add(card, "h3", "", (row.asset.name || row.asset_id) + " · " + row.cve_id);
     add(card, "p", "desc", row.label + " · " + row.priority + " · " + row.disposition_label);
-    add(card, "p", "meta", row.asset.product + " " + (row.asset.version || "版本未知") + " · 更新于 " + row.updated_at);
+    add(card, "p", "meta", row.asset.product + " " + (row.asset.version || "版本未知") + " · 更新于 " + formatStamp(row.updated_at));
     add(card, "p", "desc", row.reason);
     renderRiskEvidence(card, row);
     var form = add(card, "form", "live-actions");
@@ -79,14 +80,21 @@ function renderRisks(data) {
 }
 
 function renderInvestigations(data) {
-  var target = $("investigation-list"); clear(target);
+  var target = $("investigation-list");
+  var signature = JSON.stringify(data);
+  if (signature === lastInvestigationRender) return;
+  var opened = new Set(Array.from(target.children).filter(function (card) { return card.open; }).map(function (card) { return card._jobId; }));
+  clear(target);
+  lastInvestigationRender = signature;
   $("investigation-worker").textContent = data.worker_enabled ? "后台自动处理；本页每 10 秒更新一次。显示最近 50 项任务。" : "后台处理已关闭，排队任务不会执行。请在部署配置中启用自动处理。";
   if (!data.items.length) add(target, "p", "empty", "暂无研判任务。资产相关情报会自动创建任务，也可输入已收录的 CVE 主动研究。");
   data.items.forEach(function (job) {
     var card = add(target, "details", "asset-card"), trace = job.trace || {};
+    card._jobId = String(job.id); card.open = opened.has(card._jobId);
     add(card, "summary", "", job.cve_id + " · " + (taskLabels[job.status] || job.status) + " · 尝试 " + job.attempts + " 次");
     add(card, "p", "hint", "触发：" + ({assets_changed: "资产清单变化", intelligence_updated: "情报新增或变化", user_research: "主动研究", manual_reassessment: "重新评估"}[job.context.reason] || job.context.reason || "后台核对"));
     if (trace.stop_reason) add(card, "p", "desc", "停止原因：" + (stopLabels[trace.stop_reason] || trace.stop_reason));
+    if (trace.evidence_notice) add(card, "p", "hint", trace.evidence_notice);
     var gaps = trace.remaining_gaps || [];
     if (gaps.length) add(card, "p", "hint", "仍需确认：" + gaps.map(function (gap) { return gapLabels[gap] || gap; }).join("、"));
     (trace.decisions || []).forEach(function (decision) {
@@ -131,7 +139,7 @@ on("risk-reassess", "click", function () {
 on("investigation-form", "submit", function (event) {
   event.preventDefault(); var button = $("investigation-submit"); button.disabled = true;
   api("/api/investigations/" + encodeURIComponent($("investigation-cve").value.trim().toUpperCase()), {method: "POST"})
-    .then(function (data) { showToast(data.queued ? "研判任务已创建" : "已有相同任务或此记录为演示数据", "ok"); return loadRisks(); })
+    .then(function (data) { showToast(data.queued ? "主动调查已排队，将使用当前证据并按缺口补充；未完成富集不代表证据完整。" : "已有相同任务或此记录为演示数据", "ok"); return loadRisks(); })
     .catch(showError).finally(function () { button.disabled = false; });
 });
 setInterval(function () { if ($("risks") && !$("risks").hidden) loadRisks().catch(showError); }, 10000);

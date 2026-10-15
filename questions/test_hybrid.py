@@ -75,7 +75,8 @@ class HybridTest(unittest.TestCase):
         config_path(self.db).write_text(json.dumps({"enabled": True, "model": MODEL_NAME, "cache_dir": "unused"}))
 
         class ConcurrentModel:
-            def passage_embed(model, texts):
+            def passage_embed(model, texts, *, batch_size):
+                self.assertEqual(batch_size, 32)
                 # Simulate a document sync committing during the slow model call.
                 with _connection(self.db) as conn:
                     rowid, payload = conn.execute("SELECT rowid,payload FROM evidence LIMIT 1").fetchone()

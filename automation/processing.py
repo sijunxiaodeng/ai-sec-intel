@@ -14,6 +14,8 @@ from agents.tool_registry import (ToolRegistry, validate_records, validate_mappi
 
 _STOP = threading.Event()
 _THREAD = None
+_INTERACTIVE_THREAD = None
+_START_LOCK = threading.Lock()
 _RUN_LOCK = threading.Lock()
 STAGES = ("enrich", "documents", "investigate", "index")
 
@@ -108,7 +110,9 @@ def enqueue(records):
     return inserted
 
 
-def _claim(stage, limit=10, lease_seconds=900):
+def _claim(stage, limit=10, lease_seconds=900, *, explicit_only=None):
+    if explicit_only is not None and type(explicit_only) is not bool:
+        raise ValueError("explicit_only must be boolean or None")
     now, token = time.time(), uuid.uuid4().hex
     with _connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -116,15 +120,25 @@ def _claim(stage, limit=10, lease_seconds=900):
             WHERE status='running' AND lease_until < ?""", (now,))
         rows = conn.execute("""SELECT * FROM processing_jobs WHERE stage=?
             AND status IN ('pending','retry','deferred') AND available_at <= ?
+            AND (? IS NULL OR stage != 'investigate' OR
+                 COALESCE(json_extract(context_json,'$.explicit'),0)=?)
             AND (stage != 'investigate' OR NOT EXISTS (
                 SELECT 1 FROM processing_jobs prerequisite
                 WHERE prerequisite.cve_id=processing_jobs.cve_id
                   AND prerequisite.revision=processing_jobs.revision
                   AND prerequisite.stage IN ('enrich','documents')
                   AND (prerequisite.status='running' OR
-                       (prerequisite.status='pending' AND prerequisite.attempts=0))))
+                       (prerequisite.status='pending' AND prerequisite.attempts=0
+                        AND COALESCE(json_extract(processing_jobs.context_json,'$.explicit'),0)!=1))))
+            AND (stage NOT IN ('enrich','documents') OR NOT EXISTS (
+                SELECT 1 FROM processing_jobs research
+                WHERE research.cve_id=processing_jobs.cve_id
+                  AND research.revision=processing_jobs.revision AND research.stage='investigate'
+                  AND (research.status='running' OR
+                       (research.status IN ('pending','retry','deferred') AND research.available_at<=?
+                        AND COALESCE(json_extract(research.context_json,'$.explicit'),0)=1))))
             ORDER BY id LIMIT ?""",
-                            (stage, now, limit)).fetchall()
+                            (stage, now, explicit_only, explicit_only, now, limit)).fetchall()
         for row in rows:
             conn.execute("""UPDATE processing_jobs SET status='running',attempts=attempts+1,
                 lease_token=?,lease_until=?,updated_at=? WHERE id=?""",
@@ -265,7 +279,7 @@ def run_batch(batch_size=10):
             except Exception as exc:
                 _finish(job, type(exc).__name__)
         from automation.investigation_queue import run_pending
-        processed += run_pending(limit=min(batch_size, 2))
+        processed += run_pending(limit=min(batch_size, 2), explicit_only=False)
         index_jobs = [job for job in _claim("index", batch_size) if _current(job)]
         if index_jobs:
             try:
@@ -317,15 +331,36 @@ def _loop():
         _STOP.wait(10)
 
 
+def _interactive_loop():
+    """Explicit research shares durable leases, but not the historical fetch backlog.
+
+    One request runs at a time. Its own Agent fetches missing evidence; source
+    revision and lease fences still apply. Stop prevents another claim after the
+    current bounded provider call finishes; it does not forcibly cancel HTTP.
+    """
+    from automation.investigation_queue import run_pending
+    while not _STOP.is_set():
+        try:
+            run_pending(limit=1, explicit_only=True)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Explicit investigation worker failed")
+        _STOP.wait(2)
+
+
 def start():
-    global _THREAD
-    if _THREAD and _THREAD.is_alive():
-        return
+    global _THREAD, _INTERACTIVE_THREAD
     if os.environ.get("AUTO_INGEST_ON_COLLECT", "1").lower() in {"0", "false", "no", "off"}:
         return
-    _STOP.clear()
-    _THREAD = threading.Thread(target=_loop, name="processing-worker", daemon=True)
-    _THREAD.start()
+    with _START_LOCK:
+        _STOP.clear()
+        if not _THREAD or not _THREAD.is_alive():
+            _THREAD = threading.Thread(target=_loop, name="processing-worker", daemon=True)
+            _THREAD.start()
+        if not _INTERACTIVE_THREAD or not _INTERACTIVE_THREAD.is_alive():
+            _INTERACTIVE_THREAD = threading.Thread(target=_interactive_loop,
+                                                   name="explicit-investigation-worker", daemon=True)
+            _INTERACTIVE_THREAD.start()
 
 
 def stop():

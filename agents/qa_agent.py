@@ -82,9 +82,15 @@ def _assessment_lines(record, question):
             lines.append(warning)
         known = {chunk["citation_id"] for chunk in record.get("evidence_chunks") or []}
         for chunk in report["evidence"]:
-            if chunk["citation_id"] in ids and chunk["citation_id"] not in known:
-                record.setdefault("evidence_chunks", []).append(chunk)
-                known.add(chunk["citation_id"])
+            if chunk["citation_id"] in ids:
+                if chunk["citation_id"] not in known:
+                    record.setdefault("evidence_chunks", []).append(chunk)
+                    known.add(chunk["citation_id"])
+                elif chunk.get("locator", "").startswith("metrics/cvssMetric"):
+                    # Use the archive-checked projection even when retrieval
+                    # already selected the same fragment without that context.
+                    record["evidence_chunks"] = [chunk if row["citation_id"] == chunk["citation_id"] else row
+                                                 for row in record["evidence_chunks"]]
     return lines + _poc_code_lines(record, question) + _guidance_lines(record, question)
 
 

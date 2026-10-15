@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
+  <meta name="app-version" content="__WEB_VERSION__" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 安全知识情报</title>
   <link rel="stylesheet" href="/assets/styles.css?v=20261013-monitor-refresh2" />
@@ -63,6 +64,7 @@
         <div id="llm-pill" class="pill">正在读取配置</div>
       </header>
       <div id="banner" class="banner" hidden></div>
+      <div id="update-notice" class="hint" role="status" hidden>页面有新版本。请先保存正在编辑的内容，再<button type="button" id="reload-page" class="ghost">刷新页面</button>。</div>
       <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
 
       <section id="overview" class="view">
@@ -480,8 +482,8 @@
 
       <section id="settings" class="view" hidden>
         <form id="settings-form" class="panel settings">
-          <h2>国产大模型接口</h2>
-          <p class="hint" id="settings-mode-hint">真实密钥仅保存在当前环境，不会上传。</p>
+          <h2>模型与自动研判设置</h2>
+          <p class="hint" id="settings-mode-hint">密钥保存在本机，仅用于请求所配置的模型服务。模型调用会发送问题和相关证据；本地 Ollama 可填写 http://127.0.0.1:11434/v1。</p>
           <label>API 地址
             <input id="base-url" placeholder="https://api.deepseek.com/v1" />
           </label>
@@ -492,6 +494,18 @@
             <input id="api-key" type="password" placeholder="留空表示不修改已保存的密钥" autocomplete="off" />
           </label>
           <p id="key-hint" class="hint"></p>
+          <label>模型思考模式<select id="model-reasoning-effort"><option value="">服务默认</option><option value="none">关闭思考输出</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label>
+          <p class="hint">仅在所用模型接口支持 reasoning_effort 时选择。仅思考型模型可能无法关闭思考且耗尽输出额度；本地推荐使用明确标记为 instruct 的模型，并保留服务默认。</p>
+          <label><input id="model-review-enabled" type="checkbox" />自动复核疑难情报及资料</label>
+          <p class="hint">复核使用上面的模型，消耗模型调用额度。默认关闭；启用后按批次和每日上限处理待复核队列。</p>
+          <label>每批最多调用次数<input id="model-review-max-calls" type="number" min="0" max="10" value="2" /></label>
+          <label>每 UTC 日最多调用次数（北京时间 08:00 重置）<input id="model-review-daily-max-calls" type="number" min="0" max="1000" value="20" /></label>
+          <label>复核间隔秒数<input id="model-review-interval" type="number" min="30" max="3600" value="60" /></label>
+          <label>单次复核超时秒数<input id="model-review-timeout" type="number" min="5" max="300" value="90" /></label>
+          <label>跨资料推理时间预算秒数<input id="reasoning-budget" type="number" min="5" max="180" value="30" /></label>
+          <p id="model-review-status" class="hint" role="status"></p>
+          <button type="button" id="check-retrieval" class="ghost">检查语义索引</button>
+          <p id="retrieval-status" class="hint" role="status"></p>
           <div class="ask-row">
             <button type="submit" class="primary">保存</button>
             <button type="button" id="test-llm" class="ghost">测试连接</button>
@@ -503,5 +517,6 @@
   </div>
   <script src="/assets/app.js?v=20261014-source-status"></script>
   <script src="/assets/risks.js?v=20261014-investigations"></script>
+  <script src="/assets/live.js"></script>
 </body>
 </html>

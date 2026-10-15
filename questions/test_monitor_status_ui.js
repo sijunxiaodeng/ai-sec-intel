@@ -36,7 +36,7 @@ function loadBetween(start, end) {
 loadBetween('function dateText(value)', 'function epssText(');
 loadBetween('function formatStamp(value)', 'function stageStatusLabel(');
 loadBetween('function renderMonitorLive(data, opts)', 'function loadMonitorStatus(');
-loadBetween('function loadMonitorStatus()', 'function loadOverview(');
+loadBetween('function loadMonitorStatus(', 'function loadOverview(');
 const collection = {
   status: 'partial', finished_at: '2026-10-13T20:30:00Z', counts_complete: false,
   raw_inserted: 38, raw_updated: 4, raw_fetched: 83,

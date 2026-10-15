@@ -2,7 +2,7 @@ import os
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictBool, StrictStr
 from agents.conversation import sessions, SessionError
@@ -18,6 +18,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web")
 
 app = FastAPI(title="AI 安全知识情报")
+
+from api.ui_version import web_version, versioned_html
+WEB_VERSION = web_version(WEB)
+
+
+@app.middleware("http")
+async def fresh_ui_responses(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
+@app.get("/api/version")
+def client_version():
+    return {"web_version": WEB_VERSION, "display_timezone": "Asia/Shanghai"}
 
 
 @app.get("/api/admin/actions-consumption", tags=["actions-sync"])
@@ -42,12 +61,16 @@ def _startup():
     except Exception as exc:
         print("Actions sync on start skipped: %s" % exc, flush=True)
     start_schedule()
+    from automation.model_review import start as start_model_review
+    start_model_review()
 
 
 @app.on_event("shutdown")
 def _shutdown():
     from automation.schedule import stop
     stop()
+    from automation.model_review import stop as stop_model_review
+    stop_model_review()
 
 
 class CollectBody(BaseModel):
@@ -76,6 +99,13 @@ class SettingsBody(BaseModel):
     base_url: str = ""
     model: str = ""
     api_key: str = ""
+    model_reasoning_effort: Literal["", "none", "low", "medium", "high"] = ""
+    model_review_enabled: bool = False
+    model_review_max_calls: int = Field(2, ge=0, le=10)
+    model_review_daily_max_calls: int = Field(20, ge=0, le=1000)
+    model_review_interval_seconds: int = Field(60, ge=30, le=3600)
+    model_review_timeout_seconds: int = Field(90, ge=5, le=300)
+    reasoning_budget_seconds: int = Field(30, ge=5, le=180)
 
 
 class LibrarySyncBody(BaseModel):
@@ -1926,14 +1956,28 @@ def get_settings():
 
 @app.put("/api/settings")
 def put_settings(body: SettingsBody):
-    save_settings(body.model_dump())
+    save_settings(body.model_dump(exclude_unset=True))
     return public_settings()
+
+
+@app.get("/api/model-review/status")
+def model_review_status():
+    from automation.model_review import state
+    return state()
+
+
+@app.get("/api/retrieval/status")
+def retrieval_status():
+    from config.paths import DATA_ROOT
+    from rag.semantic import status
+    return {"results": [status(DATA_ROOT / "task_c.sqlite3"), status(DATA_ROOT / "library.sqlite3")],
+            "notice": "只读检查当前证据与向量是否一致；不下载模型，不调用问答模型。"}
 
 
 @app.post("/api/settings/test")
 def test_settings():
     if not configured():
-        raise HTTPException(status_code=400, detail="请先保存 API 地址、模型名和密钥")
+        raise HTTPException(status_code=400, detail="请先保存完整模型配置；公网 HTTPS 接口需要密钥，本机回环接口可不填密钥")
     try:
         text = chat([
             {"role": "user", "content": "只回复：连接成功"},
@@ -1945,7 +1989,7 @@ def test_settings():
 
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(WEB, "index.html"))
+    return HTMLResponse(versioned_html(WEB, WEB_VERSION))
 
 
 # Secure Actions → deploy ingest (must NOT live under /api/intelligence — that is B).

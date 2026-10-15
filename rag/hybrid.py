@@ -4,15 +4,32 @@ from functools import lru_cache
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import tempfile
 
 from rag.evidence import DEFAULT_DB, _connection, candidates, rank_bm25
 
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+EMBEDDING_BATCH_SIZE = 32
 
 
 def config_path(db_path):
     return Path(db_path).with_suffix(".retrieval.json")
+
+
+def _save_config(path, value):
+    """Readers see the old complete configuration or the new complete one."""
+    descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 @lru_cache(maxsize=2)
@@ -69,17 +86,26 @@ def _commit_embeddings(db_path, rows, changed, vectors, *, replace=False):
             for row, vector in zip(changed, vectors)])
 
 
-def build_index(db_path=DEFAULT_DB, model_dir=None):
+def build_index(db_path=DEFAULT_DB, model_dir=None, *, progress=None):
     rows = candidates("", db_path=db_path)
     if not rows:
         raise ValueError("证据库为空，请先采集或导入已授权的真实证据")
     cache_dir = str(Path(db_path).parent / "models")
     model = _model(cache_dir, bool(model_dir), str(model_dir) if model_dir else None)
-    vectors = [_normal(vector) for vector in model.passage_embed([row["text"] for row in rows])]
+    vectors = []
+    if progress:
+        progress({"stage": "embedding", "completed": 0, "total": len(rows)})
+    for vector in model.passage_embed([row["text"] for row in rows], batch_size=EMBEDDING_BATCH_SIZE):
+        vectors.append(_normal(vector))
+        if progress and (len(vectors) % 256 == 0 or len(vectors) == len(rows)):
+            progress({"stage": "embedding", "completed": len(vectors), "total": len(rows)})
     if len(vectors) != len(rows):
         raise ValueError("嵌入数量与证据数量不一致")
+    if progress:
+        progress({"stage": "publishing", "completed": len(vectors), "total": len(rows)})
     _commit_embeddings(db_path, rows, rows, vectors, replace=True)
-    config_path(db_path).write_text(json.dumps({"model": MODEL_NAME, "cache_dir": cache_dir, "model_dir": str(Path(model_dir).resolve()) if model_dir else None, "enabled": True}, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_config(config_path(db_path), {"model": MODEL_NAME, "cache_dir": cache_dir,
+                 "model_dir": str(Path(model_dir).resolve()) if model_dir else None, "enabled": True})
     return {"model": MODEL_NAME, "chunks": len(rows), "dimension": len(vectors[0])}
 
 
@@ -129,7 +155,8 @@ def update_index(db_path=DEFAULT_DB):
         vectors = []
         if changed:
             model = _model(config["cache_dir"], True, config.get("model_dir"))
-            vectors = [_normal(v) for v in model.passage_embed([row["text"] for row in changed])]
+            vectors = [_normal(v) for v in model.passage_embed(
+                [row["text"] for row in changed], batch_size=EMBEDDING_BATCH_SIZE)]
             if len(vectors) != len(changed):
                 raise ValueError("嵌入数量不一致")
         _commit_embeddings(db_path, rows, changed, vectors)

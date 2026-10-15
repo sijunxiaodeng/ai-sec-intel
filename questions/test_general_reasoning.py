@@ -17,6 +17,9 @@ class GeneralReasoningTest(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
+        settings = patch("agents.general_reasoning.load_settings", return_value={"reasoning_budget_seconds": 30})
+        settings.start()
+        self.addCleanup(settings.stop)
         self.db = Path(temp.name) / "library.sqlite3"
         self.ids, self.rows = [], []
         # Zephyr and Orion are deliberately synthetic, absent from the fixed
@@ -50,7 +53,7 @@ class GeneralReasoningTest(unittest.TestCase):
 
     def model(self, messages, **kwargs):
         self.assertGreater(kwargs["timeout"], 0)
-        self.assertLessEqual(kwargs["timeout"], 5)
+        self.assertLessEqual(kwargs["timeout"], 30)
         payload = json.loads(messages[-1]["content"])
         if "initial_evidence" in payload:
             return json.dumps(self.plan)
@@ -74,6 +77,20 @@ class GeneralReasoningTest(unittest.TestCase):
         self.assertEqual([item["query"] for item in searches], [self.question] + self.plan["subquestions"])
         self.assertEqual(result["reasoning_claims"][0]["supports"], self.supports)
         self.assertFalse(result["verdict"]["semantic_accuracy_measured"])
+
+    def test_reasoning_deadline_uses_deployment_budget(self):
+        captured = []
+        original = self.model
+        def respond(messages, **kwargs):
+            captured.append(kwargs["timeout"])
+            # The fixture schema is identical; only the outer deadline changes.
+            return original(messages, **dict(kwargs, timeout=min(kwargs["timeout"], 30)))
+        self.model = respond
+        with patch("agents.general_reasoning.load_settings", return_value={"reasoning_budget_seconds": 60}):
+            result = self.ask()
+        self.assertTrue(result["used_model"])
+        self.assertEqual(len(captured), 3)
+        self.assertTrue(all(30 < timeout <= 60 for timeout in captured), captured)
 
     def test_followup_retrieval_can_find_evidence_absent_from_initial_results(self):
         def staged_search(query, *args, **kwargs):
@@ -116,7 +133,7 @@ class GeneralReasoningTest(unittest.TestCase):
         result = self.ask()
         self.assertEqual(result["reasoning_status"], "partial")
         self.assertEqual(result["reasoning_claims"], [])
-        self.assertIn("来源冲突", result["answer"])
+        self.assertIn("模型提示的待核对差异", result["answer"])
         self.assertNotIn(self.draft["claims"][0]["text"], result["answer"])
         self.assertEqual(len(result["evidence"]), 2)
 
@@ -141,7 +158,7 @@ class GeneralReasoningTest(unittest.TestCase):
         self.assertFalse(result["used_model"])
 
     def test_budget_exhaustion_falls_back_without_model_request(self):
-        with patch("agents.general_reasoning.MODEL_BUDGET_SECONDS", 0), \
+        with patch("agents.general_reasoning.reasoning_time_budget", return_value=0), \
                 patch("agents.general_reasoning.chat") as model:
             result = self.ask()
         self.assertEqual(result["fallback_reason"], "reasoning_budget_exhausted")

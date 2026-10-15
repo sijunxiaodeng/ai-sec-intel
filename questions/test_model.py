@@ -48,7 +48,7 @@ class ModelTest(unittest.TestCase):
         def response(request, **kwargs):
             captured.append(json.loads(request.data))
             return io.BytesIO(json.dumps(result).encode())
-        with patch("config.llm.load_settings", return_value=self.settings), patch("config.llm.urllib.request.urlopen", side_effect=response):
+        with patch("config.llm.load_settings", return_value=self.settings), patch("config.llm.urllib.request.OpenerDirector.open", side_effect=response):
             self.assertEqual(chat([{"role": "user", "content": "fixture"}], response_format={"type": "json_object"}), "test")
         self.assertEqual(captured[0]["max_tokens"], 768)
         self.assertEqual(captured[0]["response_format"]["type"], "json_object")
@@ -68,14 +68,14 @@ class ModelTest(unittest.TestCase):
                 captured.append(json.loads(request.data))
                 return io.BytesIO(json.dumps(result).encode())
             settings = dict(self.settings, base_url=endpoint, model=model)
-            with self.subTest(endpoint=endpoint, model=model), patch("config.llm.load_settings", return_value=settings), patch("config.llm.urllib.request.urlopen", side_effect=response):
+            with self.subTest(endpoint=endpoint, model=model), patch("config.llm.load_settings", return_value=settings), patch("config.llm.urllib.request.OpenerDirector.open", side_effect=response):
                 self.assertEqual(chat([]), "fixture")
             self.assertEqual(captured[0].get("thinking"), {"type": "disabled"} if expected else None)
 
     def test_empty_and_truncated_model_answers_rejected(self):
         for content, reason in (("", "stop"), ("partial", "length"), (None, "stop")):
             payload = {"choices": [{"message": {"content": content}, "finish_reason": reason}]}
-            with self.subTest(content=content), patch("config.llm.load_settings", return_value=self.settings), patch("config.llm.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())):
+            with self.subTest(content=content), patch("config.llm.load_settings", return_value=self.settings), patch("config.llm.urllib.request.OpenerDirector.open", return_value=io.BytesIO(json.dumps(payload).encode())):
                 with self.assertRaises(RuntimeError):
                     chat([])
 

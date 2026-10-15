@@ -1,6 +1,7 @@
 """检查结构化来源字段的引用范围；不声称完成自由文本语义推理。"""
 
 import json
+import hashlib
 import math
 import re
 
@@ -39,14 +40,61 @@ def field_kind(chunk):
 
 
 def _metric(chunk):
+    text = chunk.get("text", "")
+    if not isinstance(text, str):
+        return None
+    if chunk.get("text_sha256") and hashlib.sha256(text.encode("utf-8")).hexdigest() != chunk["text_sha256"]:
+        return None
     try:
-        value = json.loads(chunk.get("text", ""))
+        value = json.loads(text)
     except (ValueError, TypeError):
         return None
     projection = chunk.get("structured_value")
-    if isinstance(projection, dict) and projection != value:
+    if projection is not None and (not isinstance(projection, dict) or projection != value):
         return None  # A derived field cannot override the cited archived JSON.
     return value if isinstance(value, dict) and isinstance(value.get("cvssData"), dict) else None
+
+
+METRIC_RANGE = re.compile(r"^(metrics/cvssMetric[^；]+)；字符 \[(\d+),(\d+)[)）]")
+
+
+def cited_cvss_metrics(chunks):
+    """Reassemble only complete, contiguous fields from one source snapshot.
+
+    structured_value is a consistency check, never a substitute for missing
+    cited text. Archive-bound projections are attached by assessment.assess.
+    """
+    groups, metrics = {}, []
+    for chunk in chunks:
+        if field_kind(chunk) != "cvss":
+            continue
+        if not chunk.get("source_id") and not chunk.get("source_response_sha256"):
+            # Legacy/manual evidence must itself contain a complete JSON row.
+            metrics.append(_metric(chunk))
+            continue
+        match = METRIC_RANGE.match(chunk.get("locator", ""))
+        identity = tuple(chunk.get(key) for key in ("cve_id", "source_id", "source_response_sha256", "url"))
+        if not match or not all(isinstance(value, str) and value for value in identity):
+            continue
+        groups.setdefault((*identity, match[1]), []).append((int(match[2]), int(match[3]), chunk))
+    for rows in groups.values():
+        offset, parts, valid = 0, [], True
+        for start, end, chunk in sorted(rows, key=lambda row: row[0]):
+            text = chunk.get("text")
+            if (not isinstance(text, str) or start != offset or end <= start or end - start != len(text)
+                    or hashlib.sha256(text.encode("utf-8")).hexdigest() != chunk.get("text_sha256")):
+                valid = False
+                break
+            parts.append(text)
+            offset = end
+        if not valid:
+            continue
+        value = _metric({"text": "".join(parts)})
+        if value is not None and all(chunk.get("structured_value") is None or
+                                    (isinstance(chunk["structured_value"], dict) and chunk["structured_value"] == value)
+                                    for _, _, chunk in rows):
+            metrics.append(value)
+    return [metric for metric in metrics if metric is not None]
 
 
 SEVERITY_VALUES = {"无": "NONE", "低": "LOW", "低危": "LOW", "中": "MEDIUM", "中危": "MEDIUM",
@@ -72,9 +120,11 @@ def cvss_assertions(text):
         "types": {value.lower() for value in re.findall(r"(?:类型|评分类型|metric_type|type)\s*[:：]?\s*(Primary|Secondary)\b", plain, re.I)},
         "severity": set(),
         "missing": set(),
-        "components": {(key.upper(), value.upper()) for key, value in COMPONENT.findall(plain)},
+        # Complete vectors are checked as vectors. In v4, S/AU are optional
+        # supplemental metrics, not v3 Scope or v2 Authentication assertions.
+        "components": {(key.upper(), value.upper()) for key, value in COMPONENT.findall(VECTOR.sub("", plain))},
     }
-    for vector in LEGACY_VECTOR.findall(plain):
+    for vector in LEGACY_VECTOR.findall(VECTOR.sub("", plain)):
         if re.search(r"(?:^|/)AU:", vector, re.I):
             values["vectors"].add("CVSS:2.0/" + vector.upper())
     for name, pattern in (("severity", r"严重(?:等级|级别|性|程度)"), ("vectors", r"(?:完整\s*CVSS\s*)?向量"),
@@ -135,6 +185,12 @@ def _vector_identity(value, version=None):
                 "CVSS:4.0": {"AV", "AC", "AT", "PR", "UI", "VC", "VI", "VA", "SC", "SI", "SA"}}
     if not required.get(head, set()) <= {key for key, _ in pairs}:
         return None
+    if head == "CVSS:4.0":
+        # FIRST v4: omitted optional metrics and explicitly Not Defined (X)
+        # are equivalent. Defined values must never disappear in comparison.
+        optional = {"E", "CR", "IR", "AR", "MAV", "MAC", "MAT", "MPR", "MUI", "MVC", "MVI", "MVA",
+                    "MSC", "MSI", "MSA", "S", "AU", "R", "V", "RE", "U"}
+        pairs = [(key, value) for key, value in pairs if key not in optional or value != "X"]
     return head, frozenset((key, value) for key, value in pairs)
 
 
@@ -205,13 +261,13 @@ def claim_issues(text, chunks):
             issues.append("引用字段不支持 %s 结论：%s" % (category, "、".join(sorted(set(kinds)))))
     # Never combine one row's score with another row's source, severity or vector.
     # Truncated/unknown metric evidence cannot authorize structured CVSS claims.
-    metrics = [_metric(chunk) for chunk in chunks if field_kind(chunk) == "cvss"]
+    metrics = cited_cvss_metrics(chunks)
     facts = cvss_assertions(plain)
     concrete = any(facts[key] for key in ("scores", "vectors", "severity", "providers", "types", "components", "missing"))
     if concrete and ("cvss" in categories or metrics or facts["vectors"] or COMPONENT.search(plain)):
         if not matching_cvss_metrics(plain, metrics):
             issues.append("CVSS 声明的版本、分数、严重等级、向量、指标或提供者未对应同一条完整引用评分；不同评分须分别陈述")
-    elif metrics and any(facts.values()) and not matching_cvss_metrics(plain, metrics):
+    elif "cvss" in kinds and any(facts.values()) and not matching_cvss_metrics(plain, metrics):
         issues.append("CVSS 版本或评分提供者不属于本句引用的评分字段")
     return list(dict.fromkeys(issues))
 

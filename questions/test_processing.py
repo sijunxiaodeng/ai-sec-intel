@@ -25,7 +25,8 @@ class ProcessingTest(unittest.TestCase):
         changes["DATA"] = self.root
         self.enterContext(patch.multiple(store, **changes))
         self.enterContext(patch.dict(os.environ, {"MAIN_KB_DB_PATH": str(changes["DB_PATH"]),
-                                                  "MAIN_IMPORT_DEMO_CARDS": "0"}))
+                                                  "MAIN_IMPORT_DEMO_CARDS": "0",
+                                                  "B_MONITOR_ENABLED": "0"}))
         self.record = enriched_record({"cve_id": "CVE-2026-34567", "title": "vLLM vulnerability",
             "description": "model serving RCE", "source": "NVD", "product": "vllm",
             "collected_at": "2026-10-10T01:00:00Z", "published_at": "2026-10-10T00:00:00Z"})

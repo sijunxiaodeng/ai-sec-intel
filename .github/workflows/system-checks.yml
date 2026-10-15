@@ -98,6 +98,8 @@ jobs:
         run: |
           node --check web/app.js
           node --check web/risks.js
+          node --check web/live.js
+          node questions/test_live_ui.js
           node questions/test_risks_ui.js
           node questions/test_article_candidates_ui.js
           node questions/test_asset_observations_ui.js

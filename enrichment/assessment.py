@@ -133,11 +133,30 @@ def assess(cve_id, db_path=DEFAULT_DB, *, history_catalog=None):
                   chunk.get("source_response_sha256") == sha and
                   chunk.get("text_sha256") == digest(chunk.get("text", ""))]
 
-    def cite(pointer, source_chunks=nvd_chunks):
+    def cite(pointer, source_chunks=nvd_chunks, structured_value=None):
         field = pointer.split("/cpeMatch/")[0].split("/nodes/")[0] if pointer.startswith("configurations/") else pointer
         found = [r for r in source_chunks if r.get("locator", "").startswith(field + "；")]
+        if structured_value is not None:
+            # Bind every CVSS fragment to the field reconstructed from the
+            # SHA-checked response, including the exact complete coverage.
+            text = json.dumps(structured_value, ensure_ascii=False)
+            cursor, ordered = 0, []
+            for r in found:
+                span = re.match(re.escape(field) + r"；字符 \[(\d+),(\d+)[)）]", r.get("locator", ""))
+                if not span:
+                    return []
+                ordered.append((int(span[1]), int(span[2]), r))
+            for start, end, r in sorted(ordered, key=lambda row: row[0]):
+                if (start != cursor or end <= start or end > len(text) or r.get("text") != text[start:end]
+                        or (r.get("structured_value") is not None and r["structured_value"] != structured_value)):
+                    return []
+                cursor = end
+            if cursor != len(text):
+                return []
         for r in found:
             row = dict(r, citation_id=cve_id + "/" + r["evidence_id"])
+            if structured_value is not None:
+                row["structured_value"] = copy.deepcopy(structured_value)
             if not any(e["citation_id"] == row["citation_id"] for e in report["evidence"]):
                 report["evidence"].append(row)
         return [cve_id + "/" + r["evidence_id"] for r in found]
@@ -147,7 +166,7 @@ def assess(cve_id, db_path=DEFAULT_DB, *, history_catalog=None):
         for i, metric in enumerate(values):
             result = _metric(metric, key, "metrics/%s/%d" % (key, i))
             if result:
-                result["evidence_ids"] = cite(result["pointer"])
+                result["evidence_ids"] = cite(result["pointer"], structured_value=metric)
                 result["source_url"] = source_url
                 if result["evidence_ids"]:
                     metrics.append(result)

@@ -141,7 +141,7 @@ class DocumentsTest(unittest.TestCase):
         self.run_ingest()
         config_path(self.db).write_text(json.dumps({"enabled": True, "model": MODEL_NAME, "cache_dir": "local"}), encoding="utf-8")
         model = Mock()
-        model.passage_embed.side_effect = lambda texts: [[1.0, 0.0] for _ in texts]
+        model.passage_embed.side_effect = lambda texts, **kwargs: [[1.0, 0.0] for _ in texts]
         with patch("rag.hybrid._model", return_value=model) as loader:
             first = update_index(self.db)
             self.assertGreater(first["updated"], 0)

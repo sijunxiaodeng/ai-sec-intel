@@ -52,7 +52,7 @@ function on(id, event, handler) {
 }
 
 function api(path, options) {
-  return fetch(path, options).then(function (response) {
+  return fetch(path, Object.assign({cache: "no-store"}, options || {})).then(function (response) {
     var ctype = (response.headers.get("content-type") || "").toLowerCase();
     var parse = ctype.indexOf("application/json") >= 0
       ? response.json()
@@ -459,13 +459,13 @@ function setOfflineMode(enabled) {
   offlineModeKnown = true;
   offlineDemo = !!enabled;
   if ($("offline-demo-banner")) $("offline-demo-banner").hidden = !offlineDemo;
-  document.querySelectorAll("#library-sync, #enrich-btn, #sample-btn, #settings-form input, #settings-form button").forEach(function (control) {
+  document.querySelectorAll("#library-sync, #enrich-btn, #sample-btn, #settings-form input, #settings-form select, #settings-form button").forEach(function (control) {
     control.disabled = offlineDemo;
     control.title = offlineDemo ? "离线演示不调用外部服务；请使用已加载的样例证据。" : "";
   });
   if ($("settings-mode-hint")) $("settings-mode-hint").textContent = offlineDemo
     ? "离线演示已停用模型调用，不需要填写密钥。"
-    : "真实密钥仅保存在当前环境，不会上传。";
+    : "密钥保存在本机，仅用于请求所配置的模型服务。模型调用会发送问题和相关证据；本地 Ollama 可填写 http://127.0.0.1:11434/v1。";
   if ($("monitor-intro")) $("monitor-intro").textContent = offlineDemo
     ? "当前为合成样例，可浏览、筛选并按样例证据问答。手动刷新只同步本地样例。"
     : "自动汇聚漏洞与安全资料；可立即刷新，或等待定时更新。";
@@ -483,7 +483,8 @@ function setOfflineMode(enabled) {
     ];
     renderPrompts();
   }
-  setPill(false);
+  if (offlineDemo) setPill(false);
+  else if ($("llm-pill")) $("llm-pill").textContent = "正在读取模型配置";
 }
 
 function setPill(ready) {
@@ -842,10 +843,10 @@ function renderMonitorLive(data, opts) {
   }
 }
 
-function loadMonitorStatus() {
-  return api("/api/monitor/status").then(function (data) {
+function loadMonitorStatus(light) {
+  return api("/api/monitor/status" + (light ? "?light=1" : "")).then(function (data) {
     setOfflineMode(data.offline_demo);
-    setTeamHealth(data.team);
+    if (data.team) setTeamHealth(data.team);
     lastMonitorStatus = data;
     renderMonitorLive(data);
     if (monitorRefreshing) {
@@ -886,7 +887,7 @@ function loadMonitorStatus() {
 }
 
 function loadOverview() {
-  api("/api/overview").then(function (data) {
+  return api("/api/overview").then(function (data) {
     setOfflineMode(data.offline_demo);
     setPill(data.llm_ready);
     var stats = $("stats");
@@ -928,7 +929,8 @@ function loadOverview() {
     var stepsMeta = pageSlice(stepRows, "steps", OVERVIEW_PAGE_SIZE);
     renderSteps(stepsTarget, stepsMeta.items);
     renderPager(stepsTarget, "steps", stepsMeta, function () { loadOverview(); });
-  }).catch(showError);
+    return true;
+  }).catch(function (error) { showError(error); return false; });
 }
 
 var monitorScope = "all";
@@ -1958,13 +1960,44 @@ on("sample-btn", "click", function () {
   }).catch(showError).then(function () { button.disabled = false; });
 });
 
+function loadModelReviewStatus() {
+  return api('/api/model-review/status').then(function (data) {
+    var labels = {ready: '已就绪', disabled: '未启用', offline: '离线演示停用', model_not_configured: '模型未配置',
+      zero_budget: '调用上限为零', local_collector_required: '需要本机采集模式', read_only_mirror: '只读镜像停用',
+      database_unavailable: '情报库不可用'};
+    var pending = data.pending || {}, latest = data.latest_run || {};
+    var text = '自动复核：' + (labels[data.availability] || data.availability || '未知')
+      + ' · 待复核漏洞 ' + (pending.cve == null ? '未提供' : pending.cve)
+      + ' · 待复核资料 ' + (pending.document == null ? '未提供' : pending.document)
+      + ' · 本额度日调用 ' + (data.used_today || 0) + '/' + ((data.limits || {}).per_day || 0) + '（北京时间 08:00 重置）';
+    if (latest.finished_at) text += ' · 最近执行 ' + formatStamp(latest.finished_at)
+      + ' · 实际调用 ' + (latest.attempted || 0) + ' · 通过复核 ' + (latest.accepted || 0)
+      + ' · 状态写入 ' + (latest.committed || 0) + '（含重试状态）';
+    if (data.status_error) text += ' · 队列统计暂不可用';
+    var queues = data.queue || {};
+    var deferred = (queues.cve || {}).cooldown || 0;
+    deferred += (queues.document || {}).cooldown || 0;
+    var manual = ((queues.cve || {}).manual_review || 0) + ((queues.document || {}).manual_review || 0);
+    if (deferred || manual) text += ' · 冷却等待 ' + deferred + ' · 已达重试上限需人工复核 ' + manual;
+    $('model-review-status').textContent = text;
+  }).catch(function (error) { $('model-review-status').textContent = '复核状态暂不可用：' + error.message; });
+}
+
 function loadSettings() {
   api("/api/settings").then(function (data) {
     $("base-url").value = data.base_url || "";
     $("model-name").value = data.model || "";
+    $("model-reasoning-effort").value = data.model_reasoning_effort || "";
     $("api-key").value = "";
     $("key-hint").textContent = data.key_hint || "";
-    setPill(data.has_key);
+    $("model-review-enabled").checked = !!data.model_review_enabled;
+    $("model-review-max-calls").value = data.model_review_max_calls == null ? 2 : data.model_review_max_calls;
+    $("model-review-daily-max-calls").value = data.model_review_daily_max_calls == null ? 20 : data.model_review_daily_max_calls;
+    $("model-review-interval").value = data.model_review_interval_seconds || 60;
+    $("model-review-timeout").value = data.model_review_timeout_seconds || 90;
+    $("reasoning-budget").value = data.reasoning_budget_seconds || 30;
+    setPill(data.llm_ready != null ? data.llm_ready : data.has_key);
+    loadModelReviewStatus();
   }).catch(showError);
 }
 
@@ -2478,13 +2511,36 @@ on("settings-form", "submit", function (event) {
     body: JSON.stringify({
       base_url: $("base-url").value.trim(),
       model: $("model-name").value.trim(),
-      api_key: $("api-key").value.trim()
+      model_reasoning_effort: $("model-reasoning-effort").value,
+      api_key: $("api-key").value.trim(),
+      model_review_enabled: $("model-review-enabled").checked,
+      model_review_max_calls: Number($("model-review-max-calls").value),
+      model_review_daily_max_calls: Number($("model-review-daily-max-calls").value),
+      model_review_interval_seconds: Number($("model-review-interval").value),
+      model_review_timeout_seconds: Number($("model-review-timeout").value),
+      reasoning_budget_seconds: Number($("reasoning-budget").value)
     })
   }).then(function (data) {
     $("key-hint").textContent = data.key_hint;
     $("api-key").value = "";
-    setPill(data.has_key);
+    setPill(data.llm_ready != null ? data.llm_ready : data.has_key);
+    loadModelReviewStatus();
   }).catch(showError);
+});
+
+on('check-retrieval', 'click', function () {
+  $('check-retrieval').disabled = true;
+  $('retrieval-status').textContent = '正在核对证据与向量…';
+  api('/api/retrieval/status').then(function (data) {
+    var names = {'task_c.sqlite3': '漏洞证据', 'library.sqlite3': '资料库'};
+    var states = {indexed: '索引就绪', index_pending: '等待更新', not_configured: '未准备', dependencies_missing: '缺少语义依赖',
+      model_files_missing: '模型文件缺失', evidence_empty: '暂无证据', database_missing: '未建库', error: '检查失败'};
+    $('retrieval-status').textContent = (data.results || []).map(function (row) {
+      return (names[row.database] || row.database) + '：' + (states[row.state] || row.state)
+        + '，当前有效向量 ' + row.current_embeddings + '/' + row.evidence_chunks;
+    }).join('；');
+  }).catch(function (error) { $('retrieval-status').textContent = error.message; })
+    .then(function () { $('check-retrieval').disabled = false; });
 });
 
 on("test-llm", "click", function () {
@@ -2915,16 +2971,16 @@ on("library-team-sync", "click", function () {
 
 setView("overview");
 // Surface automatic monitor health early (no keyword required).
-loadMonitorStatus();
-api("/api/monitor/status").then(function (data) {
+loadMonitorStatus().then(function (data) {
   if (data) setOfflineMode(data.offline_demo);
   if (offlineDemo) {
     showToast("离线样例已加载；手动刷新只同步本地样例。", "ok");
   } else if (data && data.running) {
-    showToast("后台正在自动监测一轮宽范围 AI 安全情报…", "busy");
+    // The live status panel owns ongoing progress. This startup notice expires.
+    showToast("后台正在自动监测一轮宽范围 AI 安全情报…", "info");
   } else if (data && data.last_run) {
     var statusLabel = {success: "成功", partial: "部分成功", failed: "失败"}[data.last_status] || "已结束";
-    showToast("最近一轮监测" + statusLabel + "：" + data.last_run + "，新增 " + (data.last_count || 0) + " 条",
+    showToast("最近一轮监测" + statusLabel + "：" + formatStamp(data.last_run) + "，AI情报新增 " + (data.last_count || 0) + " 条",
       ["failed", "partial"].indexOf(data.last_status) !== -1 ? "error" : "ok");
   }
 }).catch(function () {});

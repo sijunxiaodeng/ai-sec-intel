@@ -28,9 +28,11 @@ Windows Docker Desktop 运行真实情报请按 [Windows 部署与闭环验收](
 
 ## 当前验收入口
 
-任务 C 的功能状态、比赛阈值、演示脚本和部署联调步骤集中在 [任务 C 验收包](验收包/README.md)。本轮系统修复及待验收边界见 [系统整改与回归](验收包/系统整改与回归.md)。独立质量评测、真实资产、PoC 可用性和正式比赛材料仍需补齐。本文按步骤记录的旧测试数量与本机数据量是历史记录，不是当前版本的验收结果。
+全系统当前安装、演示和交付步骤集中在 [初赛验收包](验收包/README.md) 与 [初赛验收与交付](docs/初赛验收与交付.md)。技术报告 Word/PDF、讲解稿 PDF、操作视频及真实质量/时效证据分别准备；独立质量评测、真实资产和 PoC 可用性仍需核对。本文按步骤记录的旧测试数量与本机数据量是历史记录，不是当前版本的验收结果。
 
 启动系统后运行 `python -m questions.acceptance_snapshot`，报告写入本机 `data/`。该程序不调用模型或触发采集，只检查资料现状、接口和引用绑定，不据此判断比赛得分。
+
+新增同一 CVE 的调查→证据→风险→问答验收：`python scripts/acceptance_snapshot.py --cve CVE-2024-37032 --output data/acceptance/status-01.json` 默认只读取已有状态；加 `--asset-id 已登记资产编号 --ask` 才请求一次真实版本问答，可能调用当前模型。报告不自动创建资产或任务，缺项保留 `waiting`，链路绑定通过不等于准确率达标。隔离合成整链回归：`python scripts/run_offline_tests.py --start-directory scripts/tests --pattern test_acceptance_snapshot.py`，不访问公网或模型。
 
 ## 怎么重新采集
 

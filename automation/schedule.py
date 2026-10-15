@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from config.paths import DATA_ROOT
@@ -47,6 +47,7 @@ _STARTED = False
 _RUN_LOCK = threading.Lock()
 _STATE_LOCK = threading.RLock()
 _STOP = threading.Event()
+_NEXT_RUN_AT = ""
 
 
 def _now():
@@ -211,17 +212,19 @@ def mark_phase(phase):
 
 
 def next_run_iso(data=None):
-    """Best-effort next scheduled run (last_run + interval). Empty if unknown."""
+    """Use the live scheduler deadline; saved history is only an offline estimate."""
     data = data or ensure_state()
     if data.get("auto_enabled") is False:
         return ""
+    if _STARTED:
+        with _STATE_LOCK:
+            return _NEXT_RUN_AT
     last = parse_stamp(data.get("last_run"))
     if not last:
         return ""
     minutes = data.get("interval_minutes")
     if minutes is None:
         minutes = float(data.get("interval_hours") or INTERVAL_HOURS) * 60
-    from datetime import timedelta
     nxt = last + timedelta(minutes=max(float(minutes), 1))
     return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -518,13 +521,21 @@ def _public_loop():
         _STOP.wait(60)
 
 
+def _schedule_next():
+    global _NEXT_RUN_AT
+    delay = INTERVAL_MINUTES * 60
+    deadline = time.monotonic() + delay
+    with _STATE_LOCK:
+        _NEXT_RUN_AT = (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return deadline
+
+
 def _loop():
     if not AUTO_ENABLED:
         return
     ensure_state()
     if _STOP.wait(2):
         return
-    deadline = time.monotonic()
     if AUTO_ON_START:
         log_line("定时监测已启动：启动后立即自动跑一轮，之后每 %d 分钟。范围：宽范围 AI 安全。" % INTERVAL_MINUTES)
         try:
@@ -533,7 +544,7 @@ def _loop():
             log_line("启动首轮自动监测失败（将按间隔重试）：%s: %s" % (type(exc).__name__, exc))
     else:
         log_line("定时监测已启动，间隔 %d 分钟。AUTO_MONITOR_ON_START 已关闭，启动不立即抓取。" % INTERVAL_MINUTES)
-    deadline += INTERVAL_MINUTES * 60
+    deadline = _schedule_next()
     while not _STOP.is_set():
         if _STOP.wait(max(0, deadline - time.monotonic())):
             return
@@ -541,10 +552,10 @@ def _loop():
             run_once(DEFAULT_KEYWORDS)
         except Exception as exc:
             log_line("定时自动监测失败（继续等待下一轮）：%s: %s" % (type(exc).__name__, exc))
-        deadline += INTERVAL_MINUTES * 60
-        if deadline < time.monotonic():
-            # No backlog of simultaneous cycles when one takes longer than the period.
-            deadline = time.monotonic()
+        # Wait a complete interval after completion, including failed/slow cycles.
+        # A restart without an immediate fetch gets a new actual deadline, not
+        # an already-expired last_run timestamp from the previous process.
+        deadline = _schedule_next()
 
 
 def start():
@@ -565,6 +576,9 @@ def start():
 
 
 def stop():
+    global _NEXT_RUN_AT
     _STOP.set()
+    with _STATE_LOCK:
+        _NEXT_RUN_AT = ""
     from automation.processing import stop as stop_processing
     stop_processing()

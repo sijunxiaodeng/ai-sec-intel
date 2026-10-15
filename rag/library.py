@@ -414,13 +414,37 @@ def verified_sources(db_path=LIBRARY_DB):
 
 
 def detail(document_id, db_path=LIBRARY_DB):
-    doc = next((r for r in documents(db_path) if r["document_id"] == document_id), None)
-    if not doc:
+    if not Path(db_path).exists():
         return None
+    def metadata(row):
+        doc = json.loads(row[0])
+        attempt = json.loads(row[1]) if row[1] is not None else {}
+        return dict(doc, latest_attempt_status=attempt.get("status"),
+                    retained_previous=attempt.get("status") == "error")
+
+    # Model reasoning checks the same handful of documents before/after every
+    # request. Read only their metadata here instead of decoding and sorting the
+    # entire library twice per check. Evidence is still revalidated from the raw
+    # snapshot below on every call; no cached integrity verdict is introduced.
+    with _connection(db_path) as conn:
+        _schema(conn)
+        row = conn.execute("""SELECT d.payload,a.payload FROM library_documents d
+            LEFT JOIN library_attempts a ON a.document_id=d.document_id
+            WHERE d.document_id=?""", (document_id,)).fetchone()
+        if row is None:
+            return None
+        doc = metadata(row)
+        if doc.get("document_id") != document_id:
+            return None
+        full_text = [metadata(row) for row in conn.execute("""
+            SELECT d.payload,a.payload FROM library_documents d
+            LEFT JOIN library_attempts a ON a.document_id=d.document_id
+            WHERE CASE WHEN json_valid(d.payload)
+                THEN json_extract(d.payload,'$.parent_document_id') END=?""", (document_id,))]
+    full_text.sort(key=lambda row: (row.get("published_at") or "", row["document_id"]), reverse=True)
     rows = _valid_evidence(db_path, document_ids=[document_id])
     chunks = sorted([r for r in rows if r["document_id"] == document_id], key=lambda r: r["evidence_id"])
     complete = type(doc.get("chunk_count")) is int and doc["chunk_count"] > 0 and len(chunks) == doc["chunk_count"]
-    full_text = [r for r in documents(db_path) if r.get("parent_document_id") == document_id]
     return dict(doc, evidence=chunks, full_text_documents=full_text, integrity_status="ok" if complete else "incomplete_or_invalid",
                 notice="引用对应已存档的提取内容；字符定位不是网页行号。" if complete else "部分证据完整性校验未通过，异常片段不展示。")
 

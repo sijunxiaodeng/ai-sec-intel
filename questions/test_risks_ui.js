@@ -27,6 +27,7 @@ const context = {
   add: (parent,tag,cls,text) => { const el = new Element(tag); el.textContent = text || ''; parent.appendChild(el); return el; },
   on: (id,event,fn) => { assert.ok(elements[id], id); elements[id].addEventListener(event,fn); },
   showError: err => errors.push(err), showToast: () => {}, setView: () => {}, setInterval: () => {},
+  formatStamp: value => 'local:' + value,
   api: (url,options) => {
     calls.push({url, options});
     if (url.startsWith('/api/risks?')) {
@@ -64,6 +65,15 @@ async function main() {
   await context.loadRisks();
   finishOld({items:[],total:999}); await old;
   assert.ok(elements['risk-summary'].textContent.includes('1 条'), 'old response must not replace current results');
+  const jobs = {worker_enabled:true,items:[{id:7,cve_id:'CVE-2026-12345',status:'done',attempts:1,context:{},trace:{}}]};
+  context.renderInvestigations(jobs);
+  const firstCard = elements['investigation-list'].children[0];
+  firstCard.open = true;
+  context.renderInvestigations(jobs);
+  assert.equal(elements['investigation-list'].children[0], firstCard, 'unchanged poll must retain open trace and history');
+  jobs.items.push({id:8,cve_id:'CVE-2026-12346',status:'pending',attempts:0,context:{},trace:{}});
+  context.renderInvestigations(jobs);
+  assert.equal(elements['investigation-list'].children[0].open, true, 'changed task list must retain expanded jobs by ID');
   assert.equal(errors.length, 0);
   console.log('risk UI regression checks passed');
 }

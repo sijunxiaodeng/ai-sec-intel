@@ -75,6 +75,22 @@ python -m venv .venv
 
 ### 正式数据库与 Docker 的语义索引
 
+Windows 原生部署可使用新增的双库准备/状态入口。必须使用**服务实际使用的 Python 环境**安装 `requirements-rag.txt`，再从官方 Qdrant 仓库下载固定修订的 ONNX 文件。下例中的数据库和模型路径应换成部署目录；不会更改主系统 LLM 设置或导入演示数据：
+
+```powershell
+python -m pip install --index-url https://pypi.org/simple -r requirements-rag.txt
+& ./rag/download_model.ps1 -Destination 'D:/ai-sec-intel/data/main/models/bge-small-zh-v1.5-local'
+python -m rag.semantic --db 'D:/ai-sec-intel/data/main/task_c.sqlite3' --db 'D:/ai-sec-intel/data/main/library.sqlite3'
+python -m rag.semantic --prepare --model-dir 'D:/ai-sec-intel/data/main/models/bge-small-zh-v1.5-local' --db 'D:/ai-sec-intel/data/main/task_c.sqlite3' --db 'D:/ai-sec-intel/data/main/library.sqlite3'
+python -m rag.semantic --probe --db 'D:/ai-sec-intel/data/main/task_c.sqlite3' --db 'D:/ai-sec-intel/data/main/library.sqlite3'
+```
+
+不传 `--db` 时，默认检查 `MAIN_DATA_DIR` 下的 `task_c.sqlite3` 和 `library.sqlite3`。默认状态检查使用只读 SQLite 连接，不创建文件、配置或索引；`index_ready` 检查当前文本摘要、512 维有效向量，`query_ready` 只有显式本地 `--probe` 推理成功才为 true。状态区分未配置、缺依赖、缺模型文件、索引待更新与就绪，不把有配置文件当作启用成功。
+
+`--prepare` 必须显式指定完整本地模型目录，绝不隐式联网下载。首次构建按 32 条一批、CPU 两线程计算；同目录重复执行只处理变化片段，复用未变向量，删除已撤回片段的向量。索引提交仍核对证据快照，配置采用原子替换；资料在计算期间变化会报告失败，保留证据和旧配置。首次大批量准备宜短暂停止写入服务，完成后再恢复，避免持续资料同步使整批反复失效。日常增量索引由原处理链继续维护，查询本身不下载或更新模型。
+
+下载脚本固定官方修订 `46fbe35fd4374a00fee7de77dfddaeb6dd6a2c59`；ONNX 按官方 LFS SHA-256 校验，其余配置/词表按 Git blob 摘要校验，全部检查文件大小。未完整下载或校验失败的临时文件不会替换已验证文件，TLS 校验保持开启。状态和准备输出只含数量、版本、耗时及错误类型；不能把它们当作语义检索准确率或初赛问答得分。
+
 `rag.prepare` 默认只处理已有证据，不再自动导入历史样例。需要演示样例时显式加 `--demo`。正式数据应先通过采集、导入和正文处理入库，再分别建立漏洞证据库和资料库的索引：
 
 ```powershell

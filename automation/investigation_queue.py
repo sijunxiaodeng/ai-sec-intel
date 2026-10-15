@@ -83,12 +83,12 @@ def evidence_updated(record):
     return reconcile([refreshed], reason="evidence_updated", force=True, invalidate_running=True)
 
 
-def run_pending(limit=2):
+def run_pending(limit=2, *, explicit_only=None):
     from automation import processing
     from agents.investigation import run
     from enrichment.risk_register import evaluate_record, inventory_fingerprint, StaleInventory
     completed = 0
-    for job in processing._claim("investigate", max(1, min(int(limit), 10))):
+    for job in processing._claim("investigate", max(1, min(int(limit), 10)), explicit_only=explicit_only):
         record = processing._current(job)
         if record is None:
             continue
@@ -97,6 +97,8 @@ def run_pending(limit=2):
         trace = {"trigger": context.get("reason"), "cve_id": job["cve_id"],
                  "revision": job["revision"], "attempt": job["attempts"],
                  "run_id": str(job["id"]) + "-" + job["lease_token"], "committed": False}
+        if context.get("explicit"):
+            trace["evidence_notice"] = "显式研判先使用当前证据；后台富集可能尚未完成，缺失证据由 Agent 按预算补充，未补足部分保留为缺口。"
         try:
             if expected != inventory_fingerprint():
                 processing._finish(job, skipped=True, trace=trace)
