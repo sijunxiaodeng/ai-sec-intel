@@ -21,6 +21,7 @@ env:
   B_MONITOR_ON_REFRESH: '0'
   AUTO_INGEST_ON_COLLECT: '0'
   AUTO_CLASSIFY_V5: '0'
+  ACCEPTANCE_OBSERVATION_ENABLED: '0'
   CLASSIFY_V5_MAX_LLM_CALLS: '0'
   CLASSIFY_V4_MAX_LLM_CALLS: '0'
   DEEPSEEK_REVIEW_ENABLED: 'false'
@@ -105,6 +106,8 @@ jobs:
           node questions/test_asset_observations_ui.js
           node questions/test_poc_sources_ui.js
           node questions/test_monitor_status_ui.js
+            node --check web/acceptance.js
+            node questions/test_acceptance_ui.js
 
   intelligence-tests:
     runs-on: ubuntu-latest

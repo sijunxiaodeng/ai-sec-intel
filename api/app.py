@@ -63,6 +63,8 @@ def _startup():
     start_schedule()
     from automation.model_review import start as start_model_review
     start_model_review()
+    from acceptance.worker import start as start_acceptance_observer
+    start_acceptance_observer()
 
 
 @app.on_event("shutdown")
@@ -71,6 +73,8 @@ def _shutdown():
     stop()
     from automation.model_review import stop as stop_model_review
     stop_model_review()
+    from acceptance.worker import stop as stop_acceptance_observer
+    stop_acceptance_observer()
 
 
 class CollectBody(BaseModel):
@@ -2030,5 +2034,8 @@ elif sidecar_enabled():
     async def _proxy_documents_list(request: Request):
         return await forward_async(request, "/api/documents")
 
+
+from api.acceptance import router as acceptance_router
+app.include_router(acceptance_router)
 
 app.mount("/assets", StaticFiles(directory=WEB), name="assets")

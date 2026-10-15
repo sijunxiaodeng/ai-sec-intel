@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 安全知识情报</title>
   <link rel="stylesheet" href="/assets/styles.css?v=20261013-monitor-refresh2" />
+  <link rel="stylesheet" href="/assets/acceptance.css?v=20261015-acceptance">
 </head>
 <body>
   <p id="offline-demo-banner" class="hint" role="status" hidden>离线演示：当前为合成样例，可查看资料和证据问答；不进行真实采集或在线模型调用。</p>
@@ -45,6 +46,11 @@
           <span class="node" aria-hidden="true"></span>
           证据问答
           <small>先证据后答</small>
+        </button>
+        <button type="button" data-view="acceptance">
+          <span class="node" aria-hidden="true"></span>
+          验收中心
+          <small>指标、复核与证据</small>
         </button>
         <button type="button" data-view="settings">
           <span class="node" aria-hidden="true"></span>
@@ -480,6 +486,63 @@
         </div>
       </section>
 
+      <section id="acceptance" class="view acceptance" hidden aria-label="初赛验收中心">
+        <div class="ac-intro">
+          <div><p class="eyebrow">验收工作台</p><h2>让每项结论都有可核对的证据</h2><p class="hint">目标、实现和实测分别展示。自动检查通过数不等于准确率，当前证据不自动折算竞赛得分。</p></div>
+          <button type="button" id="ac-refresh" class="ghost">更新快照</button>
+        </div>
+        <p id="ac-status" class="ac-status" role="status" aria-live="polite"></p>
+        <nav class="ac-section-nav" aria-label="验收中心章节"><a href="#ac-overview">指标总览</a><a href="#ac-quality">质量评测</a><a href="#ac-observation">持续时效</a><a href="#ac-evidence">材料与方法</a></nav>
+        <article id="ac-overview" class="panel ac-section">
+          <div class="panel-head"><h2><span class="ac-step">01</span>初赛指标总览</h2><span class="hint">权重仅来自评分表，不代表实得分</span></div>
+          <div id="ac-criteria" class="ac-criteria"></div>
+          <details class="ac-details"><summary>运行数据与实现证据</summary><div id="ac-runtime"></div></details>
+        </article>
+        <article id="ac-quality" class="panel ac-section">
+          <div class="panel-head"><h2><span class="ac-step">02</span>质量评测</h2><a class="ac-link" href="/api/acceptance/templates/quality" download>下载 JSON 模板</a></div>
+          <p class="hint">冻结原题、完整输出和来源摘要后复核。公开开发集继续显示开发属性；“独立”是复核者声明，系统不认证身份。</p>
+          <details class="ac-details"><summary>导入冻结评测 JSON</summary>
+            <form id="ac-quality-import" class="ac-form-grid">
+              <label>评测标题<input id="ac-quality-title" maxlength="160" placeholder="例如：基础与跨文档评测 · 第 1 批"></label>
+              <label>本次用途<select id="ac-quality-purpose"><option value="development">开发验证</option><option value="acceptance">验收记录（保留原数据集属性）</option></select></label>
+              <label class="ac-wide">JSON 文件（最多 8 MiB）<input id="ac-quality-file" type="file" accept=".json,application/json" required></label>
+              <div class="ac-wide"><button type="submit" class="primary">导入并冻结原始报告</button></div>
+            </form>
+          </details>
+          <label class="ac-select-label">评测批次<select id="ac-run-select"><option value="">尚无评测批次</option></select></label>
+          <p id="ac-quality-status" class="ac-status" role="status" aria-live="polite"></p>
+          <div id="ac-quality-summary"></div>
+          <div id="ac-quality-workspace" hidden>
+            <div class="ac-toolbar"><label>题目筛选<select id="ac-case-filter"><option value="all">全部题目</option><option value="unreviewed">尚未复核</option><option value="automatic_failed">自动检查未通过</option><option value="review_failed">复核存在不通过项</option></select></label><label class="ac-grow">查找题目<input id="ac-case-search" type="search" placeholder="题号或问题关键词"></label></div>
+            <p id="ac-case-count" class="hint"></p>
+            <div class="ac-quality-split"><div id="ac-case-list" class="ac-case-list" aria-label="题目列表"></div><div id="ac-case-detail" class="ac-case-detail"></div></div>
+          </div>
+        </article>
+        <article id="ac-observation" class="panel ac-section">
+          <div class="panel-head"><h2><span class="ac-step">03</span>持续时效</h2><a class="ac-link" href="/api/acceptance/templates/inventory" download>下载上游清单模板</a></div>
+          <p class="hint">本次选择 72 小时观察，结束后继续核对最多 24 小时的迟到记录。72 小时是验证方案，不是赛题硬性要求。统计使用服务端真实快照，页面不会模拟采集进度。</p>
+          <details class="ac-details"><summary>创建 72 小时观察窗口</summary><form id="ac-window-create" class="ac-form-grid">
+            <label class="ac-wide">窗口名称<input id="ac-window-name" maxlength="160" placeholder="例如：初赛持续观测 · 第 1 轮"></label>
+            <label class="ac-wide">观察范围说明<input id="ac-window-scope" maxlength="1000" placeholder="注册来源原始记录；AI 范围需清单 in_scope 核对"></label>
+            <div class="ac-wide"><p class="hint">开始时间由服务端记录，持续 72 小时；默认登记当前全部来源。</p><button type="submit" class="primary">开始 72 小时观察</button></div>
+          </form></details>
+          <label class="ac-select-label">观察窗口<select id="ac-window-select"><option value="">尚无观察窗口</option></select></label>
+          <p id="ac-observation-status" class="ac-status" role="status" aria-live="polite"></p>
+          <div id="ac-observation-detail"></div>
+          <details id="ac-inventory-panel" class="ac-details" hidden><summary>导入上游清单，核对漏采与范围</summary>
+            <p class="hint">每个来源只登记一次。清单须包含原始时间、范围、完整性声明及响应 SHA-256；声明完整并不意味着系统已验证完整。没有清单时，召回率与全量时效结论保持待验证。</p>
+            <form id="ac-inventory-import" class="ac-form-grid"><label class="ac-wide">上游清单 JSON（最多 8 MiB）<input id="ac-inventory-file" type="file" accept=".json,application/json" required></label><div class="ac-wide"><button type="submit" class="primary">导入清单</button></div></form>
+          </details>
+        </article>
+        <article id="ac-evidence" class="panel ac-section">
+          <div class="panel-head"><h2><span class="ac-step">04</span>材料与方法</h2><span id="ac-evidence-count" class="hint"></span></div>
+          <p class="hint">下载前服务端验证登记文件的 SHA-256。历史报告和实时页面可以属于不同版本，请核对各自的提交与采集时间。</p>
+          <label class="ac-select-label">查找材料<input id="ac-evidence-search" type="search" placeholder="名称、类型或提交编号"></label>
+          <div id="ac-evidence-list" class="ac-evidence-list"></div>
+          <details class="ac-details"><summary>验收方法与指标口径</summary><ol id="ac-method"></ol></details>
+        </article>
+      </section>
+
       <section id="settings" class="view" hidden>
         <form id="settings-form" class="panel settings">
           <h2>模型与自动研判设置</h2>
@@ -517,6 +580,7 @@
   </div>
   <script src="/assets/app.js?v=20261014-source-status"></script>
   <script src="/assets/risks.js?v=20261014-investigations"></script>
+  <script src="/assets/acceptance.js?v=20261015-acceptance"></script>
   <script src="/assets/live.js"></script>
 </body>
 </html>

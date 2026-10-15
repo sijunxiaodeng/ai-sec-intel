@@ -6,6 +6,7 @@ var titles = {
   library: "资料库",
   assets: "情报富集",
   ask: "证据问答",
+  acceptance: "验收中心",
   settings: "模型设置"
 };
 var eyebrows = {
@@ -16,6 +17,7 @@ var eyebrows = {
   library: "可检索原文与片段",
   assets: "EPSS / KEV / 论文 / 影响资产",
   ask: "先证据后回答",
+  acceptance: "初赛指标 · 质量复核 · 持续观测 · 交付证据",
   settings: "模型接口"
 };
 
@@ -520,6 +522,7 @@ function setView(name, opts) {
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
+  if (name === "acceptance" && typeof loadAcceptance === "function") loadAcceptance();
 }
 
 function setTeamHealth(team) {
