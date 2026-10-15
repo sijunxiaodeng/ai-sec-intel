@@ -546,9 +546,12 @@ def _build_visibility(records, names, monitor, library, team, latency_count, llm
     }
 
 
-@app.get("/api/visibility")
-def visibility():
-    records = knowledge_records()
+def _observed_item_source_names(records):
+    """Distinct origin labels already present on knowledge-store cards.
+
+    This is not the product source registry: CVE cards often only carry
+    NVD/OSV/GitHub/CISA even when many more collectors are configured.
+    """
     names = []
     for record in records:
         if (record.get("item", {}).get("raw_data") or {}).get("sample_mode"):
@@ -556,28 +559,85 @@ def visibility():
         for name in (record.get("item") or {}).get("sources") or []:
             if name and name not in names:
                 names.append(name)
+    return names
+
+
+def _registered_source_catalog():
+    """Enabled SourceSpec entries from the multi-source registry (real origins).
+
+    Returns name list + category count. Never invents sources; empty on load failure.
+    Product「来源」must use this catalog — not library ingest paths, not card tags alone.
+    """
+    try:
+        from api.b_embed import ensure_intelligence_path
+        ensure_intelligence_path()
+        from monitoring.source_registry import get_sources
+        specs = list(get_sources() or [])
+    except Exception:
+        return {
+            "sources": [],
+            "source_count": 0,
+            "source_category_count": 0,
+            "source_categories": [],
+            "source_basis": "source_registry_unavailable",
+            "registered_sources": [],
+        }
+    names = [spec.name for spec in specs if getattr(spec, "name", None)]
+    categories = sorted({
+        spec.category for spec in specs
+        if isinstance(getattr(spec, "category", None), str) and spec.category
+    })
+    registered = [{
+        "name": spec.name,
+        "category": spec.category,
+        "kind": spec.kind,
+    } for spec in specs]
+    return {
+        "sources": names,
+        "source_count": len(names),
+        "source_category_count": len(categories),
+        "source_categories": categories,
+        "source_basis": "source_registry",
+        "registered_sources": registered,
+    }
+
+
+@app.get("/api/visibility")
+def visibility():
+    records = knowledge_records()
+    observed = _observed_item_source_names(records)
+    catalog = _registered_source_catalog()
+    # Prefer registry names for module board honesty; fall back to observed tags.
+    names = catalog["sources"] or observed
     monitor = monitor_state()
     from rag.library import overview as library_overview
     library = library_overview()
     team = _team_intel_snapshot()
-    return _build_visibility(
+    board = _build_visibility(
         records, names, monitor,
         {"documents": library["documents"], "chunks": library["chunks"],
          "source_categories": library["source_categories"]},
         team, countable_latency(records), configured(),
     )
+    board["source_registry"] = {
+        "source_count": catalog["source_count"],
+        "sources": catalog["sources"],
+        "source_category_count": catalog["source_category_count"],
+        "source_categories": catalog["source_categories"],
+        "source_basis": catalog["source_basis"],
+        "observed_source_count": len(observed),
+        "observed_sources": observed,
+    }
+    return board
 
 
 @app.get("/api/overview")
 def overview():
     records = knowledge_records()
-    names = []
-    for record in records:
-        if (record.get("item", {}).get("raw_data") or {}).get("sample_mode"):
-            continue
-        for name in (record.get("item") or {}).get("sources") or []:
-            if name and name not in names:
-                names.append(name)
+    observed = _observed_item_source_names(records)
+    catalog = _registered_source_catalog()
+    # Homepage「来源」= registered real origins (NVD/OSV/GitHub/…), not card-tag subset.
+    names = catalog["sources"] or observed
     monitor = monitor_state()
     from rag.library import overview as library_overview
     library = library_overview()
@@ -594,6 +654,11 @@ def overview():
         "items": len(records),
         "source_count": len(names),
         "sources": names,
+        "source_basis": catalog["source_basis"] if catalog["sources"] else "observed_item_tags",
+        "source_category_count": catalog["source_category_count"],
+        "registered_sources": catalog["registered_sources"],
+        "observed_source_count": len(observed),
+        "observed_sources": observed,
         "latency_count": latency,
         "latency_count_basis": latency_basis,
         "root_latency_count": root_latency,
