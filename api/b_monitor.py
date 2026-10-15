@@ -47,6 +47,73 @@ def _bounded(value, name, default, minimum, maximum):
     return max(minimum, min(value, maximum))
 
 
+def _missing_module_name(exc: BaseException) -> str:
+    name = getattr(exc, "name", None)
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    detail = str(exc)
+    marker = "No module named "
+    if marker in detail:
+        part = detail.split(marker, 1)[1].strip().strip("'\"")
+        return part.split("'")[0].split('"')[0].strip() or detail[:80]
+    return ""
+
+
+def cycle_failure_message(exc: BaseException) -> str:
+    """User-facing Chinese reason for a parent-process collector failure."""
+    kind = type(exc).__name__
+    detail = str(exc).strip()
+    if kind == "ModuleNotFoundError":
+        missing = _missing_module_name(exc)
+        if missing in {"fcntl", "msvcrt"} or "fcntl" in detail or "msvcrt" in detail:
+            return (
+                "当前运行环境缺少可用的文件锁能力（常见于不完整的 Windows/精简 Python），"
+                "多源刷新未能启动；请用项目自带启动方式或 Docker 一键部署后重试。"
+            )
+        if missing == "intelligence" or "intelligence" in detail:
+            return "程序模块路径未就绪，无法启动多源刷新；请从项目根目录启动应用后重试。"
+        label = missing or detail[:80] or "未知模块"
+        return "缺少运行依赖「%s」，多源刷新未能启动。" % label
+    if kind == "RuntimeError" and "writer mode" in detail.lower():
+        return "数据目录已被其它写入模式占用，无法在此再开采集；请换独立数据目录。"
+    if kind == "RuntimeError" and "mirror snapshots" in detail.lower():
+        return "当前数据目录含镜像快照，不能再作为采集目录；请换独立数据目录。"
+    if kind == "ValueError" and "Actions mirrors" in detail:
+        return "当前为只读镜像数据，不能再启动本地采集。"
+    if kind == "FileNotFoundError":
+        return "采集工作进程启动失败（找不到解释器或入口脚本）；请检查安装是否完整。"
+    message = "多源刷新未能完成（%s）" % kind
+    if detail:
+        message = "%s：%s" % (message, detail[:120])
+    return message
+
+
+def _productize_worker_error(error: str | None) -> str | None:
+    """Map known worker English failures to Chinese product copy."""
+    if not error:
+        return error
+    text = str(error).strip()
+    lower = text.lower()
+    if "no module named 'fcntl'" in lower or "no module named \"fcntl\"" in lower:
+        return (
+            "当前运行环境缺少可用的文件锁能力（常见于不完整的 Windows/精简 Python），"
+            "多源刷新未能完成；请用项目自带启动方式或 Docker 一键部署后重试。"
+        )
+    if "no module named 'intelligence'" in lower:
+        return "程序模块路径未就绪，多源刷新未能完成；请从项目根目录启动应用后重试。"
+    if text.endswith("B collector could not complete") or "B collector could not complete" in text:
+        prefix = text.split(":", 1)[0].strip() if ":" in text else ""
+        if prefix == "ModuleNotFoundError" and "fcntl" in lower:
+            return (
+                "当前运行环境缺少可用的文件锁能力，多源刷新未能完成；"
+                "请用项目自带启动方式或 Docker 一键部署后重试。"
+            )
+        return "多源刷新工作进程未完成（%s）。" % (prefix or "未知原因")
+    if text.startswith("B collector "):
+        return "多源刷新工作进程异常：%s" % text[len("B collector "):]
+    return text
+
+
 def _worker_command(root, db, result_path, source_timeout, workers, poll_minutes):
     return [os.environ.get("B_MONITOR_PYTHON") or sys.executable,
             str(root / "deployment" / "run_embedded_cycle.py"),
@@ -101,7 +168,7 @@ def run_b_monitor_cycle(
         return {"status": "disabled", "mode": "embed", "execution": "subprocess", "sources": {}}
     if not _CYCLE_LOCK.acquire(blocking=False):
         return {"status": "skipped", "mode": "embed", "execution": "subprocess",
-                "error": "B collector already running", "sources": {}}
+                "error": "已有一轮多源刷新在进行，已跳过本次。", "sources": {}}
     summary: dict[str, Any] = {"status": "failed", "mode": "embed", "execution": "subprocess"}
     child = None
     try:
@@ -109,7 +176,7 @@ def run_b_monitor_cycle(
         # claim_role lives under intelligence.*; restore ROOT on sys.path before
         # that import. Calling prefer_root only after the import left a window
         # where ModuleNotFoundError: No module named 'intelligence' was wrapped
-        # as "B collector worker could not complete" on 一键监测.
+        # as an opaque English failure on 一键监测.
         ensure_intelligence_path()
         from intelligence.deployment.state_role import claim_role
         db = db_path()
@@ -146,12 +213,14 @@ def run_b_monitor_cycle(
                     child.wait(timeout=overall_timeout)
                 except subprocess.TimeoutExpired:
                     stopped = _stop_process_tree(child)
-                    summary.update(status="timeout", termination_confirmed=stopped,
-                                   error="B collector deadline exceeded; committed data retained"
-                                         + ("; process tree termination unconfirmed" if not stopped else ""))
+                    summary.update(
+                        status="timeout", termination_confirmed=stopped,
+                        error="多源刷新超时，已保留已写入数据"
+                              + ("；进程树未能确认结束" if not stopped else ""),
+                    )
                     return summary
             if not result_path.is_file() or result_path.stat().st_size > _MAX_RESULT_BYTES:
-                summary["error"] = "B collector worker produced no valid result (exit %s)" % child.returncode
+                summary["error"] = "多源刷新工作进程未返回有效结果（退出码 %s）" % child.returncode
                 return summary
             result = json.loads(result_path.read_text(encoding="utf-8"))
             if not isinstance(result, dict):
@@ -162,25 +231,23 @@ def run_b_monitor_cycle(
             status = result.get("status") or "failed"
             if child.returncode:
                 status = "failed"
+            error = _productize_worker_error(result.get("error"))
             summary.update(
                 status=status if status in {"success", "partial", "skipped", "timeout", "failed", "disabled"} else "partial",
                 configured_sources=result.get("configured_sources"),
                 success_sources=result.get("success_sources"),
                 failed_sources=result.get("failed_sources"),
-                source_names=sorted(sources), error=result.get("error"),
+                source_names=sorted(sources), error=error,
             )
             from automation.collection_summary import summarize_collection
             summary["collection_summary"] = summarize_collection(dict(result, status=summary["status"]))
             if child.returncode and not summary["error"]:
-                summary["error"] = "B collector worker failed (exit %s)" % child.returncode
+                summary["error"] = "多源刷新工作进程异常退出（退出码 %s）" % child.returncode
             return summary
     except Exception as exc:
         if child is not None and child.poll() is None:
             summary["termination_confirmed"] = _stop_process_tree(child)
-        detail = str(exc).strip()
-        summary["error"] = "%s: B collector worker could not complete" % type(exc).__name__
-        if detail:
-            summary["error"] = "%s (%s)" % (summary["error"], detail[:160])
+        summary["error"] = cycle_failure_message(exc)
         return summary
     finally:
         from automation.collection_summary import summarize_collection

@@ -6,12 +6,15 @@ import os
 from pathlib import Path
 
 try:
-    from ..monitoring.lock import ProcessFileLock
-except ImportError:  # Top-level deployment package or direct script invocation.
+    from .file_lock import exclusive_file_lock
+except ImportError:  # Direct script: python deployment/state_role.py …
     if not __package__:
         import sys
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from monitoring.lock import ProcessFileLock
+    try:
+        from deployment.file_lock import exclusive_file_lock
+    except ImportError:
+        from file_lock import exclusive_file_lock
 
 
 def claim_role(directory, role):
@@ -19,7 +22,7 @@ def claim_role(directory, role):
         raise ValueError("Unknown state role")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    with ProcessFileLock(directory / ".runtime-role.lock", timeout=30):
+    with exclusive_file_lock(directory / ".runtime-role.lock", timeout=30):
         marker = directory / ".writer-mode"
         if marker.exists() and marker.read_text().strip() != role:
             raise RuntimeError("This volume belongs to a different writer mode; use a separate volume")

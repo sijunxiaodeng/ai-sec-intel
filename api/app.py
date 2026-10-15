@@ -1586,9 +1586,10 @@ def _monitor_run(body: MonitorRunBody):
     if team.get("enabled") is not False and not team.get("reachable"):
         warnings.append("多源情报暂不可用，本轮仍继续其它来源与资料刷新。")
     if b_cycle and b_cycle.get("status") in {"failed", "timeout"}:
+        status_zh = {"failed": "失败", "timeout": "超时"}.get(b_cycle.get("status"), b_cycle.get("status"))
         warnings.append(
             "部分来源刷新%s（%s）；监测仍继续。"
-            % (b_cycle.get("status"), (b_cycle.get("error") or "partial OK")[:120])
+            % (status_zh, (b_cycle.get("error") or "原因未详")[:120])
         )
     result = None
     library = None
