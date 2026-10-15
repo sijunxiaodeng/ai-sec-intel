@@ -210,6 +210,7 @@ function sourceLabel(raw) {
     "HUGGING FACE": "Hugging Face", HF_SECURITY_COMMUNITY: "Hugging Face",
     VLLM: "vLLM", VLLM_VENDOR: "vLLM", OLLAMA: "Ollama", OLLAMA_VENDOR: "Ollama",
     LANGCHAIN: "LangChain", LANGCHAIN_VENDOR: "LangChain",
+    TRANSFORMERS: "Transformers", TRANSFORMERS_VENDOR: "Transformers",
     NIST: "NIST", NIST_CSRC_AI_STANDARDS: "NIST",
     "FEDERAL REGISTER": "Federal Register", FEDERAL_REGISTER_AI_POLICY: "Federal Register"
   };
@@ -899,17 +900,21 @@ function loadOverview() {
     var monitor = data.monitor || {};
     var team = data.team_intel || {};
     var sourceNames = (data.sources || []).slice(0, 6).map(sourceLabel);
+    var sourceTotal = data.source_count || 0;
+    var sourceMore = sourceTotal > sourceNames.length
+      ? " 等 " + sourceTotal + " 个登记来源"
+      : (sourceNames.length ? "（" + sourceTotal + " 个登记来源）" : "");
     var running = monitor.running ? "正在刷新" : (monitor.last_run
       ? aiMonitorHeadline(monitor) + " · " + sourceCoverageText(monitor.collection_summary) : "可点监测页立即刷新");
     $("monitor-line").textContent =
       "监测 · " + running +
       " · 情报 " + data.items +
       " · 资料 " + ((data.library || {}).documents || 0) +
-      (sourceNames.length ? " · 来源 " + sourceNames.join(" / ") : "") +
+      (sourceNames.length ? " · 来源 " + sourceNames.join(" / ") + sourceMore : "") +
       " · 模型 " + (offlineDemo ? "离线停用" : data.llm_ready ? "已配置" : "未配置");
     [
       [String(data.items), "情报条目"],
-      [String(data.source_count || 0), "漏洞来源数"],
+      [String(sourceTotal), "登记来源"],
       [String((data.library || {}).documents || 0), "资料库文档"],
       [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源 CVE"],
       [offlineDemo ? "离线摘录" : data.llm_ready ? "可用" : "未配置", "问答模型"]
