@@ -153,13 +153,18 @@
         </article>
         <article class="panel">
           <header class="panel-head"><h2>研判任务与证据轨迹</h2></header>
+          <p class="hint">可同时查看多个漏洞：每项任务独立展开，资产风险结果与研判任务分别分页。一次任务可以包含多次 Agent 工具调用。</p>
           <form id="investigation-form" class="live-actions">
-            <label for="investigation-cve">研究已收录情报</label>
-            <input id="investigation-cve" placeholder="CVE-2026-12345" required pattern="[Cc][Vv][Ee]-[0-9]{4}-[0-9]{4,7}" maxlength="20" />
-            <button type="submit" class="ghost" id="investigation-submit">创建研判任务</button>
+            <label for="investigation-cve">研究已收录情报（最多 20 个）</label>
+            <textarea id="investigation-cve" placeholder="CVE-2024-37032, CVE-2025-0312" rows="2" cols="42" required maxlength="1500" aria-describedby="investigation-input-help"></textarea>
+            <button type="submit" class="ghost" id="investigation-submit">批量创建研判任务</button>
           </form>
+          <p class="hint" id="investigation-input-help">输入一个或多个 CVE，以逗号、空格或换行分隔；重复编号只提交一次。只研究知识库中已收录的情报。</p>
+          <div id="investigation-submission" role="status" aria-live="polite"></div>
           <p class="hint" id="investigation-worker"></p>
+          <p class="hint" id="investigation-summary"></p>
           <div id="investigation-list"></div>
+          <div class="live-actions"><button type="button" class="ghost" id="investigation-prev">上一页任务</button><span id="investigation-page"></span><button type="button" class="ghost" id="investigation-next">下一页任务</button></div>
         </article>
       </section>
       <section id="monitor" class="view" hidden>
@@ -579,7 +584,7 @@
     </div>
   </div>
   <script src="/assets/app.js?v=20261015-source-registry"></script>
-  <script src="/assets/risks.js?v=20261014-investigations"></script>
+  <script src="/assets/risks.js?v=20261015-batch-investigations"></script>
   <script src="/assets/acceptance.js?v=20261015-acceptance"></script>
   <script src="/assets/live.js"></script>
 </body>

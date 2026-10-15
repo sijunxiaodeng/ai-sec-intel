@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from database import store
 from agents.planning import enrichment_plan, PUBLIC_FEEDS, PAPERS
@@ -17,7 +18,54 @@ _THREAD = None
 _INTERACTIVE_THREAD = None
 _START_LOCK = threading.Lock()
 _RUN_LOCK = threading.Lock()
+_ACTIVITY_LOCK = threading.Lock()
+_ACTIVITY = {name: {"last_started_at": None, "last_finished_at": None,
+                    "last_error": None, "in_progress": False}
+             for name in ("background", "explicit")}
 STAGES = ("enrich", "documents", "investigate", "index")
+
+
+def enabled():
+    """The deployment switch is read by this process, not from a settings file."""
+    return os.environ.get("AUTO_INGEST_ON_COLLECT", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _activity(name, *, started=False, error=None):
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with _ACTIVITY_LOCK:
+        values = _ACTIVITY[name]
+        values["in_progress"] = started
+        values["last_started_at" if started else "last_finished_at"] = stamp
+        if not started:
+            # Do not expose provider messages, URLs, tokens or filesystem paths.
+            values["last_error"] = type(error).__name__ if error else None
+
+
+def worker_state():
+    """Report actual threads separately from the configured deployment switch."""
+    configured, stopping = enabled(), _STOP.is_set()
+    with _ACTIVITY_LOCK:
+        lanes = {name: dict(_ACTIVITY[name]) for name in _ACTIVITY}
+    for name, thread in (("background", _THREAD), ("explicit", _INTERACTIVE_THREAD)):
+        alive = bool(thread and thread.is_alive())
+        lanes[name].update(alive=alive, running=alive and not stopping)
+    alive = [lane["alive"] for lane in lanes.values()]
+    if stopping and any(alive):
+        status = "stopping"
+    elif all(alive):
+        status = "running"
+    elif any(alive):
+        status = "partial"
+    elif not configured:
+        status = "disabled"
+    elif stopping:
+        status = "stopped"
+    else:
+        status = "not_started"
+    return {"configured_enabled": configured, "status": status,
+            "running": any(lane["running"] for lane in lanes.values()),
+            "restart_required": (configured and not all(lane["running"] for lane in lanes.values()))
+                                or (not configured and any(alive)), **lanes}
 
 
 @contextmanager
@@ -322,12 +370,17 @@ def retry_failed():
 
 def _loop():
     while not _STOP.is_set():
+        _activity("background", started=True)
+        error = None
         try:
             run_batch(int(os.environ.get("PROCESSING_BATCH_SIZE", "10")))
-        except Exception:
+        except Exception as exc:
+            error = exc
             # Individual job errors are durable. A worker-level failure is visible in the log.
             import logging
             logging.getLogger(__name__).exception("Processing worker failed")
+        finally:
+            _activity("background", error=error)
         _STOP.wait(10)
 
 
@@ -340,17 +393,22 @@ def _interactive_loop():
     """
     from automation.investigation_queue import run_pending
     while not _STOP.is_set():
+        _activity("explicit", started=True)
+        error = None
         try:
             run_pending(limit=1, explicit_only=True)
-        except Exception:
+        except Exception as exc:
+            error = exc
             import logging
             logging.getLogger(__name__).exception("Explicit investigation worker failed")
+        finally:
+            _activity("explicit", error=error)
         _STOP.wait(2)
 
 
 def start():
     global _THREAD, _INTERACTIVE_THREAD
-    if os.environ.get("AUTO_INGEST_ON_COLLECT", "1").lower() in {"0", "false", "no", "off"}:
+    if not enabled():
         return
     with _START_LOCK:
         _STOP.clear()
