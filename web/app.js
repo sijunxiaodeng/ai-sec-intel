@@ -799,7 +799,8 @@ function renderMonitorLive(data, opts) {
     if (phaseEl) {
       phaseEl.textContent = offlineDemo ? "离线样例已加载；手动刷新只同步本地样例。"
         : data && data.auto_enabled === false ? "自动监测已关闭；可手动刷新。"
-        : "约 " + intervalText + " 后自动刷新，也可立即刷新。";
+        : data && data.next_run ? "已安排下次自动刷新，也可立即刷新。"
+        : "等待调度计划" + (data ? "（配置间隔 " + intervalText + "）" : "") + "；也可立即刷新。";
     }
   }
   if (lastEl && data) {
@@ -813,8 +814,8 @@ function renderMonitorLive(data, opts) {
     if (running) nextEl.textContent = "本轮进行中…";
     else if (offlineDemo) nextEl.textContent = "离线演示不执行定时采集";
     else if (data && data.auto_enabled === false) nextEl.textContent = "自动监测已关闭";
-    else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run) + "（等待约 " + intervalText + "）";
-    else if (data) nextEl.textContent = "完成首轮后等待约 " + intervalText;
+    else if (data && data.next_run) nextEl.textContent = formatStamp(data.next_run);
+    else nextEl.textContent = "等待调度计划" + (data ? "（配置间隔 " + intervalText + "）" : "");
   }
   var pipe = opts.pipeline || null;
   if (!pipe && data && data.pipeline) {
