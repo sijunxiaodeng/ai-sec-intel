@@ -437,6 +437,44 @@ class ObservationWindowTest(unittest.TestCase):
         result = self.import_list(self.inventory([item], source="OSV"), at=96)
         self.assertEqual(result["metrics"]["inventory"]["by_threshold"]["6"]["collected"], 1)
 
+    def test_osv_raw_and_document_materializations_cannot_double_score(self):
+        ghsa, cve = "GHSA-demo-aaaa-bbbb", "CVE-2020-1234"
+        composite = ghsa + ":" + cve
+        hashed = "doc-" + hashlib.sha256(("OSV\0" + ghsa).encode()).hexdigest()
+        url = "https://osv.dev/vulnerability/" + ghsa
+        self.record(composite, source="OSV", cve=cve, seen=2,
+                    payload_extra={"url": url, "raw_data": {"id": ghsa}})
+        self.document(hashed, source="OSV", seen=10)
+        with closing(sqlite3.connect(self.b)) as con, con:
+            con.execute("UPDATE knowledge_documents SET url=?,payload_json=?",
+                        (url, json.dumps({"raw_data": {"advisory": {"id": ghsa}}})))
+        for order in ((ghsa, composite), (composite, ghsa)):
+            with self.subTest(order=order):
+                self.window = self.create(sources=["OSV"])
+                self.tick(96)
+                items = [{**self.item(identity, 1), "url": url} for identity in order]
+                metrics = self.import_list(self.inventory(items, source="OSV"), at=96)["metrics"]["inventory"]
+                for hours in ("6", "12", "24"):
+                    self.assertEqual(metrics["by_threshold"][hours]["unknown"], 2)
+                    self.assertEqual(metrics["by_threshold"][hours]["denominator"], 0)
+                    self.assertIsNone(metrics["by_threshold"][hours]["within_rate"])
+                self.assertIsNone(metrics["recall"])
+                self.assertEqual(metrics["latency"]["samples"], 0)
+                self.assertEqual({item["reason"] for item in metrics["items"]}, {"duplicate_upstream_identity"})
+
+    def test_duplicate_upstream_id_is_unknown_even_when_materialized_urls_differ(self):
+        self.window = self.create(sources=["OSV"])
+        upstream = "GHSA-shared-advisory"
+        identities = (upstream + ":CVE-2020-1", upstream + ":CVE-2020-2")
+        for identity in identities:
+            self.record(identity, source="OSV", payload_extra={"raw_data": {"id": upstream}})
+        self.tick(96)
+        metrics = self.import_list(self.inventory([self.item(i, 1) for i in identities], source="OSV"), at=96)["metrics"]["inventory"]
+        self.assertEqual(metrics["by_threshold"]["6"]["unknown"], 2)
+        self.assertEqual(metrics["by_threshold"]["6"]["denominator"], 0)
+        self.assertIsNone(metrics["recall"])
+        self.assertEqual({item["reason"] for item in metrics["items"]}, {"duplicate_upstream_identity"})
+
     def test_absent_record_table_cannot_prove_missing_item(self):
         with closing(sqlite3.connect(self.b)) as con, con:
             con.execute("DROP TABLE source_items")

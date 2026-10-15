@@ -465,7 +465,7 @@ def _report(con, row, current):
                         completeness_verified=False, response_hash_verified="response_body" in inventory,
                         response_sha256_verified="response_body" in inventory)
         native_ids = {item["id"] for item in inventory["items"]}
-        claimed = set()
+        matches, upstream_groups = [], {}
         for item in inventory["items"]:
             candidates = by_native.get((entry["source"], item["id"]), [])
             alias = False
@@ -488,6 +488,20 @@ def _report(con, row, current):
                 record, reason = None, "source_url_conflict"
             if record and alias and not record.get("url"):
                 record, reason = None, "alias_requires_matching_source_url"
+            matches.append((item, record, reason, alias))
+            if record:
+                for field in ("upstream_id", "url"):
+                    value = record.get(field)
+                    if isinstance(value, str) and value:
+                        upstream_groups.setdefault((field, value), set()).add(record["record_key"])
+        # A source can materialize one advisory as both a raw record and a
+        # document. Exclude every matching representation before scoring so
+        # differing first-seen times cannot make inventory order decide delay.
+        duplicate_upstream = {key for group in upstream_groups.values() if len(group) > 1 for key in group}
+        claimed = set()
+        for item, record, reason, alias in matches:
+            if record and record["record_key"] in duplicate_upstream:
+                record, reason = None, "duplicate_upstream_identity"
             if record and (record["record_key"] in claimed or alias and record["native_id"] in native_ids):
                 record, reason = None, "duplicate_collected_identity"
             if record:
