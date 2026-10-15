@@ -56,13 +56,19 @@ def document_collector(spec, now):
         return FederalRegisterPolicyCollector(source=spec.name, url=spec.url, **options)
     url = spec.url
     if spec.kind == 'arxiv':
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError('arXiv collection requires an aware observation time')
+        now = now.astimezone(timezone.utc)
         parts = urlsplit(url)
         query = parse_qs(parts.query)
         # Bound bootstrap volume; a rolling window also rechecks recent papers.
         # This covers new submissions, not all revisions of old papers.
         days = _integer('PAPER_LOOKBACK_DAYS', 7, 1)
         start = (now - timedelta(days=days)).strftime('%Y%m%d0000')
-        end = now.strftime('%Y%m%d2359')
+        # The official API accepts GMT minute precision. Freeze this run's
+        # actual cutoff for every page, rather than querying the future end of
+        # today. This does not change arXiv's daily article publication cycle.
+        end = now.strftime('%Y%m%d%H%M')
         terms = query.get('search_query', ['all:"AI security"'])[0]
         if 'submittedDate:' not in terms:
             query['search_query'] = [f'({terms}) AND submittedDate:[{start} TO {end}]']
@@ -254,8 +260,25 @@ def collect_source(spec, db_path, *, now=None, collector=None):
             collector = collector or document_collector(spec, now)
             state = documents.get_http_state(spec.name) or {}
             batch = collector.collect(etag=state.get('etag'), last_modified=state.get('last_modified'))
-            if batch.status not in ('success', 'not_modified'):
+            if batch.status not in ('success', 'not_modified', 'partial'):
                 raise ValueError('Source did not complete a valid collection')
+            if batch.status == 'partial':
+                if batch.pending_reason not in {'result_count_changed', 'duplicate_documents'}:
+                    raise ValueError('Partial document collection requires a known gap reason')
+                message = {'result_count_changed': 'arXiv 分页期间结果总数变化',
+                           'duplicate_documents': 'arXiv 分页期间出现重复文档'}[batch.pending_reason]
+                error = message + '；已保留通过校验的去重记录，覆盖不完整，下轮从第一页重试'
+                audit = json.dumps({'reason': batch.pending_reason, 'message': error,
+                                    'collection': batch.collection_details}, ensure_ascii=False)
+                result = documents.ingest(spec.name, spec.category, batch.items, started_at=started,
+                                          status='partial', error=audit)
+                # Neither a page validator nor this partial observation can
+                # advance the source's complete-collection success timestamp.
+                return {'source': spec.name, 'category': spec.category, 'status': 'partial',
+                        **result, 'pending': True, 'pending_reason': batch.pending_reason,
+                        'error': error, 'collection': batch.collection_details,
+                        'upstream_entries': batch.fetched_count,
+                        'filtered_entries': batch.filtered_count, 'http_status': batch.status}
             result = documents.ingest(spec.name, spec.category, batch.items, started_at=started)
             if batch.status == 'not_modified':
                 etag = batch.etag if batch.etag is not None else state.get('etag')

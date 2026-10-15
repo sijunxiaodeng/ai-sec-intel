@@ -213,17 +213,107 @@ class ArxivTests(unittest.TestCase):
         self.assertIsNone(result.etag)
         self.assertTrue(first.closed and last.closed)
 
-    def test_missing_or_changing_metadata_and_incomplete_pages_fail(self):
+    def test_missing_metadata_and_invalid_or_incomplete_pages_fail(self):
         scenarios = [
             [Response(atom([atom_entry()]))],
             [Response(atom([atom_entry()], total=2, start=1, size=1))],
             [Response(atom([], total=2, start=0, size=1))],
-            [Response(atom([atom_entry()], total=2, start=0, size=1)), Response(atom([atom_entry("2")], total=3, start=1, size=1))],
-            [Response(atom([atom_entry()], total=2, start=0, size=1)), Response(atom([atom_entry()], total=2, start=1, size=1))],
         ]
         for responses in scenarios:
             with self.subTest(pages=len(responses)), self.assertRaises(ValueError):
                 self.collector(*responses).collect()
+
+    def test_changed_total_retains_verified_pages_and_stops_without_repeating_requests(self):
+        pages = [Response(atom([atom_entry(str(i))], total=total, start=i, size=1),
+                          headers={"ETag": "page-only"})
+                 for i, total in enumerate((3, 3, 4))]
+        collector = self.collector(*pages)
+        result = collector.collect(etag="old")
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(result.pending_reason, "result_count_changed")
+        self.assertEqual((len(result.items), result.fetched_count), (3, 3))
+        self.assertEqual(result.collection_details["initial_total_results"], 3)
+        self.assertEqual(result.collection_details["latest_total_results"], 4)
+        self.assertEqual(result.collection_details["last_page_start"], 2)
+        self.assertEqual(result.collection_details["retry_start"], 0)
+        self.assertFalse(result.collection_details["complete"])
+        self.assertIsNone(result.etag)
+        self.assertIsNone(result.last_modified)
+        self.assertEqual([parse_qs(urlsplit(url).query)["start"][0] for url, _ in collector.session.calls],
+                         ["0", "1", "2"])
+        self.assertTrue(all(page.closed for page in pages))
+        self.assertTrue(all("If-None-Match" not in options["headers"] for _, options in collector.session.calls))
+
+    def test_shrinking_and_disappearing_result_sets_preserve_prior_observations_as_partial(self):
+        for latest, entries, expected in ((2, [atom_entry("2")], 2), (1, [], 1), (0, [], 1)):
+            pages = [Response(atom([atom_entry("1")], total=3, start=0, size=1)),
+                     Response(atom(entries, total=latest, start=1, size=1))]
+            with self.subTest(latest=latest):
+                result = self.collector(*pages).collect()
+                self.assertEqual(result.status, "partial")
+                self.assertEqual(result.pending_reason, "result_count_changed")
+                self.assertEqual(len(result.items), expected)
+                self.assertEqual(result.collection_details["latest_total_results"], latest)
+                self.assertEqual(result.collection_details["last_page_start"], 1)
+                self.assertTrue(all(page.closed for page in pages))
+
+    def test_drift_outside_count_or_item_bounds_retains_only_the_prior_valid_pages(self):
+        for latest in (0, 10):
+            with self.subTest(latest=latest):
+                result = self.collector(
+                    Response(atom([atom_entry("first")], total=2, start=0, size=1)),
+                    Response(atom([atom_entry("untrusted-count")], total=latest, start=1, size=1)),
+                    max_items=3,
+                ).collect()
+                self.assertEqual(result.status, "partial")
+                self.assertEqual(len(result.items), 1)
+                self.assertEqual(result.fetched_count, 1)
+                self.assertFalse(result.collection_details["last_page_retained"])
+                self.assertEqual(result.items[0].raw_data["entry_id"], "first")
+
+    def test_duplicate_across_pages_is_deduplicated_but_never_reported_complete(self):
+        collector = self.collector(
+            Response(atom([atom_entry("1", title="First observation"), atom_entry("2")], total=4, start=0, size=2)),
+            Response(atom([atom_entry("1", title="Later observation"), atom_entry("3")], total=4, start=2, size=2)),
+        )
+        collector.url = self.url.replace("max_results=1", "max_results=2")
+        result = collector.collect()
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(result.pending_reason, "duplicate_documents")
+        self.assertEqual((len(result.items), result.fetched_count), (3, 4))
+        self.assertEqual(result.items[0].title, "First observation")
+        self.assertEqual(result.collection_details["unique_entries"], 3)
+        self.assertEqual(result.collection_details["duplicate_entries"], 1)
+        self.assertEqual(len(collector.session.calls), 2)
+
+    def test_filtered_cross_page_duplicate_still_marks_an_incomplete_collection(self):
+        result = self.collector(
+            Response(atom([atom_entry("1")], total=2, start=0, size=1)),
+            Response(atom([atom_entry("1")], total=2, start=1, size=1)),
+            content_terms=["absent-filter-term"],
+        ).collect()
+        self.assertEqual(result.status, "partial")
+        self.assertEqual(result.items, [])
+        self.assertEqual(result.filtered_count, 2)
+        self.assertEqual(result.collection_details["unique_entries"], 1)
+
+    def test_partial_recovery_does_not_accept_invalid_page_content_or_identity(self):
+        bad_pages = [
+            '<!DOCTYPE feed [<!ENTITY x "unsafe">]>' + atom([], total=3, start=1, size=1),
+            atom([atom_entry("2", link="javascript:alert(1)")], total=3, start=1, size=1),
+            atom([atom_entry("2"), atom_entry("2")], total=3, start=1, size=2),
+            atom([atom_entry("2")], total=3, start=0, size=1),
+        ]
+        for body in bad_pages:
+            pages = [Response(atom([atom_entry("1")], total=2, start=0, size=1)), Response(body)]
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                self.collector(*pages).collect()
+            self.assertTrue(all(page.closed for page in pages))
+
+    def test_stable_empty_result_is_complete(self):
+        result = self.collector(Response(atom([], total=0, start=0, size=0))).collect()
+        self.assertEqual(result.status, "success")
+        self.assertIsNone(result.pending_reason)
 
     def test_item_and_page_caps_do_not_produce_a_partial_success(self):
         with self.assertRaises(ValueError):

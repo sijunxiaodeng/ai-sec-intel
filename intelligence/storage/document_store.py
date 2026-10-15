@@ -112,7 +112,7 @@ class SQLiteDocumentStore:
                 source_category TEXT NOT NULL,
                 started_at TEXT NOT NULL,
                 finished_at TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('success','failed')),
+                status TEXT NOT NULL CHECK(status IN ('success','partial','failed')),
                 fetched_count INTEGER NOT NULL DEFAULT 0,
                 inserted_count INTEGER NOT NULL DEFAULT 0,
                 updated_count INTEGER NOT NULL DEFAULT 0,
@@ -131,6 +131,32 @@ class SQLiteDocumentStore:
             connection.execute("BEGIN IMMEDIATE")
             for statement in statements:
                 connection.execute(statement)
+            runs_schema = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='document_source_runs'"
+            ).fetchone()[0]
+            if "'partial'" not in runs_schema:
+                # SQLite cannot alter a CHECK constraint. Migrate only this
+                # audit table, atomically preserving history and its sequence.
+                sequence = connection.execute(
+                    "SELECT seq FROM sqlite_sequence WHERE name='document_source_runs'"
+                ).fetchone()
+                create_runs = next(sql for sql in statements if sql.startswith(
+                    "CREATE TABLE IF NOT EXISTS document_source_runs ("))
+                connection.execute(create_runs.replace(
+                    "IF NOT EXISTS document_source_runs", "document_source_runs_partial"))
+                columns = ("id,source,source_category,started_at,finished_at,status,fetched_count,"
+                           "inserted_count,updated_count,unchanged_count,error_text")
+                connection.execute(f"INSERT INTO document_source_runs_partial ({columns}) "
+                                   f"SELECT {columns} FROM document_source_runs")
+                connection.execute("DROP TABLE document_source_runs")
+                connection.execute("ALTER TABLE document_source_runs_partial RENAME TO document_source_runs")
+                connection.execute("CREATE INDEX idx_document_runs_source ON document_source_runs(source,id)")
+                if sequence:
+                    connection.execute("INSERT INTO sqlite_sequence (name,seq) SELECT 'document_source_runs',? "
+                                       "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='document_source_runs')",
+                                       (sequence[0],))
+                    connection.execute("UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='document_source_runs'",
+                                       (sequence[0],))
             ensure_changefeed(connection)
 
     @staticmethod
@@ -169,14 +195,19 @@ class SQLiteDocumentStore:
         return payload
 
     def ingest(self, source: str, category: str, items: Iterable[KnowledgeDocument],
-               started_at: str | None = None) -> dict[str, int]:
-        """Atomically commit one successful collection, including an empty/304 run.
+               started_at: str | None = None, *, status: str = "success",
+               error: str | None = None) -> dict[str, int]:
+        """Atomically commit validated documents and their actual run outcome.
 
         Empty responses keep historical documents. A failed validation rolls
-        back both document updates and the success run; callers can then record
-        failure separately. HTTP validators are saved only after this succeeds.
+        back both document updates and the run; callers can then record failure
+        separately. Only complete success permits saving HTTP validators.
         """
         source, category = self._run_identity(source, category)
+        if status not in {"success", "partial"} or (status == "partial" and not error):
+            raise ValueError("A partial collection requires a recorded incompleteness reason")
+        if status == "success" and error is not None:
+            raise ValueError("A successful collection cannot contain an incompleteness reason")
         documents = list(items)
         now = utc_now()
         started_at = normalize_timestamp(started_at) or now
@@ -250,10 +281,10 @@ class SQLiteDocumentStore:
             connection.execute(
                 """INSERT INTO document_source_runs
                    (source,source_category,started_at,finished_at,status,
-                    fetched_count,inserted_count,updated_count,unchanged_count)
-                   VALUES (?,?,?,?,'success',?,?,?,?)""",
-                (source, category, started_at, now, counts["fetched"], counts["inserted"],
-                 counts["updated"], counts["unchanged"]),
+                    fetched_count,inserted_count,updated_count,unchanged_count,error_text)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (source, category, started_at, now, status, counts["fetched"], counts["inserted"],
+                 counts["updated"], counts["unchanged"], str(error)[:2000] if error else None),
             )
         return counts
 

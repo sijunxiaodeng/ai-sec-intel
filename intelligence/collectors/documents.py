@@ -1,8 +1,9 @@
 """Source-preserving RSS/Atom and vendor advisory knowledge collectors.
 
 These adapters never invent CVEs, publication times, or model labels. Collection
-is deliberately separate from persistence and scheduling. Incomplete pages raise
-an error so a caller cannot advance a source checkpoint or freshness deadline.
+is deliberately separate from persistence and scheduling. Invalid pages raise;
+verified arXiv pages from a moving result set are explicitly partial so callers
+can retain evidence without advancing a complete-source freshness deadline.
 """
 from __future__ import annotations
 
@@ -51,6 +52,8 @@ class CollectionResult:
     response_headers: dict[str, str] = field(default_factory=dict)
     fetched_count: int = 0
     filtered_count: int = 0
+    pending_reason: str | None = None
+    collection_details: dict[str, Any] = field(default_factory=dict)
 
 
 def document_id(source: str, source_id: str) -> str:
@@ -364,7 +367,7 @@ class FeedCollector:
 
 
 class ArxivCollector(FeedCollector):
-    """Collect an entire query, verifying every OpenSearch page before success."""
+    """Verify every page; retain a bounded partial batch if the result set moves."""
     def __init__(self, *args, max_pages=20, **kwargs):
         kwargs.setdefault("query_scoped", True)
         kwargs.setdefault("allowed_link_hosts", ("arxiv.org", "www.arxiv.org", "export.arxiv.org"))
@@ -395,6 +398,22 @@ class ArxivCollector(FeedCollector):
             raise ValueError("arXiv max_results must be between 1 and 2000")
         all_items, total, start, count, filtered, first_headers = [], None, 0, 0, 0, {}
         seen = set()
+
+        def partial(reason, latest_total, fetched, duplicate_count, *, page_retained):
+            # Restart at zero on the next scheduled poll: offset pagination
+            # cannot prove which papers shifted across an already read boundary.
+            return CollectionResult(
+                all_items, "partial", response_headers=first_headers,
+                fetched_count=count, filtered_count=filtered, pending_reason=reason,
+                collection_details={
+                    "complete": False, "initial_total_results": total,
+                    "latest_total_results": latest_total, "last_page_start": start,
+                    "last_page_entries": fetched, "last_page_retained": page_retained,
+                    "unique_entries": len(seen), "duplicate_entries": duplicate_count,
+                    "retry_start": 0,
+                },
+            )
+
         for page in range(self.max_pages):
             query.update(start=str(start), max_results=str(page_size))
             url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), ""))
@@ -405,21 +424,36 @@ class ArxivCollector(FeedCollector):
                     first_headers = _cache_headers(response)
                 if not all(key in metadata for key in ("totalResults", "startIndex", "itemsPerPage")):
                     raise ValueError("arXiv response is missing pagination metadata")
-                if metadata["startIndex"] != start or fetched > metadata["itemsPerPage"]:
+                if (metadata["startIndex"] != start or fetched > metadata["itemsPerPage"]
+                        or fetched > page_size):
                     raise ValueError("arXiv returned an unexpected page offset or count")
-                if total is not None and total != metadata["totalResults"]:
-                    raise ValueError("arXiv result count changed during pagination; retry the query")
-                total = metadata["totalResults"]
-                if total > self.max_items or start + fetched > total:
+                latest_total = metadata["totalResults"]
+                changed = total is not None and total != latest_total
+                # A disappearing result set may legitimately leave this offset
+                # beyond its new end. Keep the earlier verified observations,
+                # without claiming they form a current or complete snapshot.
+                if changed and not fetched and start >= latest_total:
+                    return partial("result_count_changed", latest_total, fetched, 0, page_retained=True)
+                if changed and (latest_total > self.max_items or start + fetched > latest_total):
+                    # Retain only prior pages if this page cannot fit the new
+                    # count/item budget. Its records never reach persistence.
+                    return partial("result_count_changed", latest_total, fetched, 0, page_retained=False)
+                if total is None:
+                    total = latest_total
+                if latest_total > self.max_items or start + fetched > latest_total:
                     raise ValueError("arXiv query exceeds item limit or pagination counts are inconsistent")
-                if not fetched and start < total:
+                if not fetched and start < latest_total:
                     raise ValueError("arXiv returned an incomplete empty page")
                 page_ids = metadata["document_ids"]
-                if seen.intersection(page_ids):
-                    raise ValueError("arXiv repeated a document across pages")
+                duplicates = seen.intersection(page_ids)
+                # Do not overwrite the first verified observation with a later
+                # repeated identity from the same unstable pagination attempt.
+                all_items.extend(item for item in items if item.document_id not in seen)
                 seen.update(page_ids)
-                all_items.extend(items)
                 count, filtered = count + fetched, filtered + skipped
+                if changed or duplicates:
+                    return partial("result_count_changed" if changed else "duplicate_documents",
+                                   latest_total, fetched, len(duplicates), page_retained=True)
                 start += fetched
                 if start >= total:
                     # Conditional validators for one page cannot prove later pages unchanged.

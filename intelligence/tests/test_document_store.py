@@ -163,6 +163,69 @@ class DocumentStoreTests(unittest.TestCase):
             connection.execute("DELETE FROM knowledge_documents")
         self.assertIsNone(self.store.get_http_state(SOURCE))
 
+    def test_partial_ingest_atomically_preserves_documents_and_run_without_advancing_success(self):
+        self.ingest_at(T1, [document()])
+        self.store.save_http_state(SOURCE, '"complete-v1"')
+        state = self.store.get_http_state(SOURCE)
+        with patch("storage.document_store.utc_now", return_value=T2):
+            counts = self.store.ingest(SOURCE, CATEGORY, [document(document_id="new")],
+                                       status="partial", error="result_count_changed")
+        self.assertEqual(counts["inserted"], 1)
+        run = self.store.stats()["latest_runs"][0]
+        self.assertEqual((run["status"], run["inserted_count"]), ("partial", 1))
+        self.assertEqual(run["error_text"], "result_count_changed")
+        self.assertEqual(self.store.stats()["documents"], 2)
+        with self.assertRaisesRegex(ValueError, "successful"):
+            self.store.save_http_state(SOURCE, '"incomplete-v2"')
+        self.assertEqual(self.store.get_http_state(SOURCE), state)
+        with self.assertRaises(ValueError):
+            self.store.ingest(SOURCE, CATEGORY, [document(document_id="bad", published_at="bad")],
+                              status="partial", error="result_count_changed")
+        self.assertEqual(self.store.stats()["latest_runs"][0], run)
+        self.assertIsNone(self.store.get_document("bad"))
+
+    def test_legacy_run_constraint_migrates_once_preserving_history_sequence_and_documents(self):
+        self.ingest_at(T1, [document()])
+        self.store.record_failure(SOURCE, CATEGORY, "old failure", T2)
+        previous = self.rows("SELECT * FROM document_source_runs ORDER BY id")
+        with closing(sqlite3.connect(self.db)) as con, con:
+            schema = con.execute("SELECT sql FROM sqlite_master WHERE name='document_source_runs'").fetchone()[0]
+            con.execute("DROP TABLE document_source_runs")
+            con.execute(schema.replace("'success','partial','failed'", "'success','failed'"))
+            con.executemany("INSERT INTO document_source_runs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            [tuple(row.values()) for row in previous])
+            con.execute("UPDATE sqlite_sequence SET seq=100 WHERE name='document_source_runs'")
+        migrated = SQLiteDocumentStore(self.db)
+        self.assertEqual(self.rows("SELECT * FROM document_source_runs ORDER BY id"), previous)
+        self.assertIsNotNone(migrated.get_document("document-1"))
+        migrated.ingest(SOURCE, CATEGORY, [], status="partial", error="result_count_changed")
+        self.assertEqual(migrated.stats()["latest_runs"][0]["id"], 101)
+        before = self.rows("SELECT * FROM document_source_runs ORDER BY id")
+        SQLiteDocumentStore(self.db)
+        self.assertEqual(self.rows("SELECT * FROM document_source_runs ORDER BY id"), before)
+        self.assertTrue(self.rows("SELECT name FROM sqlite_master WHERE name='idx_document_runs_source'"))
+
+    def test_partial_run_requires_explicit_gap_and_success_cannot_hide_one(self):
+        for options in ({"status": "partial"}, {"status": "failed"},
+                        {"status": "success", "error": "unresolved gap"}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                self.store.ingest(SOURCE, CATEGORY, [document()], **options)
+        self.assertEqual(self.store.stats()["documents"], 0)
+        self.assertEqual(self.store.stats()["latest_runs"], [])
+
+    def test_legacy_empty_audit_table_preserves_previously_allocated_sequence(self):
+        with closing(sqlite3.connect(self.db)) as con, con:
+            schema = con.execute("SELECT sql FROM sqlite_master WHERE name='document_source_runs'").fetchone()[0]
+            con.execute("DROP TABLE document_source_runs")
+            con.execute(schema.replace("'success','partial','failed'", "'success','failed'"))
+            con.execute("INSERT INTO document_source_runs (id,source,source_category,started_at,finished_at,status) "
+                        "VALUES (137,?,?,?,?, 'success')", (SOURCE, CATEGORY, T1, T1))
+            con.execute("DELETE FROM document_source_runs")
+        migrated = SQLiteDocumentStore(self.db)
+        self.assertEqual(migrated.stats()["latest_runs"], [])
+        migrated.ingest(SOURCE, CATEGORY, [], status="partial", error="result_count_changed")
+        self.assertEqual(migrated.stats()["latest_runs"][0]["id"], 138)
+
     def test_query_filters_cve_links_pagination_and_parameter_binding(self):
         self.ingest_at(T1, [document(document_id="one", cve_ids=["CVE-2026-1234"]),
                            document(document_id="two", content_type="standard")])

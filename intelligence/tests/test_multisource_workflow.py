@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +22,7 @@ from api_v6.repository import current_classifier_version
 from collectors.base import IntelligenceItem
 from collectors.documents import CollectionResult, KnowledgeDocument, make_document_id
 from incremental.cursors import CursorStore
-from monitoring.multisource import _run_child, collect_source, ensure_source_baseline, run_cycle
+from monitoring.multisource import _run_child, collect_source, document_collector, ensure_source_baseline, run_cycle
 from monitoring.source_registry import SourceSpec, get_sources
 from run_monitor import main as monitor_main
 from storage.document_store import SQLiteDocumentStore
@@ -38,6 +39,23 @@ def document(spec, identity='one', published='2026-10-08T01:00:00Z'):
 
 
 class MultisourceTests(unittest.TestCase):
+    def test_arxiv_cutoff_is_fixed_at_the_observed_utc_minute_across_timezones(self):
+        spec = next(spec for spec in get_sources() if spec.kind == 'arxiv')
+        local = datetime(2026, 10, 15, 7, 42, 59, tzinfo=timezone(timedelta(hours=8)))
+        utc = local.astimezone(timezone.utc)
+        with patch.dict(os.environ, {'PAPER_LOOKBACK_DAYS': '7'}):
+            collector = document_collector(spec, local)
+            self.assertEqual(collector.url, document_collector(spec, utc).url)
+            terms = parse_qs(urlsplit(collector.url).query)['search_query'][0]
+            self.assertIn('submittedDate:[202610070000 TO 202610142342]', terms)
+            self.assertNotIn('202610142359', terms)
+            next_terms = parse_qs(urlsplit(document_collector(spec, utc + timedelta(minutes=1)).url).query)['search_query'][0]
+            self.assertIn('TO 202610142343]', next_terms)
+            # A saved collector's cutoff is not rebuilt while its pages load.
+            self.assertEqual(parse_qs(urlsplit(collector.url).query)['search_query'][0], terms)
+        with self.assertRaisesRegex(ValueError, 'aware'):
+            document_collector(spec, datetime(2026, 10, 15, 7, 42))
+
     def test_default_catchup_covers_nine_day_gap_and_old_cve_revisions(self):
         now = datetime(2026, 10, 13, 12, tzinfo=timezone.utc)
         cursor = now - timedelta(days=9)
@@ -225,6 +243,62 @@ class MultisourceTests(unittest.TestCase):
             with closing(sqlite3.connect(db)) as con, con:
                 self.assertEqual(con.execute('SELECT COUNT(*) FROM source_observation_baselines').fetchone()[0], 13)
             self.assertEqual(json.loads((db.parent / 'monitoring_status.json').read_text())['status'], 'partial')
+
+    def test_partial_papers_commit_gap_and_retry_without_advancing_http_success(self):
+        spec = next(spec for spec in get_sources() if spec.kind == 'arxiv')
+        prior, added = document(spec, 'prior'), document(spec, 'added')
+        details = {'complete': False, 'initial_total_results': 2, 'latest_total_results': 3,
+                   'last_page_start': 1, 'unique_entries': 2, 'retry_start': 0}
+
+        class Collector:
+            def __init__(self):
+                self.calls = []
+
+            def collect(self, **kwargs):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return CollectionResult([prior, added], status='partial', etag='incomplete',
+                                            fetched_count=2, pending_reason='result_count_changed',
+                                            collection_details=details)
+                return CollectionResult([prior, added], fetched_count=2)
+
+        collector = Collector()
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'intel.db'
+            documents = SQLiteDocumentStore(db)
+            documents.ingest(spec.name, spec.category, [prior])
+            documents.save_http_state(spec.name, etag='prior-complete')
+            state = documents.get_http_state(spec.name)
+            result = collect_source(spec, db, collector=collector)
+            self.assertEqual(result['status'], 'partial')
+            self.assertTrue(result['pending'])
+            self.assertEqual(result['pending_reason'], 'result_count_changed')
+            self.assertEqual(result['collection'], details)
+            self.assertEqual((result['fetched'], result['inserted'], result['unchanged']), (2, 1, 1))
+            self.assertEqual(documents.stats()['documents'], 2)
+            run = documents.stats()['latest_runs'][0]
+            self.assertEqual((run['status'], run['inserted_count']), ('partial', 1))
+            self.assertEqual(json.loads(run['error_text'])['collection'], details)
+            self.assertEqual(documents.get_http_state(spec.name), state)
+            replay = collect_source(spec, db, collector=collector)
+            self.assertEqual(replay['status'], 'success')
+            self.assertFalse(replay['pending'])
+            self.assertEqual(replay['inserted'], 0)
+            self.assertEqual(replay['unchanged'], 2)
+            self.assertEqual(collector.calls[1]['etag'], 'prior-complete')
+            self.assertEqual(documents.stats()['documents'], 2)
+            self.assertEqual(documents.stats()['latest_runs'][0]['status'], 'success')
+
+    def test_partial_document_result_without_known_reason_is_not_ingested(self):
+        spec = next(spec for spec in get_sources() if spec.kind == 'arxiv')
+        collector = SimpleNamespace(collect=lambda **_: CollectionResult([document(spec)], status='partial'))
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'intel.db'
+            result = collect_source(spec, db, collector=collector)
+            self.assertEqual(result['status'], 'failed')
+            documents = SQLiteDocumentStore(db)
+            self.assertEqual(documents.stats()['documents'], 0)
+            self.assertEqual(documents.stats()['latest_runs'][0]['status'], 'failed')
 
     def test_timeout_records_failure_without_advancing_http_state(self):
         spec = get_sources()[3]
