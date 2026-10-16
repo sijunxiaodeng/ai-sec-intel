@@ -120,8 +120,11 @@ function acRenderQuality() {
   var grid = metricGroups.length ? add(parent, "div", "ac-metric-grid") : null;
   metricGroups.forEach(function (item) {
     var group = (stats.by_kind || {})[item[0]] || {}, card = add(grid, "div", "ac-metric");
-    add(card, "h3", "", item[1]); add(card, "div", "ac-number", acRate(group.independent_accuracy));
-    add(card, "p", "ac-number-label", "按声明独立复核准确率"); add(card, "p", "hint", item[2]);
+    var types = group.reviewed_subset_by_reviewer_type || {};
+    var aiOnly = Number(types.ai) > 0 && Number(types.human || 0) === 0;
+    add(card, "h3", "", item[1]); add(card, "div", "ac-number", acRate(aiOnly ? group.reviewed_subset_accuracy : group.independent_accuracy));
+    add(card, "p", "ac-number-label", aiOnly ? "AI辅助复核通过比例（非独立人审）" : "按声明独立复核准确率");
+    add(card, "p", "hint", aiOnly ? "通过 " + acCount(group.reviewed_subset_passed) + " / " + acCount(group.reviewed_subset_denominator) + " 条冻结事实；可在下方追加人工复核。" : item[2]);
     add(card, "p", "hint", "复核覆盖 " + acCount(group.reviewed_cases) + " / " + acCount(group.cases) + "；未复核 " + acCount(group.unreviewed_cases));
     add(card, "p", "hint", "已有复核但必要检查未填完 " + acCount(group.incomplete_review_cases));
     add(card, "p", "hint", "复核子集准确率 " + acRate(group.reviewed_subset_accuracy) + "（分母 " + acCount(group.reviewed_subset_denominator) + "）");

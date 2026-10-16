@@ -182,6 +182,10 @@ class ArticleCandidatesTest(unittest.TestCase):
         self.assertEqual(result["status"], "insufficient_context")
         searched.assert_not_called()
 
+    def test_incidental_validation_checklist_is_not_related_research(self):
+        self.ingest("This Ollama AI security skill follows good security practices: path traversal validation for PROJECT_DIR and idempotent file writes. ")
+        self.assertEqual(self.candidates()["items"], [])
+
     def test_partial_local_failure_does_not_erase_other_candidates(self):
         self.ingest("Ollama AI security path traversal research. ")
         def dispatch(query, **kwargs):

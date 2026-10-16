@@ -78,6 +78,12 @@ async function main() {
   context.acceptanceState.run.statistics.by_kind.enrichment = group;
   context.acRenderQuality();
   assert.match(texts(elements['ac-quality-summary']), /富化事实\n待验证/, 'existing samples must retain their actual review state');
+  context.acceptanceState.run.statistics.by_kind.enrichment = {...group,
+    reviewed_subset_by_reviewer_type:{ai:2,human:0}, reviewed_subset_accuracy:0.5,
+    reviewed_subset_denominator:2,reviewed_subset_passed:1};
+  context.acRenderQuality();
+  assert.match(texts(elements['ac-quality-summary']), /富化事实\n50.0%/);
+  assert.match(texts(elements['ac-quality-summary']), /AI辅助复核通过比例（非独立人审）/);
   context.acceptanceState.run = originalRun;
   context.acRenderQuality();
   assert.match(texts(elements['ac-quality-summary']), /评测代码提交\n未登记（版本未知）/);

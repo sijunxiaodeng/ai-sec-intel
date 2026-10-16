@@ -128,7 +128,19 @@ def _basis(chunk, profile, mechanisms):
         if mentions(text, value):
             rows.append({"kind": "cwe", "term": value, "label": "原文提到相同 CWE 编号"})
     for mechanism in mechanisms:
-        if re.search(mechanism[2], text, re.I):
+        matches = list(re.finditer(mechanism[2], text, re.I))
+        # A protection checklist/code sample that merely says "path traversal
+        # validation" is weak evidence of related vulnerability research.
+        # Keep actual findings/attacks/limitations and central research mentions.
+        useful = False
+        for match in matches:
+            nearby = text[max(0, match.start() - 160):match.end() + 160]
+            protective = re.search(r"validat|saniti[sz]|good.security.practic|校验|良好安全实践", nearby, re.I)
+            finding = re.search(r"vulnerab|exploit|bypass|arbitrary|malicious|attack|flaw|research|limitation|漏洞|攻击|绕过|缺陷|研究", nearby, re.I)
+            if not protective or finding:
+                useful = True
+                break
+        if useful:
             rows.append({"kind": "mechanism", "term": mechanism[0], "label": "原文涉及相同机制：" + mechanism[1]})
     for row in rows:
         row["citation_id"] = chunk["citation_id"]
