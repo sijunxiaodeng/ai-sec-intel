@@ -205,8 +205,8 @@ def _vuln_item(row: dict) -> IntelligenceItem:
         raw = {
             "demo_fixture": True,
             "cveID": cve,
-            "vendorProject": "demo",
-            "vendor": "demo",
+            "vendorProject": product,
+            "vendor": product,
             "product": product,
             "dateAdded": "2026-10-08",
             "requiredAction": "演示用：请升级到供应商修复版本（合成）",
@@ -215,6 +215,8 @@ def _vuln_item(row: dict) -> IntelligenceItem:
         }
         source_id = cve
     else:
+        # CPE vendor/product must match demo inventory identities (e.g. ollama/ollama).
+        cpe_token = product.replace("_", "-")
         raw = {
             "id": cve,
             "demo_fixture": True,
@@ -222,7 +224,7 @@ def _vuln_item(row: dict) -> IntelligenceItem:
                 "nodes": [{
                     "cpeMatch": [{
                         "vulnerable": True,
-                        "criteria": f"cpe:2.3:a:demo:{product}:*:*:*:*:*:*:*:*",
+                        "criteria": f"cpe:2.3:a:{cpe_token}:{cpe_token}:*:*:*:*:*:*:*:*",
                         "versionEndExcluding": end,
                     }],
                 }],

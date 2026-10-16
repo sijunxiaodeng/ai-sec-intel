@@ -6,7 +6,6 @@ var titles = {
   library: "资料库",
   assets: "情报富集",
   ask: "证据问答",
-  acceptance: "验收中心",
   settings: "模型设置"
 };
 var eyebrows = {
@@ -17,7 +16,6 @@ var eyebrows = {
   library: "可检索原文与片段",
   assets: "研究关联 / 资产风险",
   ask: "先证据后回答",
-  acceptance: "初赛指标 · 质量复核 · 持续观测 · 交付证据",
   settings: "模型接口"
 };
 
@@ -528,7 +526,6 @@ function setView(name, opts) {
   if (name === "library") loadLibrary();
   if (name === "enrich") loadAssets().catch(function () {});
   if (name === "settings") loadSettings();
-  if (name === "acceptance" && typeof loadAcceptance === "function") loadAcceptance();
 }
 
 function setTeamHealth(team) {
@@ -2946,7 +2943,7 @@ function renderLibraryDocRow(target, doc, allItems) {
       if (libraryActiveDocId === doc.document_id) renderLibraryEvidence(data);
     }).catch(showError);
   });
-  add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
+  add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + sourceLabel(doc.publisher || doc.team_source) + " · " + dateText(doc.published_at));
   var discoveryLabels = {team_api: "资料存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
   add(block, "p", "meta", libraryScopes[doc.content_scope] + " · " + doc.chunk_count + " 段 · " + (discoveryLabels[doc.discovery] || doc.discovery) + (doc.retained_previous ? " · 刷新失败，保留旧快照" : ""));
   if (doc.version) add(block, "p", "meta", "版本：" + doc.version);

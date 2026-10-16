@@ -31,7 +31,7 @@ def _auto_ingest_enabled():
 def _documents_step(records):
     if not _auto_ingest_enabled():
         return [], [{"role": "编排", "action": "跳过自动抓取关联资料",
-                     "detail": "AUTO_INGEST_ON_COLLECT 已关闭；可在详情页或 /api/documents 单独处理。"}]
+                     "detail": "采集后自动研判未启用；可在情报详情中单独补充关联资料。"}]
     from automation.processing import enqueue
     count = enqueue(records)
     return [], [{"role": "富化", "action": "加入富化与证据索引队列",

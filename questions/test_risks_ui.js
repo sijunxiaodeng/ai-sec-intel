@@ -173,7 +173,7 @@ async function main() {
 
   const disabledJob = {id:9,cve_id:'CVE-2026-12347',status:'pending',attempts:0,context:{reason:'assets_changed'},trace:{},wait_reason:{code:'worker_disabled',label:'当前实例后台处理关闭'}};
   context.renderInvestigations({worker_enabled:false,worker:{configured_enabled:false,status:'disabled',background:{running:false},explicit:{running:false}},total:1,items:[disabledJob]});
-  assert.match(elements['investigation-worker'].textContent, /运行此服务的电脑.*AUTO_INGEST_ON_COLLECT=1.*重启/);
+  assert.match(elements['investigation-worker'].textContent, /部署配置中开启采集后自动研判.*重启/);
   taskNodes = descendants(elements['investigation-list']);
   assert.ok(taskNodes.some(row => row.textContent.includes('当前实例后台处理关闭')));
   const historyButton = taskNodes.find(row => row.tag === 'button');

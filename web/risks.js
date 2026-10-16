@@ -193,10 +193,10 @@ function renderInvestigations(data) {
   if (worker) {
     var workerLabels = {disabled: "后台处理已关闭", not_started: "后台处理已配置，但线程尚未启动", running: "后台处理正在运行", partial: "部分后台线程未运行", stopping: "后台处理正在停止", stopped: "后台处理已停止"};
     workerMessage = (workerLabels[worker.status] || "后台状态待确认") + "。资产自动研判：" + (worker.background && worker.background.running ? "运行中" : "未运行") + "；主动研判：" + (worker.explicit && worker.explicit.running ? "运行中" : "未运行") + "。";
-    if (!worker.configured_enabled) workerMessage += "请在运行此服务的电脑设置 AUTO_INGEST_ON_COLLECT=1，并重启对应服务实例。";
+    if (!worker.configured_enabled) workerMessage += "请在部署配置中开启采集后自动研判，并重启服务后再试。";
     else if (worker.restart_required || worker.status === "not_started" || worker.status === "stopped") workerMessage += "请检查此服务实例的启动日志并重启，修改配置本身不会启动后台线程。";
   } else {
-    workerMessage = data.worker_enabled ? "后台处理配置已启用，当前服务未提供线程运行状态。" : "后台处理已关闭，排队任务不会执行。请在运行此服务的电脑设置 AUTO_INGEST_ON_COLLECT=1，并重启对应服务实例。";
+    workerMessage = data.worker_enabled ? "后台处理配置已启用，当前服务未提供线程运行状态。" : "后台处理已关闭，排队任务不会执行。请在部署配置中开启采集后自动研判，并重启服务后再试。";
   }
   $("investigation-worker").textContent = workerMessage + " 本页每 10 秒更新。任务执行次数是后台领取该任务的次数，不是模型推理或工具调用次数。";
   var total = Number.isInteger(data.total) ? data.total : data.items.length;

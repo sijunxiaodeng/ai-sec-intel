@@ -55,11 +55,43 @@ def prepare(directory):
     from rag.library import sync_team_drain, overview
     from database.store import load_kb
     run_collect()
+    seeded_evidence = _seed_offline_nvd_evidence()
     result = sync_team_drain()
     if result.get("status") != "ok":
         raise RuntimeError("离线资料导入失败，请查看数据库权限和运行日志")
     return {"mode": "offline_demo", "synthetic": True, "external_network": False,
-            "vulnerabilities": len(load_kb()), "documents": overview()["documents"]}
+            "vulnerabilities": len(load_kb()), "documents": overview()["documents"],
+            "nvd_evidence_seeded": seeded_evidence}
+
+
+def _seed_offline_nvd_evidence():
+    """Archive synthetic NVD JSON from the KB so asset matching can cite version ranges offline."""
+    from database.store import load_kb
+    from rag.ingest import ingest
+
+    seeded = 0
+    for record in load_kb():
+        item = record.get("item") or {}
+        cve_id = item.get("cve_id")
+        raw_nvd = ((item.get("raw_data") or {}).get("raw_by_source") or {}).get("NVD")
+        if not cve_id or not isinstance(raw_nvd, dict):
+            continue
+        # assess() expects the NVD 2.0 envelope; seed stores the inner CVE object.
+        payload = {"vulnerabilities": [{"cve": raw_nvd}]}
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+        def fetcher(url, _body=body, _cve=cve_id):
+            if "services.nvd.nist.gov" in url and _cve in url:
+                return {"body": _body, "content_type": "application/json", "url": url}
+            raise TimeoutError("offline demo keeps non-NVD fetches local-only")
+
+        try:
+            result = ingest(record, max_sources=1, fetcher=fetcher, update_index_on_ingest=False)
+        except Exception as exc:
+            raise RuntimeError("离线证据存档失败（%s）：%s" % (cve_id, exc)) from exc
+        if result.get("ok", 0):
+            seeded += 1
+    return seeded
 
 
 def main():

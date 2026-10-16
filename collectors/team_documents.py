@@ -61,7 +61,7 @@ def extract_summary(response):
     if row["description"].strip():
         parts.append(("team_api.description", row["description"]))
         fields.append("description")
-    notice = ("当前引用来自队友接口存档的题名/描述字段，未核对原始网页、论文或法规全文；"
+    notice = ("当前引用来自资料接口存档的题名/描述字段，未核对原始网页、论文或法规全文；"
               "不能把描述当成完整条款、标准要求或本项目验证结果。" if len(fields) > 1 else
               "当前接口存档仅包含来源题名，没有摘要或正文；只能引用该题名，"
               "不能据此推断条款、标准要求、研究结论或本项目验证结果。")

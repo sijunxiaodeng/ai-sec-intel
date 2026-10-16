@@ -55,7 +55,9 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/acceptance.js'), 'utf8'), context);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 async function main() {
-  assert.match(html, /data-view="acceptance"/);
+  // Product nav must not expose the scoring/acceptance wall; page markup may remain for ops.
+  assert.doesNotMatch(html, /data-view="acceptance"/);
+  assert.match(html, /id="acceptance"/);
   await context.loadAcceptance();
   assert.match(texts(elements['ac-criteria']), /DO_NOT_EXECUTE/);
   assert.match(texts(elements['ac-case-detail']), /DO_NOT_EXECUTE/);
