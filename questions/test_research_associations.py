@@ -1,6 +1,7 @@
 """Source-backed persisted research links, including stale and forged caches."""
 import copy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -83,3 +84,46 @@ class ResearchAssociationsTest(unittest.TestCase):
         self.assertNotEqual(actual["evidence"][0]["text"], "forged quote")
         row["match_basis"].append({"kind": "explicit_cve_mention", "term": "CVE-2024-37032"})
         self.assertEqual(self.current()["items"], [])
+
+    def api_client(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        from enrichment import research_associations
+        changes = {name: self.root / filename for name, filename in {
+            "DB_PATH": "main.sqlite3", "KB_PATH": "old.json", "RUNS_PATH": "runs.json",
+            "CARDS_PATH": "cards.json", "CARDS_JS_PATH": "cards.js", "SEED_CARDS_PATH": "seed.json"}.items()}
+        self.enterContext(patch.multiple(store, DATA=self.root, **changes))
+        self.enterContext(patch.dict(os.environ, {"MAIN_KB_DB_PATH": str(changes["DB_PATH"]), "MAIN_IMPORT_DEMO_CARDS": "0"}))
+        self.enterContext(patch.multiple(research_associations, LIBRARY_DB=self.library, DEFAULT_DB=self.evidence))
+        self.ingest("Ollama AI security path traversal research. ")
+        store.upsert([self.record])
+        return TestClient(app)
+
+    def test_refresh_and_read_api_roundtrip_uses_canonical_item_not_rag_view(self):
+        client = self.api_client()
+        with patch("api.app.get_record", side_effect=AssertionError("augmented display view must not be used")):
+            response = client.post("/api/research-associations/CVE-2024-37032/refresh")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["counts"]["paper"], 1)
+            response = client.get("/api/research-associations/CVE-2024-37032")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["counts"]["paper"], 1)
+        saved = store.get_record("CVE-2024-37032")
+        self.assertEqual(saved["item"]["raw_data"][KEY]["source_revision"], store.source_revision(saved))
+
+    def test_item_detail_does_not_mark_research_stale_due_to_transient_poc_view(self):
+        client = self.api_client()
+        self.assertEqual(client.post("/api/research-associations/CVE-2024-37032/refresh").status_code, 200)
+        view = store.get_record("CVE-2024-37032")
+        view["item"]["raw_data"]["poc_code"] = {"status": "not_collected"}
+        with patch("api.app.get_record", return_value=view), patch("rag.ingest.document_status", return_value={"status": "empty"}):
+            response = client.get("/api/items/CVE-2024-37032")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["research_associations"]["counts"]["paper"], 1)
+
+    def test_research_api_does_not_accept_library_only_records_for_persistence(self):
+        client = self.api_client()
+        with patch("api.app.get_record", return_value=self.record):
+            for path in ("/api/research-associations/CVE-2099-99999",):
+                self.assertEqual(client.get(path).status_code, 404)
+                self.assertEqual(client.post(path + "/refresh").status_code, 404)

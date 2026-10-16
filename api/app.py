@@ -1119,7 +1119,10 @@ def item_detail(cve_id: str):
     payload["poc"] = record.get("poc") or []
     payload["papers"] = record.get("papers") or []
     from enrichment.research_associations import current as research_current
-    payload["research_associations"] = research_current(record)
+    from database.store import get_record as stored_record
+    # The RAG view adds transient PoC/guidance fields. Revision-fenced research
+    # must use the canonical source item, not that augmented display view.
+    payload["research_associations"] = research_current(stored_record(cve_id.upper()) or record)
     payload["vector"] = (record.get("cvss") or {}).get("vector")
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
     from rag.ingest import document_status
@@ -1198,7 +1201,8 @@ def article_candidates(cve_id: str, top_k: int = 4):
 @app.get("/api/research-associations/{cve_id}")
 def research_associations(cve_id: str):
     from enrichment.research_associations import current
-    record = get_record(cve_id.upper())
+    from database.store import get_record as stored_record
+    record = stored_record(cve_id.upper())
     if not record:
         raise HTTPException(status_code=404, detail="知识库中没有这条情报")
     return current(record)
@@ -1207,7 +1211,8 @@ def research_associations(cve_id: str):
 @app.post("/api/research-associations/{cve_id}/refresh")
 def refresh_research_associations(cve_id: str):
     from enrichment.research_associations import refresh_and_save
-    record = get_record(cve_id.upper())
+    from database.store import get_record as stored_record
+    record = stored_record(cve_id.upper())
     if not record:
         raise HTTPException(status_code=404, detail="知识库中没有这条情报")
     try:
