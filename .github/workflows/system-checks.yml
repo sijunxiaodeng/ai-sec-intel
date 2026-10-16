@@ -98,6 +98,8 @@ jobs:
           node-version: '22'
       - name: Validate UI syntax and candidate detail interactions
         run: |
+          node --check web/answer-content.js
+          node questions/test_workbench_ui.js
           node --check web/app.js
           node --check web/risks.js
           node --check web/asset-workflow.js

@@ -14,7 +14,7 @@ function acEmpty(parent, message) { return add(parent, "p", "ac-empty", message)
 function acButton(parent, label, action, cls) { var button = add(parent, "button", cls || "ghost", label); button.type = "button"; button.addEventListener("click", action); return button; }
 function acLink(parent, label, path) { var link = add(parent, "a", "ac-link", label); link.href = path; link.setAttribute("download", ""); return link; }
 function acPath(type, id, suffix) { return "/api/acceptance/" + type + "/" + encodeURIComponent(id) + (suffix || ""); }
-function acMeta(parent, pairs) { var dl = add(parent, "dl", "ac-meta"); pairs.forEach(function (pair) { add(dl, "dt", "", pair[0]); add(dl, "dd", "", acText(pair[1])); }); return dl; }
+function acMeta(parent, pairs) { var dl = add(parent, "dl", "ac-meta"); pairs.forEach(function (pair) { add(dl, "dt", "", pair[0]); add(dl, "dd", /SHA|提交/.test(pair[0]) ? "technical" : "", acText(pair[1])); }); return dl; }
 function acDetails(parent, title, value) { var box = add(parent, "details", "ac-details"); add(box, "summary", "", title); add(box, "pre", "ac-text", acText(value)); return box; }
 function acLimitDetails(parent, title, values) { return acDetails(parent, title, values.map(function (value) { return acceptanceBlockers[value] || value; }).join("\n")); }
 function acTable(parent, headings, rows) {

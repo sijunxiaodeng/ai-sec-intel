@@ -46,6 +46,7 @@ function loadOverviewRisks() {
   return api("/api/risks?actionable=true&limit=5").then(function (data) {
     if (version !== overviewRiskVersion) return;
     clear(target);
+    if ($("overview-risk-count")) $("overview-risk-count").textContent = "待处置关联 " + data.total + " 条 · 含待确认项，非已证实漏洞利用";
     if (!data.items.length) add(target, "p", "hint", "暂无待办。可在资产风险页载入演示，或登记组件后评估。");
     (data.items || []).forEach(function (row) {
       var button = add(target, "button", "row", ""); button.type = "button";

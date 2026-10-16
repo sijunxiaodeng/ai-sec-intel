@@ -10,7 +10,7 @@ var titles = {
   settings: "模型设置"
 };
 var eyebrows = {
-  overview: "工作台",
+  overview: "监测更新、资产风险与最近任务",
   monitor: "CVE + 资料情报流",
   enrich: "EPSS / KEV / 研究关联 / 资产风险",
   risks: "自动关联 · 证据研判 · 处置跟踪",
@@ -37,6 +37,7 @@ var monitorRefreshStartedAt = 0;
 var lastMonitorStatus = null;
 var lastMonitorToastPhase = "";
 var selectedMonitorId = null;
+var selectedEnrichId = null;
 var offlineDemo = false;
 var offlineModeKnown = false;
 
@@ -392,12 +393,14 @@ function renderItemRow(parent, item, onPick) {
   row.type = "button";
   var itemKey = String(item.cve_id || item.id || item.url || "");
   if (itemKey) row.setAttribute("data-item-id", itemKey);
-  if (selectedMonitorId && itemKey && selectedMonitorId === itemKey) row.className += " is-selected";
+  var selected = parent.id === "enrich-list" ? selectedEnrichId : selectedMonitorId;
+  if (selected && itemKey && selected === itemKey) row.className += " is-selected";
+  row.setAttribute("aria-pressed", String(!!selected && selected === itemKey));
   if (isDemoItem(item) || item.demo) row.className += " is-demo";
   row.addEventListener("click", function () { onPick(item); });
   var id = add(row, "div");
   var primary = isDoc ? (item.category_label || "资料") : (item.cve_id || item.id || "");
-  var titleLine = add(id, "div", "title", primary);
+  var titleLine = add(id, "div", "title" + (isDoc ? "" : " technical"), primary);
   if (isDemoItem(item) || item.demo) {
     var badge = document.createElement("span");
     badge.className = "demo-badge";
@@ -429,7 +432,7 @@ function renderItemRow(parent, item, onPick) {
     add(srcWrap, "span", "src-tag src-" + fam, label);
   });
   if (isDoc) add(row, "div", "score kind-score", item.category_label || "资料");
-  else add(row, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
+  else add(row, "div", "score " + scoreClass(item.cvss), "CVSS " + scoreText(item.cvss));
   var text = add(row, "div");
   var headline = item.title && item.title !== item.cve_id ? item.title : (item.description || "");
   add(text, "div", "desc", (headline || "").slice(0, 140));
@@ -441,7 +444,7 @@ function renderItemRow(parent, item, onPick) {
   if (item.collected_at && collected && collected !== pub && collected !== "未知") {
     when += " · 入库 " + collected;
   }
-  add(text, "div", "meta", when + " · " + labels.join("、") + product);
+  add(text, "div", "meta", when + product);
 }
 
 function renderPrompts() {
@@ -508,6 +511,8 @@ function setView(name, opts) {
   if ($("assets")) $("assets").hidden = true;
   document.querySelectorAll(".pipeline button").forEach(function (button) {
     button.className = button.getAttribute("data-view") === name ? "is-on" : "";
+    if (button.getAttribute("data-view") === name) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
   $("page-title").textContent = titles[name] || name;
   if ($("page-eyebrow")) $("page-eyebrow").textContent = eyebrows[name] || "工作台";
@@ -677,6 +682,8 @@ function renderCollectPipeline(pipeline, opts) {
   box.hidden = false;
   var metrics = pipeline.metrics || {};
   var status = pipeline.status || "";
+  if (status === "running" && box.getAttribute("data-last-status") !== "running") box.open = true;
+  box.setAttribute("data-last-status", status);
   var countsPending = pipelineCountsPending(pipeline);
   if (summaryEl) {
     if (status === "running") {
@@ -784,6 +791,19 @@ function renderMonitorLive(data, opts) {
   var progress = $("monitor-progress");
   if (!live || !stateEl) return;
   var running = !!(opts.running || (data && data.running) || monitorRefreshing);
+  var drawer = $("monitor-status-drawer"), brief = $("monitor-brief");
+  if (drawer) {
+    if (running && !drawer._wasRunning) drawer.open = true;
+    drawer._wasRunning = running;
+  }
+  if (brief) {
+    brief.textContent = running ? "正在刷新 · " + (opts.phase || (data && data.run_phase) || "处理来源记录")
+      : data && data.last_run ? "最近更新 " + formatStamp(data.last_run) + " · 上次刷新" + monitorResultLabel(data.last_status)
+      : "尚无完成的监测轮次";
+    var failedSources = data && data.collection_summary && data.collection_summary.source_failed;
+    if (typeof failedSources === "number" && failedSources > 0) brief.textContent += " · 来源失败 " + failedSources;
+    brief.className = "hint monitor-brief" + (!running && data && data.last_status === "failed" ? " is-error" : !running && data && data.last_status === "partial" ? " is-warning" : "");
+  }
   var phase = opts.phase || (data && data.run_phase) || "";
   var elapsed = opts.elapsedSec != null ? opts.elapsedSec : null;
   var minutes = (data && data.interval_minutes) || ((data && data.interval_hours) ? data.interval_hours * 60 : 15);
@@ -898,31 +918,24 @@ function loadOverview() {
     var stats = $("stats");
     clear(stats);
     var monitor = data.monitor || {};
-    var team = data.team_intel || {};
-    var sourceNames = (data.sources || []).slice(0, 6).map(sourceLabel);
-    var sourceTotal = data.source_count || 0;
-    var sourceMore = sourceTotal > sourceNames.length
-      ? " 等 " + sourceTotal + " 个登记来源"
-      : (sourceNames.length ? "（" + sourceTotal + " 个登记来源）" : "");
-    var running = monitor.running ? "正在刷新" : (monitor.last_run
-      ? aiMonitorHeadline(monitor) + " · " + sourceCoverageText(monitor.collection_summary) : "可点监测页立即刷新");
-    $("monitor-line").textContent =
-      "监测 · " + running +
-      " · 情报 " + data.items +
-      " · 资料 " + ((data.library || {}).documents || 0) +
-      (sourceNames.length ? " · 来源 " + sourceNames.join(" / ") + sourceMore : "") +
-      " · 模型 " + (offlineDemo ? "离线停用" : data.llm_ready ? "已配置" : "未配置");
+    var collection = monitor.collection_summary || {};
+    $("monitor-line").textContent = monitor.running
+      ? "监测进行中 · " + (monitor.run_phase || "正在处理来源记录")
+      : monitor.last_run ? "最近完成 " + formatStamp(monitor.last_run) + " · " + monitorResultLabel(monitor.last_status)
+      : "尚无完成的监测轮次，可立即刷新读取来源。";
+    function metric(value) { return typeof value === "number" && Number.isFinite(value) ? String(value) : "暂无数据"; }
     [
-      [String(data.items), "情报条目"],
-      [String(sourceTotal), "登记来源"],
-      [String((data.library || {}).documents || 0), "资料库文档"],
-      [team.reachable ? String(team.team_total != null ? team.team_total : "—") : "—", "多源 CVE"],
-      [offlineDemo ? "离线摘录" : data.llm_ready ? "可用" : "未配置", "问答模型"]
+      [metric(data.items), "情报总量", "知识库漏洞条目"],
+      [metric(monitor.last_run ? monitor.last_count : null), "上轮新增情报", "最近完成轮次 · 唯一 CVE"],
+      [metric(collection.raw_inserted), "来源记录新增", collection.counts_complete === true ? "来源报告合计 · 可跨源重复" : "已报告来源合计 · 统计可能不完整"],
+      [metric((data.library || {}).documents), "资料库文档", "已入库的资料存档"]
     ].forEach(function (pair) {
       var card = add(stats, "div", "stat");
       add(card, "b", "", pair[0]);
       add(card, "span", "", pair[1]);
+      add(card, "small", "", pair[2]);
     });
+    renderOverviewSources(collection, data.source_count);
     var recent = $("recent");
     clear(recent);
     if (!data.recent.length) {
@@ -941,6 +954,22 @@ function loadOverview() {
     if (typeof loadOverviewRisks === "function") loadOverviewRisks();
     return true;
   }).catch(function (error) { showError(error); return false; });
+}
+
+function renderOverviewSources(collection, registeredCount) {
+  var target = $("overview-sources");
+  if (!target) return;
+  clear(target);
+  if ($("overview-source-count")) $("overview-source-count").textContent = typeof registeredCount === "number" ? "登记 " + registeredCount + " 源" : "登记数量未提供";
+  var rows = collection && Array.isArray(collection.sources) ? collection.sources : [];
+  if (!rows.length) { add(target, "p", "hint", "暂无本轮来源报告。登记来源数不代表本轮成功数。"); return; }
+  rows.slice(0, 8).forEach(function (row) {
+    var block = add(target, "div", "source-health-row");
+    add(block, "span", "", sourceLabel(row.source));
+    var cls = row.status === "ok" || row.status === "success" ? "st-ok" : ["error", "failed", "timeout"].indexOf(row.status) >= 0 ? "st-bad" : row.status === "partial" ? "st-warn" : "st-empty";
+    add(block, "span", "source-health-status " + cls, monitorResultLabel(row.status));
+  });
+  if (rows.length > 8) add(target, "p", "meta", "展示前 8 个来源；完整结果见情报监测。");
 }
 
 var monitorScope = "all";
@@ -973,6 +1002,7 @@ function setMonitorScope(scope) {
   listPages.monitor = 1;
   document.querySelectorAll("[data-monitor-scope]").forEach(function (node) {
     node.className = node.getAttribute("data-monitor-scope") === monitorScope ? "chip is-on" : "chip";
+    node.setAttribute("aria-pressed", String(node.getAttribute("data-monitor-scope") === monitorScope));
   });
   var detail = $("monitor-detail");
   if (detail) {
@@ -988,6 +1018,7 @@ function setMonitorCategoryFilter(filter) {
   listPages.monitor = 1;
   document.querySelectorAll("[data-category-filter]").forEach(function (node) {
     node.className = node.getAttribute("data-category-filter") === monitorCategoryFilter ? "chip is-on" : "chip";
+    node.setAttribute("aria-pressed", String(node.getAttribute("data-category-filter") === monitorCategoryFilter));
   });
   if (lastMonitorFeed) renderMonitorFeed(lastMonitorFeed);
   else loadItems("monitor");
@@ -999,6 +1030,7 @@ function setMonitorSourceFilter(filter) {
   listPages.monitor = 1;
   document.querySelectorAll("[data-source-filter]").forEach(function (node) {
     node.className = node.getAttribute("data-source-filter") === monitorSourceFilter ? "chip is-on" : "chip";
+    node.setAttribute("aria-pressed", String(node.getAttribute("data-source-filter") === monitorSourceFilter));
   });
   if (lastMonitorFeed) renderMonitorFeed(lastMonitorFeed);
   else loadItems("monitor");
@@ -1053,7 +1085,7 @@ function renderMonitorFeed(data) {
         ? "（知识库侧匹配漏洞 " + before + "，流内按组件截断）" : "")
       + (teamTotal ? "（资料摘要 " + teamTotal + "）" : "")
       + (filterBits.length ? " · " + filterBits.join(" + ") + " → 显示 " + items.length + " 条" : "")
-      + "。条目「发布」= 原文日；监测是否在跑看上方「最近更新」。";
+      + "。";
   }
   var mixEl = $("monitor-mix");
     if (mixEl) {
@@ -1182,7 +1214,7 @@ function openMonitorDetail(item) {
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
-      add(field, "b", "", pair[1]);
+      add(field, "b", /版本|CVSS|EPSS|SHA|哈希/.test(pair[0]) ? "technical" : "", pair[1]);
     });
     if (item.url) {
       var link = add(panel, "a", "meta", item.url);
@@ -1197,9 +1229,10 @@ function openMonitorDetail(item) {
   clearError();
   showToast("正在加载「" + cveId + "」…", "busy");
   api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+    if (selectedMonitorId !== String(cveId)) return;
     var panel = $("monitor-detail");
     clear(panel);
-    add(panel, "h2", "", detail.cve_id + (isDemoItem(detail) || detail.demo ? "（演示）" : ""));
+    add(panel, "h2", "technical", detail.cve_id + (isDemoItem(detail) || detail.demo ? "（演示）" : ""));
     add(panel, "p", "desc", detail.title || "");
     add(panel, "p", "desc", detail.description || "");
     var fields = add(panel, "div", "fields");
@@ -1213,7 +1246,7 @@ function openMonitorDetail(item) {
     ].forEach(function (pair) {
       var field = add(fields, "div", "field");
       add(field, "span", "", pair[0]);
-      add(field, "b", "", pair[1]);
+      add(field, "b", /版本|CVSS|EPSS|SHA|哈希/.test(pair[0]) ? "technical" : "", pair[1]);
     });
     var go = add(panel, "button", "primary", "送去富集（含影响资产）");
     go.type = "button";
@@ -1227,6 +1260,7 @@ function openMonitorDetail(item) {
 
 var detailRequestVersion = 0;
 function openDetail(cveId) {
+  selectedEnrichId = String(cveId);
   var requestVersion = ++detailRequestVersion;
   setView("enrich");
   clearError();
@@ -1553,7 +1587,7 @@ function renderPocCode(panel, cveId, initialReport) {
 function renderDetail(item) {
   var panel = $("enrich-detail");
   clear(panel);
-  add(panel, "h2", "", item.cve_id);
+  add(panel, "h2", "technical", item.cve_id);
   add(panel, "p", "desc", item.description || "");
   var fields = add(panel, "div", "fields");
   [
@@ -1570,7 +1604,7 @@ function renderDetail(item) {
   ].forEach(function (pair) {
     var field = add(fields, "div", "field");
     add(field, "span", "", pair[0]);
-    add(field, "b", "", pair[1]);
+    add(field, "b", /版本|CVSS|EPSS|SHA|哈希/.test(pair[0]) ? "technical" : "", pair[1]);
   });
   renderAssessment(panel, item.assessment);
   renderGuidance(panel, item.related_guidance);
@@ -2478,6 +2512,8 @@ on("ask-form", "submit", function (event) {
   event.preventDefault();
   var button = $("ask-btn");
   button.disabled = true;
+  button.textContent = "正在检索与回答…";
+  button.setAttribute("aria-busy", "true");
   $("new-session").disabled = true;
   clearError();
   var question = $("question").value.trim();
@@ -2495,29 +2531,34 @@ on("ask-form", "submit", function (event) {
     var answer = $("answer");
     clear(answer);
     askSessionId = data.session_id;
+    var citationTargets = {};
+    (data.evidence_chunks || []).forEach(function (chunk, index) { citationTargets[chunk.citation_id] = "qa-evidence-" + index; });
+    (data.evidence || []).forEach(function (item, index) { citationTargets[String(index + 1)] = "qa-record-" + index; });
     $("conversation-context").textContent = "第 " + data.turn + " 轮 · " + ((data.context.cve_ids || []).join("、") || "未限定漏洞") + " · " + data.context.notice;
     (data.history || []).forEach(function (turn) {
       if (turn.turn === data.turn) {
         add(answer, "h3", "", "第 " + turn.turn + " 轮：" + turn.question);
-        add(answer, "div", "", data.answer);
+        renderAnswerContent(answer, data.answer, citationTargets);
       } else {
         var previous = add(answer, "details", "conversation-turn");
         add(previous, "summary", "", "第 " + turn.turn + " 轮：" + turn.question);
-        add(previous, "div", "", turn.answer);
+        renderAnswerContent(previous, turn.answer);
         add(previous, "p", "meta", "历史回答；右侧证据对应最新一轮。超过长度的历史回答仅保留前 12000 字符。");
       }
     });
-    $("question").value = "";
+    if ($("question").value.trim() === question) $("question").value = "";
     var answerMode = data.used_model ? "模型回答" : (data.model_attempted ? "模型回退到证据摘录" : "规则回答");
     $("verdict").textContent = !data.evidence.length ? "证据不足" : answerMode + " · " + (data.verdict.passed ? "引用、编号与分数检查通过" : "检查未通过");
+    $("verdict").setAttribute("data-state", !data.verdict.passed ? "failed" : data.model_attempted && !data.used_model ? "fallback" : "available");
     renderSteps($("ask-steps"), data.steps);
     var evidence = $("evidence");
     clear(evidence);
     if (!data.evidence.length) {
       add(evidence, "p", "empty", "没有召回到情报。");
     }
-    (data.evidence_chunks || []).forEach(function (chunk) {
+    (data.evidence_chunks || []).forEach(function (chunk, index) {
       var block = add(evidence, "div", "evidence-chunk");
+      block.id = "qa-evidence-" + index; block.tabIndex = 0;
       add(block, "div", "title", "[" + chunk.citation_id + "] " + chunk.title);
       add(block, "p", "desc", chunk.text);
       add(block, "div", "meta", "原文定位：" + chunk.locator);
@@ -2530,6 +2571,7 @@ on("ask-form", "submit", function (event) {
     });
     data.evidence.forEach(function (item, index) {
       var block = add(evidence, "div", "mini");
+      block.id = "qa-record-" + index;
       var text = add(block, "div");
       add(text, "div", "title", "[" + (index + 1) + "] " + item.cve_id);
       add(text, "div", "desc", (item.description || "").slice(0, 180));
@@ -2537,10 +2579,12 @@ on("ask-form", "submit", function (event) {
       link.href = item.url;
       link.target = "_blank";
       link.rel = "noopener";
-      add(block, "div", "score " + scoreClass(item.cvss), scoreText(item.cvss));
+      add(block, "div", "score " + scoreClass(item.cvss), "CVSS " + scoreText(item.cvss));
     });
   }).catch(showError).then(function () {
     button.disabled = false;
+    button.textContent = "提问";
+    button.removeAttribute("aria-busy");
     $("new-session").disabled = false;
   });
 });
@@ -2548,6 +2592,10 @@ on("ask-form", "submit", function (event) {
 on("settings-form", "submit", function (event) {
   event.preventDefault();
   clearError();
+  var saveButton = document.querySelector('#settings-form button[type="submit"]');
+  setBusyButton(saveButton, true, "正在保存…");
+  $("test-result").textContent = "正在保存配置…";
+  $("test-result").setAttribute("data-state", "pending");
   api("/api/settings", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -2566,9 +2614,15 @@ on("settings-form", "submit", function (event) {
   }).then(function (data) {
     $("key-hint").textContent = data.key_hint;
     $("api-key").value = "";
+    $("test-result").textContent = "配置已保存。";
+    $("test-result").setAttribute("data-state", "success");
     setPill(data.llm_ready != null ? data.llm_ready : data.has_key);
     loadModelReviewStatus();
-  }).catch(showError);
+  }).catch(function (error) {
+    $("test-result").textContent = "保存失败：" + error.message;
+    $("test-result").setAttribute("data-state", "failed");
+    showError(error);
+  }).finally(function () { setBusyButton(saveButton, false, null, "保存配置"); });
 });
 
 on('check-retrieval', 'click', function () {
@@ -2587,18 +2641,24 @@ on('check-retrieval', 'click', function () {
 });
 
 on("test-llm", "click", function () {
-  $("test-result").textContent = "正在测试…";
+  var button = $("test-llm");
+  setBusyButton(button, true, "正在测试…");
+  $("test-result").textContent = "正在测试已保存配置…";
+  $("test-result").setAttribute("data-state", "pending");
   api("/api/settings/test", { method: "POST" }).then(function (data) {
     $("test-result").textContent = data.reply || "连接成功";
+    $("test-result").setAttribute("data-state", "success");
   }).catch(function (error) {
-    $("test-result").textContent = error.message;
-  });
+    $("test-result").textContent = "连接未成功：" + error.message;
+    $("test-result").setAttribute("data-state", "failed");
+  }).finally(function () { setBusyButton(button, false, null, "测试连接"); });
 });
 
 var libraryKinds = {vendor_advisory: "项目安全公告", vendor_guidance: "厂商安全文档", research_article: "安全研究文章", academic_paper: "论文", standard: "标准 / 风险框架", policy: "政策法规"};
 var libraryScopes = {team_summary: "接口题名/描述，非原始全文", abstract: "仅摘要", article_body: "文章正文", advisory_fields: "公告正文及字段", full_text_html: "HTML 全文文字", full_text_pdf: "PDF 各页文字", policy_articles: "政策条文", catalog_only: "仅目录"};
 var libraryTopics = {prompt_injection: "提示注入", jailbreak: "越狱与对抗攻击", model_supply_chain: "模型供应链", agent_security: "智能体安全", ai_infrastructure: "AI 基础设施", ai_governance: "AI 风险治理", content_labeling: "生成内容标识"};
 var librarySelectedDocs = [];
+var libraryActiveDocId = "";
 
 function libraryLink(parent, url, text) {
   var link = add(parent, "a", "", text);
@@ -2875,11 +2935,16 @@ function loadLibrary() {
 }
 
 function renderLibraryDocRow(target, doc, allItems) {
-  var block = add(target, "div", "evidence-chunk");
+  var block = add(target, "div", "evidence-chunk" + (libraryActiveDocId === doc.document_id ? " is-reading" : ""));
   var button = add(block, "button", "text-btn", doc.title);
   button.type = "button";
   button.addEventListener("click", function () {
-    api("/api/library/" + encodeURIComponent(doc.document_id)).then(renderLibraryEvidence).catch(showError);
+    libraryActiveDocId = doc.document_id;
+    document.querySelectorAll("#library-list .is-reading").forEach(function (row) { row.classList.remove("is-reading"); });
+    block.classList.add("is-reading");
+    api("/api/library/" + encodeURIComponent(doc.document_id)).then(function (data) {
+      if (libraryActiveDocId === doc.document_id) renderLibraryEvidence(data);
+    }).catch(showError);
   });
   add(block, "p", "meta", libraryKinds[doc.document_type] + " · " + doc.publisher + " · " + dateText(doc.published_at));
   var discoveryLabels = {team_api: "资料存档", explicit_source_text: "显式获取来源原文", historical_seed: "历史起始资料", explicit_full_text: "显式获取全文", fixed_reference_monitor: "固定官方原文监测", subscription: "订阅发现"};
