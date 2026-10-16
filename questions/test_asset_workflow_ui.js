@@ -11,10 +11,10 @@ const ctx = vm.createContext({
   clear:el=>{el.children=[];}, add:(el,tag,cls,text)=>{const child={tag,textContent:text,children:[],addEventListener(){}};el.children.push(child);return child;},
   clearError(){}, showError:e=>{throw e;}, setView(){},
   api:async(url,options)=>{calls.push({url,options});
-    if (!url.includes('demo/evaluate')) return {items:[],total:0};
+    if (!url.includes('demo/match')) return {items:[],total:0};
     if (demoGate) await demoGate;
     if (demoFailure) throw demoFailure;
-    return {cve_id:'CVE-2024-37032',demo_assets:[{is_demo:true},{is_demo:true},{is_demo:true}],risks_saved:3};
+    return {demo_assets:[{name:'Old component',is_demo:true},{name:'Unknown version',is_demo:true},{name:'Boundary',is_demo:true}],risks_saved:6};
   },
   assetImpactRequestVersions:{declared:0},
   loadAssets:async()=>{}, renderAssetImpact(report,target){calls.push({render:target || element('asset-impact'),report});},
@@ -35,9 +35,9 @@ async function main(){
   assert.throws(()=>parse({bomFormat:'CycloneDX',components:[{name:'ollama',purl:'pkg:npm/ollama@1.0'}]}),/未找到/);
   assert.throws(()=>parse({bomFormat:'CycloneDX',components:[{name:'ollama',version:'2.0',cpe:'cpe:2.3:a:ollama:ollama:1.0:*:*:*:*:*:*:*'}]}),/未找到/);
   await ctx.runAssetDemo(element('asset-demo'));
-  assert.ok(calls.some(row=>row.url==='/api/assets/demo/evaluate' && row.options.method==='POST'));
+  assert.ok(calls.some(row=>row.url==='/api/assets/demo/match' && row.options.method==='POST'));
   assert.equal(element('asset-demo').disabled,false);
-  assert.ok(element('asset-message').textContent.includes('同步 3 条'));
+  assert.ok(element('asset-message').textContent.includes('共有 6 条 CVE 关联'));
   assert.ok(JSON.parse(element('asset-json').value).assets[0].is_demo);
   element('risk-demo').textContent='载入并评估演示';
   element('asset-demo').textContent='载入并评估演示';
@@ -50,14 +50,15 @@ async function main(){
   assert.equal(element('risk-demo').disabled,true);
   assert.equal(element('risk-demo')['aria-busy'],'true');
   assert.ok(element('risk-demo').textContent.includes('正在载入'));
-  const requestCount=calls.filter(row=>row.url==='/api/assets/demo/evaluate').length;
+  const requestCount=calls.filter(row=>row.url==='/api/assets/demo/match').length;
   await ctx.runAssetDemo(element('asset-demo'));
-  assert.equal(calls.filter(row=>row.url==='/api/assets/demo/evaluate').length,requestCount,'busy controls must not submit twice');
+  assert.equal(calls.filter(row=>row.url==='/api/assets/demo/match').length,requestCount,'busy controls must not submit twice');
   releaseDemo(); await pending; demoGate=null;
-  assert.ok(element('risk-demo-message').textContent.includes('演示评估完成'));
+  assert.ok(element('risk-demo-message').textContent.includes('点击下方组件'));
   assert.ok(element('risk-demo-message').textContent.includes('关联总数可能不变'));
   assert.equal(element('risk-demo-result').hidden,false);
-  assert.ok(calls.some(row=>row.render===element('risk-demo-impact')),'current-page details must use the actual API report');
+  assert.ok(element('risk-demo-impact').textContent.includes('Old component'));
+  assert.ok(!element('risk-demo-message').textContent.includes('CVE-2024-37032'),'the component demo must not be presented as a single-CVE assessment');
   assert.equal(element('risk-demo').textContent,'载入并评估演示');
   assert.equal(element('risk-demo')['aria-busy'],undefined);
   demoFailure=Error('连接中断');

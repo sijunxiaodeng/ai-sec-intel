@@ -391,6 +391,51 @@ def list_risks(*, db_path=None, asset_db=None, status=None, disposition=None,
             "counts": {state: sum(row["status"] == state for row in rows) for state in sorted(STATES)}}
 
 
+def list_risk_assets(*, db_path=None, asset_db=None, status=None, limit=30, offset=0):
+    """Page registered components, including components with no saved decisions.
+
+    Counts cover every saved CVE for each component, before CVE pagination.
+    Removed components remain in the audit register but not the current inventory.
+    """
+    if status is not None and status not in STATES:
+        raise ValueError("无效的风险结论")
+    registered = {asset["asset_id"]: asset for asset in inventory.load_assets(asset_db)}
+    with _connection(db_path) as conn:
+        _reconcile(conn, registered)
+        rows = [json.loads(row[0]) for row in conn.execute("SELECT payload_json FROM asset_risks ORDER BY asset_id,cve_id")]
+    grouped = {asset_id: [] for asset_id in registered}
+    for row in rows:
+        if row["asset_id"] in grouped:
+            grouped[row["asset_id"]].append(row)
+    items = []
+    for asset_id, asset in registered.items():
+        risks = grouped[asset_id]
+        counts = {state: sum(row["status"] == state for row in risks) for state in sorted(STATES)}
+        matching = counts[status] if status else len(risks)
+        if status and not matching:
+            continue
+        items.append({
+            "asset_id": asset_id, "asset": asset, "counts": counts,
+            "total_cves": len(risks), "matching_cves": matching,
+            "actionable_count": sum(row["status"] != "not_matched" and row["disposition"] in
+                                    {"pending", "in_progress", "pending_review"} for row in risks),
+            "latest_updated_at": max((row.get("updated_at") or "" for row in risks), default=None),
+            # Ignore worker timestamps; only changed visible decisions refresh an
+            # expanded component. Include disposition edits from other browsers.
+            "revision": _digest([{key: row.get(key) for key in
+                ("cve_id", "fingerprint", "status", "disposition", "disposition_note",
+                 "disposition_updated_at", "evaluation_mode", "updated_at")} for row in risks]),
+        })
+    items.sort(key=lambda item: (0 if item["counts"]["matched_version"] else
+                                1 if item["counts"]["unknown"] else
+                                2 if item["counts"]["invalidated"] else 3,
+                                -item["counts"]["matched_version"], item["asset_id"]))
+    start, size = max(0, int(offset)), max(1, min(200, int(limit)))
+    return {"items": items[start:start + size], "total": len(items),
+            "inventory_total": len(registered), "risk_total": sum(item["matching_cves"] for item in items),
+            "limit": size, "offset": start}
+
+
 def get_risk(asset_id, cve_id, *, db_path=None, asset_db=None):
     registered = {asset["asset_id"]: asset for asset in inventory.load_assets(asset_db)}
     with _connection(db_path) as conn:

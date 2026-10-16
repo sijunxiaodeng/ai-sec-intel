@@ -1309,6 +1309,18 @@ def asset_risks(status: str = "", asset_id: str = "", cve_id: str = "",
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@app.get("/api/risks/assets")
+def asset_risk_components(status: str = "", limit: int = Query(30, ge=1, le=200),
+                          offset: int = Query(0, ge=0)):
+    from enrichment.risk_register import list_risk_assets
+    from automation.asset_matching import state as matching_state
+    try:
+        return dict(list_risk_assets(status=status or None, limit=limit, offset=offset),
+                    automatic_matching=matching_state())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @app.get("/api/risks/{asset_id}/{cve_id}")
 def asset_risk_detail(asset_id: str, cve_id: str):
     from enrichment.risk_register import get_risk
@@ -1390,6 +1402,15 @@ def assets_demo_evaluate():
     report = _asset_assessment("CVE-2024-37032")
     try:
         return load_demo("CVE-2024-37032", report)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/assets/demo/match")
+def assets_demo_match():
+    from enrichment.asset_workflow import match_demo_components
+    try:
+        return match_demo_components()
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

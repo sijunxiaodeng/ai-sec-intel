@@ -3,6 +3,8 @@ var riskOffset = 0;
 var riskPageSize = 30;
 var riskRequest = 0;
 var riskEditing = false;
+var riskAssetViews = Object.create(null);
+var riskCvePageSize = 20;
 var lastInvestigationRender = "";
 var investigationOffset = 0;
 var investigationPageSize = 30;
@@ -44,15 +46,13 @@ function renderRiskEvidence(target, row) {
   if (!(row.evidence || []).length) add(detail, "p", "hint", "尚无足够的可引用版本证据，请查看研判任务中的未解决项。");
 }
 
-function renderRisks(data) {
-  var target = $("risk-list"); clear(target);
-  $("risk-summary").textContent = "当前筛选共 " + data.total + " 条资产与情报关联。" + ((data.automatic_matching || {}).running ? "自动判断运行中：新情报和资产变化后自动更新，无需选择 CVE。" : "自动判断状态请检查服务是否启动。") + "待确认、结论过期均不能作为安全结论。";
-  if (!data.items.length) add(target, "p", "empty", "暂无关联结果。可点“载入并评估演示”查看完整示例；已有清单可在登记区即时评估并同步结果。");
-  data.items.forEach(function (row) {
-    var card = add(target, "article", "asset-card");
-    add(card, "h3", "", (row.asset.name || row.asset_id) + " · " + row.cve_id);
+function renderAssetCve(target, row) {
+    var card = add(target, "article", "asset-card risk-cve");
+    card._cveId = row.cve_id;
+    add(card, "h3", "technical", row.cve_id);
+    if (row.title && row.title !== row.cve_id) add(card, "p", "desc", row.title);
     add(card, "p", "desc", row.label + " · " + row.priority + " · " + row.disposition_label);
-    add(card, "p", "meta", row.asset.product + " " + (row.asset.version || "版本未知") + " · 更新于 " + formatStamp(row.updated_at));
+    add(card, "p", "meta", "评估时版本：" + (row.asset.version || "版本未知") + " · 更新于 " + formatStamp(row.updated_at));
     add(card, "p", "meta", "评估方式：" + ({automatic_rules: "自动版本匹配，Agent 后续补充证据", immediate_rules: "即时规则评估", agent_research: "Agent 证据研判"}[row.evaluation_mode] || "已保存评估"));
     add(card, "p", "desc", row.reason);
     renderRiskEvidence(card, row);
@@ -77,10 +77,113 @@ function renderRisks(data) {
         body: JSON.stringify({status: select.value, note: note.value, expected_fingerprint: row.fingerprint})})
         .then(function () { riskEditing = false; if (typeof loadOverviewRisks === "function") loadOverviewRisks(); return loadRisks(); }).catch(showError).finally(function () { save.disabled = false; });
     });
+    return card;
+}
+
+function loadAssetCves(view, force) {
+  var key = view.filter + "|" + view.group.revision + "|" + view.offset;
+  if (view.loadingKey === key) return view.pending;
+  if (!force && view.loadedKey === key) return Promise.resolve();
+  var version = ++view.request;
+  view.loadingKey = key;
+  view.message.textContent = view.loadedKey ? "正在更新该组件的关联漏洞…" : "正在读取该组件的关联漏洞…";
+  view.retry.hidden = true;
+  var query = "?asset_id=" + encodeURIComponent(view.id) + "&status=" + encodeURIComponent(view.filter)
+    + "&limit=" + riskCvePageSize + "&offset=" + view.offset;
+  view.pending = api("/api/risks" + query).then(function (data) {
+    if (version !== view.request || riskAssetViews[view.id] !== view
+        || key !== view.filter + "|" + view.group.revision + "|" + view.offset) return;
+    if (view.offset && view.offset >= data.total) {
+      view.offset = Math.max(0, Math.floor((data.total - 1) / riskCvePageSize) * riskCvePageSize);
+      view.loadingKey = null;
+      return loadAssetCves(view, true);
+    }
+    // A user may begin editing while a background request is in flight.
+    if (riskEditing) { view.loadingKey = null; return; }
+    var signature = JSON.stringify({items: data.items, offset: view.offset, filter: view.filter});
+    if (signature !== view.rowSignature) {
+      var opened = new Set(Array.from(view.rows.children).filter(function (card) {
+        return card.querySelector && card.querySelector("details[open]");
+      }).map(function (card) { return card._cveId; }));
+      clear(view.rows);
+      (data.items || []).forEach(function (row) {
+        var card = renderAssetCve(view.rows, row), evidence = card.querySelector && card.querySelector("details");
+        if (evidence && opened.has(row.cve_id)) evidence.open = true;
+      });
+      view.rowSignature = signature;
+    }
+    view.message.textContent = data.total ? "该组件当前筛选关联 " + data.total + " 条 CVE；显示 "
+      + (view.offset + 1) + "–" + (view.offset + data.items.length) + " 条。版本命中表示可能受影响，尚未验证可利用性。"
+      : view.filter ? "该组件没有符合当前结论筛选的关联记录，可将结论切换为“全部”。"
+      : "该组件尚无已保存的关联记录。系统会自动匹配已收录情报；请核对产品和版本，当前不能据此判断资产安全。";
+    view.prev.disabled = view.offset === 0;
+    view.next.disabled = view.offset + riskCvePageSize >= data.total;
+    view.page.textContent = "CVE 第 " + (Math.floor(view.offset / riskCvePageSize) + 1) + " / "
+      + Math.max(1, Math.ceil(data.total / riskCvePageSize)) + " 页";
+    view.pager.hidden = data.total <= riskCvePageSize;
+    view.loadedKey = key;
+  }).catch(function (error) {
+    if (version !== view.request) return;
+    view.message.textContent = "该组件关联漏洞读取失败：" + error.message
+      + (view.rows.children.length ? "；下方保留上次结果，请重试更新。" : "；请点击重试。");
+    view.retry.hidden = false;
+  }).finally(function () { if (version === view.request) view.loadingKey = null; });
+  return view.pending;
+}
+
+function createRiskAsset(group) {
+  var view = {id: group.asset_id, group: group, offset: 0, request: 0};
+  view.card = document.createElement("details"); view.card.className = "risk-component";
+  view.card.dataset.assetId = view.id;
+  var summary = add(view.card, "summary", "risk-component-summary", "");
+  view.name = add(summary, "span", "risk-component-name", "");
+  view.identity = add(summary, "span", "meta technical", "");
+  view.counts = add(summary, "span", "risk-component-counts", "");
+  var body = add(view.card, "div", "risk-component-body", "");
+  view.message = add(body, "p", "hint", "点击组件后读取关联漏洞。"); view.message.setAttribute("role", "status");
+  view.retry = add(body, "button", "ghost", "重试读取关联漏洞"); view.retry.type = "button"; view.retry.hidden = true;
+  view.retry.addEventListener("click", function () { loadAssetCves(view, true); });
+  view.rows = add(body, "div", "risk-component-cves", "");
+  view.pager = add(body, "div", "live-actions risk-cve-pager", ""); view.pager.hidden = true;
+  view.prev = add(view.pager, "button", "ghost", "上一页 CVE"); view.prev.type = "button";
+  view.page = add(view.pager, "span", "hint", "");
+  view.next = add(view.pager, "button", "ghost", "下一页 CVE"); view.next.type = "button";
+  view.prev.addEventListener("click", function () { view.offset = Math.max(0, view.offset - riskCvePageSize); loadAssetCves(view); });
+  view.next.addEventListener("click", function () { view.offset += riskCvePageSize; loadAssetCves(view); });
+  view.card.addEventListener("toggle", function () { if (view.card.open) loadAssetCves(view); });
+  return view;
+}
+
+function renderRisks(data) {
+  var target = $("risk-list"), filter = $("risk-filter").value, loads = [];
+  $("risk-summary").textContent = "已登记 " + data.inventory_total + " 个组件；当前筛选 " + data.total + " 个组件、"
+    + data.risk_total + " 条 CVE 关联。点击组件展开查看。"
+    + ((data.automatic_matching || {}).running ? "自动判断运行中。" : "自动判断状态请检查服务是否启动。")
+    + "待确认、结论过期均不能作为安全结论。";
+  var ids = new Set(data.items.map(function (group) { return group.asset_id; }));
+  Array.from(target.children).forEach(function (card) {
+    if (!card.dataset || !ids.has(card.dataset.assetId)) target.removeChild(card);
+  });
+  if (!data.items.length) add(target, "p", "empty", data.inventory_total
+    ? "当前结论筛选下没有组件，请切换为“全部”查看资产清单。"
+    : "尚未登记组件。可点击“管理资产清单”登记真实组件，或载入演示资产。");
+  data.items.forEach(function (group, index) {
+    var view = riskAssetViews[group.asset_id] || (riskAssetViews[group.asset_id] = createRiskAsset(group));
+    var asset = group.asset, counts = group.counts;
+    if (view.filter !== filter) view.offset = 0;
+    view.filter = filter; view.group = group;
+    view.name.textContent = (asset.name || group.asset_id) + (asset.is_demo ? "（演示资产）" : "");
+    view.identity.textContent = asset.vendor + "/" + asset.product + " · " + (asset.version || "版本未知") + " · " + group.asset_id;
+    view.counts.textContent = "关联 CVE " + group.total_cves + " · 可能受影响 " + counts.matched_version
+      + " · 待确认 " + counts.unknown + " · 范围未命中 " + counts.not_matched + " · 结论过期 " + counts.invalidated;
+    if (target.children[index] !== view.card) target.insertBefore(view.card, target.children[index] || null);
+    if (view.card.open) loads.push(loadAssetCves(view));
   });
   $("risk-prev").disabled = riskOffset === 0;
   $("risk-next").disabled = riskOffset + riskPageSize >= data.total;
-  $("risk-page").textContent = "第 " + (Math.floor(riskOffset / riskPageSize) + 1) + " 页";
+  $("risk-page").textContent = "组件第 " + (Math.floor(riskOffset / riskPageSize) + 1) + " / "
+    + Math.max(1, Math.ceil(data.total / riskPageSize)) + " 页";
+  return Promise.all(loads);
 }
 
 function renderInvestigations(data) {
@@ -160,10 +263,15 @@ function loadRisks() {
   var request = ++riskRequest;
   var query = "?limit=" + riskPageSize + "&offset=" + riskOffset + "&status=" + encodeURIComponent($("risk-filter").value);
   var taskQuery = "?limit=" + investigationPageSize + "&offset=" + investigationOffset;
-  return Promise.all([api("/api/risks" + query), api("/api/investigations" + taskQuery)]).then(function (results) {
+  return Promise.all([api("/api/risks/assets" + query), api("/api/investigations" + taskQuery)]).then(function (results) {
     if (request !== riskRequest) return;
-    if (!riskEditing) renderRisks(results[0]);
+    if (riskOffset && riskOffset >= results[0].total) {
+      riskOffset = Math.max(0, Math.floor((results[0].total - 1) / riskPageSize) * riskPageSize);
+      return loadRisks();
+    }
+    var rendered = !riskEditing ? renderRisks(results[0]) : Promise.resolve();
     renderInvestigations(results[1]);
+    return rendered;
   });
 }
 

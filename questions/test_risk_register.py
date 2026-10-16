@@ -84,6 +84,44 @@ class RiskRegisterTest(unittest.TestCase):
         self.assertEqual(result["evaluated"], 1)
         self.assertEqual([a["asset_id"] for a in risks.candidate_assets(self.record, load_assets(self.assets), self.assessment)], ["ai-01"])
 
+    def test_component_pages_include_empty_inventory_and_count_all_cves(self):
+        import_assets({"assets": [dict(self.asset, asset_id="empty", product="vllm", vendor="vllm")]}, self.assets)
+        for index in range(35):
+            cve = "CVE-2026-%05d" % (index + 10000)
+            record, report = copy.deepcopy(self.record), copy.deepcopy(self.assessment)
+            record["item"]["cve_id"] = report["cve_id"] = cve
+            self.save_source(record)
+            risks.evaluate_record(record, assessment=report, db_path=self.main, asset_db=self.assets)
+        page = risks.list_risk_assets(db_path=self.main, asset_db=self.assets, limit=1)
+        self.assertEqual((page["total"], page["inventory_total"], page["risk_total"]), (2, 2, 35))
+        self.assertEqual(page["items"][0]["total_cves"], 35)
+        self.assertEqual(page["items"][0]["counts"]["matched_version"], 35)
+        following = risks.list_risk_assets(db_path=self.main, asset_db=self.assets, limit=1, offset=1)
+        self.assertEqual(following["items"][0]["asset_id"], "empty")
+        self.assertEqual(following["items"][0]["total_cves"], 0)
+        cves = risks.list_risks(db_path=self.main, asset_db=self.assets, asset_id="ai-01", limit=20, offset=20)
+        self.assertEqual((cves["total"], len(cves["items"])), (35, 15))
+        self.assertEqual({row["asset_id"] for row in cves["items"]}, {"ai-01"})
+        filtered = risks.list_risk_assets(db_path=self.main, asset_db=self.assets, status="matched_version")
+        self.assertEqual((filtered["total"], filtered["inventory_total"], filtered["risk_total"]), (1, 2, 35))
+
+    def test_component_revision_tracks_disposition_and_inventory_invalidation(self):
+        self.evaluate()
+        first = risks.list_risk_assets(db_path=self.main, asset_db=self.assets)["items"][0]
+        self.evaluate(run_id="unchanged-run")
+        same = risks.list_risk_assets(db_path=self.main, asset_db=self.assets)["items"][0]
+        self.assertEqual(first["revision"], same["revision"], "worker timestamps must not redraw open forms")
+        self.disposition("in_progress", note="checking source")
+        changed = risks.list_risk_assets(db_path=self.main, asset_db=self.assets)["items"][0]
+        self.assertNotEqual(first["revision"], changed["revision"])
+        import_assets({"assets": [dict(self.asset, version="0.1.34")]}, self.assets)
+        expired = risks.list_risk_assets(db_path=self.main, asset_db=self.assets, status="invalidated")
+        self.assertEqual(expired["items"][0]["counts"]["invalidated"], 1)
+        self.assertEqual(expired["items"][0]["asset"]["version"], "0.1.34")
+        self.assertEqual(risks.list_risk_assets(db_path=self.main, asset_db=self.assets, status="matched_version")["total"], 0)
+        with self.assertRaises(ValueError):
+            risks.list_risk_assets(db_path=self.main, asset_db=self.assets, status="bad")
+
     def test_missing_ranges_exact_product_is_unknown_and_unclosable(self):
         missing = _empty("CVE-2024-37032", "No range")
         self.evaluate(assessment=missing)

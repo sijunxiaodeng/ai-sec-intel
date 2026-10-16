@@ -104,6 +104,56 @@ class InvestigationQueueTest(unittest.TestCase):
             self.assertEqual(client.get("/api/assets").json()["count"], 3)
             self.assertEqual(client.get("/api/risks").json()["total"], 3)
 
+    def test_component_demo_matches_multiple_cves_and_groups_current_inventory(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        second = enriched_record({"cve_id": "CVE-2026-12345", "title": "Second fixture", "product": "ollama", "source": "NVD"})
+        store.upsert([second])
+        assets.import_assets({"assets": [dict(self.asset, asset_id="unrelated", product="vllm", vendor="vllm")]})
+
+        def report(cve):
+            value = copy.deepcopy(self.report)
+            value["cve_id"] = cve
+            return value
+
+        client = TestClient(app)
+        with patch("automation.asset_matching.assess", side_effect=report), patch("api.app._asset_assessment") as single_cve:
+            response = client.post("/api/assets/demo/match")
+            self.assertEqual(response.status_code, 200, response.text)
+            single_cve.assert_not_called()
+            self.assertEqual(response.json()["risks_saved"], 6)
+            groups = client.get("/api/risks/assets?limit=2").json()
+            self.assertEqual((groups["total"], groups["inventory_total"], groups["risk_total"]), (4, 4, 6))
+            self.assertEqual(len(groups["items"]), 2)
+            self.assertEqual(client.get("/api/risks/assets?limit=2&offset=2").json()["items"][-1]["total_cves"], 0)
+            rows = client.get("/api/risks?asset_id=demo-ollama-old").json()
+            self.assertEqual({row["cve_id"] for row in rows["items"]}, {"CVE-2024-37032", "CVE-2026-12345"})
+            self.assertEqual(client.get("/api/risks/assets?status=matched_version").json()["total"], 1)
+            self.assertEqual(client.get("/api/risks/assets?status=bad").status_code, 422)
+            self.assertEqual(client.get("/api/risks/assets?limit=0").status_code, 422)
+            self.assertEqual(client.post("/api/assets/demo/match").json()["risks_saved"], 6)
+
+    def test_component_demo_also_refuses_to_overwrite_real_asset_ids(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        assets.import_assets({"assets": [dict(self.asset, asset_id="demo-ollama-old", is_demo=False)]})
+        response = TestClient(app).post("/api/assets/demo/match")
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(assets.load_assets()[0]["is_demo"])
+
+    def test_component_demo_does_not_require_the_old_example_cve(self):
+        import sqlite3
+        from contextlib import closing
+        from fastapi.testclient import TestClient
+        from api.app import app
+        with closing(sqlite3.connect(store.database_path())) as conn:
+            conn.execute("DELETE FROM knowledge_records")
+            conn.commit()
+        response = TestClient(app).post("/api/assets/demo/match")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()["demo_assets"]), 3)
+        self.assertEqual(response.json()["risks_saved"], 0)
+
     def test_demo_never_overwrites_a_real_asset_using_its_reserved_id(self):
         from fastapi.testclient import TestClient
         from api.app import app

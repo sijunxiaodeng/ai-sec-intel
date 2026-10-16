@@ -152,8 +152,8 @@
 
       <section id="risks" class="view" hidden>
         <article class="panel">
-          <header class="panel-head"><h2>资产关联与处置</h2></header>
-          <p class="hint">登记资产后自动匹配已有情报；新情报、来源证据或资产版本变化后自动重新判断，无需逐条选择 CVE。Agent 在后台继续补充证据。</p>
+          <header class="panel-head"><h2>组件资产与影响</h2></header>
+          <p class="hint">先点击组件，再查看它关联的 CVE、影响判断、证据和处置状态。登记资产后自动匹配已有情报；新情报、证据或资产版本变化后自动更新，Agent 在后台继续补充证据。</p>
           <div class="live-actions">
             <button type="button" class="primary" id="risk-refresh">刷新结果</button>
             <button type="button" class="ghost" id="risk-inventory">管理资产清单</button>
@@ -163,13 +163,10 @@
             <select id="risk-filter"><option value="">全部</option><option value="matched_version">版本命中</option><option value="unknown">待确认</option><option value="not_matched">当前范围未命中</option><option value="invalidated">结论已过期</option></select>
           </div>
           <p id="risk-demo-message" class="hint" role="status" aria-live="polite" hidden></p>
-          <details id="risk-demo-result" class="filter-drawer" hidden>
-            <summary>查看本次演示评估结果 · CVE-2024-37032</summary>
-            <div id="risk-demo-impact"></div>
-          </details>
+          <div id="risk-demo-result" hidden><p id="risk-demo-impact" class="hint"></p></div>
           <p id="risk-summary" class="hint" role="status"></p>
           <div id="risk-list"></div>
-          <div class="live-actions"><button type="button" class="ghost" id="risk-prev">上一页</button><span id="risk-page"></span><button type="button" class="ghost" id="risk-next">下一页</button></div>
+          <div class="live-actions"><button type="button" class="ghost" id="risk-prev">上一页组件</button><span id="risk-page"></span><button type="button" class="ghost" id="risk-next">下一页组件</button></div>
         </article>
         <article class="panel">
           <header class="panel-head"><h2>研判任务与证据轨迹</h2></header>

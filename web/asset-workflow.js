@@ -77,20 +77,22 @@ async function runAssetDemo(button) {
   });
   if (riskResult) riskResult.hidden = true;
   clearError();
-  feedback("正在保存演示组件并评估 CVE-2024-37032；其他已登记资产保留。");
+  feedback("正在保存演示组件并自动匹配已收录的相关漏洞；其他已登记资产保留。");
   try {
-    report = await api("/api/assets/demo/evaluate", {method: "POST"});
+    report = await api("/api/assets/demo/match", {method: "POST"});
     assetImpactRequestVersions.declared += 1;
     $("asset-json").value = JSON.stringify({assets: report.demo_assets}, null, 2);
-    renderAssetImpact(report);
+    clear($("asset-impact"));
+    add($("asset-impact"), "p", "hint", "演示组件已载入。请打开资产风险，先选组件，再查看它关联的全部 CVE。");
     if (riskResult && $("risk-demo-impact")) {
-      renderAssetImpact(report, $("risk-demo-impact"));
+      $("risk-demo-impact").textContent = "本次载入：" + report.demo_assets.map(function (asset) { return asset.name || asset.asset_id; }).join("、") + "。";
       riskResult.hidden = false;
     }
-    var complete = "演示评估完成：已保存 " + report.demo_assets.length + " 条演示资产并同步 " + report.risks_saved
-      + " 条 CVE-2024-37032 资产风险。重复载入会更新原记录，关联总数可能不变；可展开本次结果查看。";
+    var complete = "演示组件已载入：" + report.demo_assets.length + " 个组件，当前共有 " + report.risks_saved
+      + " 条 CVE 关联。点击下方组件展开影响详情；后台会继续更新。重复载入会更新原记录，关联总数可能不变。";
     feedback(complete);
-    await loadAssets("CVE-2024-37032");
+    if (button === $("asset-demo")) setView("risks");
+    await loadAssets();
     if ($("risks") && !$("risks").hidden) await loadRisks();
     await loadOverviewRisks();
     feedback(complete);
