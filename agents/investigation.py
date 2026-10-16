@@ -233,6 +233,12 @@ def run(record, *, db_path=DEFAULT_DB, commit_guard=None, use_model=None,
                 call["observation"] = {name: (working.get(name) or {}).get("status", "unknown")
                                        for name in ("epss", "kev")}
             else:
+                from enrichment.research_associations import refresh as refresh_research
+                local = refresh_research(working, evidence_db=db_path,
+                                         library_db=Path(db_path).parent / "library.sqlite3")
+                call["local_research"] = {"status": local["status"],
+                                         "relations": len(local["items"]),
+                                         "paper_relations": sum(row["category"] == "paper" for row in local["items"])}
                 papers, error = fetch_papers([cve_id], max_batches=1,
                                             cursor_path=Path(db_path).parent / "paper_queries.sqlite3")
                 rows = papers.get(cve_id, [])

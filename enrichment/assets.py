@@ -239,7 +239,7 @@ def answer_assets(question, cve_id=""):
             result["label"], result["reason"], result["priority"], chunk["citation_id"],
             " ".join("[%s]" % eid for eid in result["evidence_ids"])))
     if len(report["results"]) > 50:
-        lines.append("回答展示前 50 条，请在资产影响页面查看完整结果。")
+        lines.append("回答展示前 50 条，请在资产风险页面查看完整结果。")
     lines.extend(report["limitations"] + report["warnings"])
     return {"answer": "\n".join(lines), "evidence": [record], "used_model": False,
             "steps": [{"role": "资产评估", "action": "本地匹配登记资产", "detail": "共 %d 条，版本命中 %d 条、待确认 %d 条；没有调用大模型或扫描资产。" % (len(assets), report["counts"]["matched_version"], report["counts"]["unknown"])}]}

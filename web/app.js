@@ -12,10 +12,10 @@ var titles = {
 var eyebrows = {
   overview: "工作台",
   monitor: "CVE + 资料情报流",
-  enrich: "EPSS / KEV / 论文 / 影响资产",
+  enrich: "EPSS / KEV / 研究关联 / 资产风险",
   risks: "自动关联 · 证据研判 · 处置跟踪",
   library: "可检索原文与片段",
-  assets: "EPSS / KEV / 论文 / 影响资产",
+  assets: "研究关联 / 资产风险",
   ask: "先证据后回答",
   acceptance: "初赛指标 · 质量复核 · 持续观测 · 交付证据",
   settings: "模型接口"
@@ -938,6 +938,7 @@ function loadOverview() {
     var stepsMeta = pageSlice(stepRows, "steps", OVERVIEW_PAGE_SIZE);
     renderSteps(stepsTarget, stepsMeta.items);
     renderPager(stepsTarget, "steps", stepsMeta, function () { loadOverview(); });
+    if (typeof loadOverviewRisks === "function") loadOverviewRisks();
     return true;
   }).catch(function (error) { showError(error); return false; });
 }
@@ -1306,7 +1307,7 @@ function renderAssessment(panel, report) {
     add(section, "p", "meta", history.detail || "本地存档暂无历史关联线索。");
     if (history.notice) add(section, "p", "meta", history.notice);
   }
-  add(section, "p", "desc", "此技术报告未进行资产匹配；登记清单后，在「资产影响」查看筛选结果。");
+  add(section, "p", "desc", "此技术报告未进行资产匹配；登记清单后，在「资产风险」查看自动判断结果。");
   (report.warnings || []).forEach(function (warning) { add(section, "p", "meta", warning); });
   if (report.source) add(section, "p", "meta", "报告依据获取于 " + dateText(report.source.retrieved_at) + " 的来源快照。");
 }
@@ -1350,13 +1351,40 @@ function renderGuidance(panel, report) {
   (report.limitations || []).forEach(function (text) { add(section, "p", "meta", text); });
 }
 
-function renderArticleCandidates(panel, cveId) {
+function renderArticleCandidates(panel, cveId, savedReport) {
   var section = add(panel, "div", "article-candidates");
   add(section, "h3", "", "论文与分析文章关联候选");
   add(section, "p", "meta", "只查询已入库资料。候选需结合原文核对，不用于改写评分、版本、修复或资产结论。");
   var button = add(section, "button", "ghost", "查看本地关联候选");
   button.type = "button";
   var content = add(section, "div", "");
+  var saveButton = add(section, "button", "ghost", "更新并保存研究关联");
+  saveButton.type = "button";
+  if (savedReport) {
+    var counts = savedReport.counts || {};
+    add(content, "p", "desc", "已保存关联：论文 " + (counts.paper || 0) + " 篇 · 分析文章 " + (counts.blog || 0) + " 篇；" + (savedReport.detail || "请按关联类型核对原文。"));
+    (savedReport.items || []).forEach(function (row) {
+      var saved = add(content, "details", "guidance-fact");
+      add(saved, "summary", "", (row.category === "paper" ? "论文 · " : "分析文章 · ") + row.title);
+      add(saved, "p", "meta", (row.relation_type === "direct_mention" ? "原文提及目标 CVE" : "相关机制研究") + " · 关联语义待复核");
+      (row.evidence || []).forEach(function (chunk) { add(saved, "p", "desc", chunk.text); });
+      if (/^https:\/\//i.test(row.url || "")) {
+        var savedLink = add(saved, "a", "meta", "查看原文与关联依据");
+        savedLink.href = row.url; savedLink.target = "_blank"; savedLink.rel = "noopener";
+      }
+      (row.match_basis || []).forEach(function (basis) { add(saved, "p", "meta", basis.label + " · " + basis.citation_id); });
+    });
+  }
+  saveButton.addEventListener("click", function () {
+    saveButton.disabled = true;
+    saveButton.textContent = "正在检索并保存…";
+    api("/api/research-associations/" + encodeURIComponent(cveId) + "/refresh", {method: "POST"}).then(function () {
+      if (panel.querySelector(".article-candidates") !== section) return;
+      return api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+        if (panel.querySelector(".article-candidates") === section) renderDetail(detail);
+      });
+    }).catch(showError).then(function () { saveButton.disabled = false; saveButton.textContent = "更新并保存研究关联"; });
+  });
   button.addEventListener("click", function () {
     button.disabled = true;
     button.textContent = "正在检索本地资料…";
@@ -1537,7 +1565,7 @@ function renderDetail(item) {
     ["EPSS", epssText(item.epss)],
     ["CISA KEV", kevText(item.kev)],
     ["公开利用链接", item.poc_count ? item.poc_count + " 条链接" : "未见 Exploit 标记"],
-    ["论文", item.paper_count ? item.paper_count + " 篇" : "尚未关联"],
+    ["直接提及编号的论文", item.paper_count ? item.paper_count + " 篇" : "本轮未匹配；另见下方研究关联"],
     ["记录类型", isDemoItem(item) ? "演示数据" : "联网/入库情报"]
   ].forEach(function (pair) {
     var field = add(fields, "div", "field");
@@ -1546,7 +1574,7 @@ function renderDetail(item) {
   });
   renderAssessment(panel, item.assessment);
   renderGuidance(panel, item.related_guidance);
-  renderArticleCandidates(panel, item.cve_id);
+  renderArticleCandidates(panel, item.cve_id, item.research_associations);
   renderPocCode(panel, item.cve_id, item.poc_code);
   var guidanceButton = add(panel, "button", "ghost", "补充关联建议");
   guidanceButton.type = "button";
@@ -1560,7 +1588,9 @@ function renderDetail(item) {
       guidanceButton.textContent = "本次成功 " + data.ok + "/" + data.attempted + " 个关联来源";
     }).catch(showError).then(function () { guidanceButton.disabled = false; });
   });
-  var assetButton = add(panel, "button", "ghost", "评估影响资产（富集）");
+  var assetSummary = item.asset_summary;
+  add(panel, "p", "hint", assetSummary ? "资产风险：已登记 " + assetSummary.asset_count + " 条；版本命中 " + assetSummary.counts.matched_version + "、待确认 " + assetSummary.counts.unknown + "、未命中 " + assetSummary.counts.not_matched + "。" : "可在下方登记区查看资产风险摘要。");
+  var assetButton = add(panel, "button", "ghost", "查看资产风险与登记清单");
   assetButton.type = "button";
   assetButton.addEventListener("click", function () {
     var drawer = $("asset-drawer");
@@ -1640,8 +1670,9 @@ function loadAssets(selected) {
     (data[1].items || []).forEach(function (item) { add(select, "option", "", item.cve_id).value = item.cve_id; });
     select.value = current;
     $("asset-count").textContent = inventory.count + " 条，其中演示资产 " + inventory.demo_count + " 条";
+    if (inventory.automatic_matching && inventory.automatic_matching.running) $("asset-message").textContent = "自动判断已开启：保存资产后自动匹配已有情报，新情报进入后自动更新资产风险；下方选择 CVE 仅用于查看单条详情。";
     clear($("asset-list"));
-    if (!inventory.count) add($("asset-list"), "p", "empty", "暂无已保存资产。可填入演示清单预览，或登记实际组件。");
+    if (!inventory.count) add($("asset-list"), "p", "empty", "暂无已保存资产。点击“载入并评估演示”可查看完整示例，也可用表单登记实际组件。");
     (inventory.items || []).forEach(function (asset) {
       var block = add($("asset-list"), "div", "asset-card");
       add(block, "b", "", asset.name + (asset.is_demo ? "（演示资产）" : ""));
@@ -1732,19 +1763,18 @@ function evaluateSavedAssets() {
 }
 
 on("asset-demo", "click", function () {
-  api("/api/assets/demo").then(function (data) {
-    assetImpactRequestVersions.declared += 1;
-    assetImpactRequestVersions.observations += 1;
-    $("asset-json").value = JSON.stringify(data, null, 2);
-    $("asset-message").textContent = "已填入 3 条虚构演示资产，尚未保存。选择 CVE-2024-37032 后可预览。";
-    $("asset-cve").value = "CVE-2024-37032";
-  }).catch(showError);
+  runAssetDemo($("asset-demo")).catch(showError);
 });
 on("asset-file", "change", function () {
   var file = this.files[0];
   if (!file) return;
   if (file.size > 1024 * 1024) { showError(new Error("JSON 文件不能超过 1 MB。")); return; }
-  file.text().then(function (text) { assetImpactRequestVersions.declared += 1; $("asset-json").value = text.replace(/^\uFEFF/, ""); $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。"; }).catch(showError);
+  file.text().then(function (text) {
+    var parsed = parseAssetInventoryFile(text);
+    assetImpactRequestVersions.declared += 1;
+    $("asset-json").value = JSON.stringify(parsed.payload, null, 2);
+    $("asset-message").textContent = "已读取文件，尚未保存；请先预览核对。" + parsed.notice;
+  }).catch(showError);
 });
 on("asset-preview", "click", function () {
   clearError();
@@ -1768,9 +1798,12 @@ on("asset-save", "click", function () {
     button.disabled = true;
     api("/api/assets/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)}).then(function (data) {
       assetImpactRequestVersions.declared += 1;
-      $("asset-message").textContent = "已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条；其他已登记资产保留。";
+      $("asset-message").textContent = "已保存：新增 " + data.created + " 条，更新 " + data.updated + " 条；自动匹配已完成 " + (data.automatic_matches_completed || 0) + " 项，后续结果自动更新到资产风险。";
       clear($("asset-impact"));
-      add($("asset-impact"), "p", "empty", "清单已更新，已安排 " + (data.investigations_queued || 0) + " 项相关研判；请在资产风险页面查看进度与结论。");
+      var worker = data.worker || {};
+      add($("asset-impact"), "p", "empty", worker.running
+        ? "已自动执行 " + (data.automatic_matches_completed || 0) + " 项本地匹配，并安排 " + (data.investigations_queued || 0) + " 项 Agent 补充研判；请直接打开资产风险查看结果。"
+        : "已自动执行 " + (data.automatic_matches_completed || 0) + " 项本地匹配，可直接打开资产风险查看。Agent 补充研判当前未运行；单条详情仍可随时评估。");
       return loadAssets();
     }).catch(showError).then(function () { button.disabled = false; });
   } catch (error) { showError(error); }

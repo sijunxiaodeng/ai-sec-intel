@@ -648,7 +648,7 @@ def source_revision(record):
     """Hash the upstream item without derived enrichment or local metadata."""
     item = dict(record.get("item") or {})
     raw = dict(item.get("raw_data") or {})
-    for key in ("_store", "automatic_assessment", "related_guidance"):
+    for key in ("_store", "automatic_assessment", "related_guidance", "research_associations"):
         raw.pop(key, None)
     item["raw_data"] = raw
     item.pop("collected_at", None)
@@ -703,7 +703,7 @@ def apply_enrichment(records, expected_revisions, job_tokens=None):
                 current_meta["fields"][field] = merged["item"]["raw_data"]["_store"]["fields"][field]
             current_meta["updated_at"] = now
             raw["_store"] = current_meta
-            for key in ("automatic_assessment", "related_guidance"):
+            for key in ("automatic_assessment", "related_guidance", "research_associations"):
                 if key in incoming["item"].get("raw_data", {}):
                     raw[key] = incoming["item"]["raw_data"][key]
             merged["item"] = item

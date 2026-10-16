@@ -22,7 +22,7 @@ _ACTIVITY_LOCK = threading.Lock()
 _ACTIVITY = {name: {"last_started_at": None, "last_finished_at": None,
                     "last_error": None, "in_progress": False}
              for name in ("background", "explicit")}
-STAGES = ("enrich", "documents", "investigate", "index")
+STAGES = ("enrich", "documents", "investigate", "index", "asset_match")
 
 
 def enabled():
@@ -290,6 +290,16 @@ def run_batch(batch_size=10):
                 for job, record in zip(jobs, records):
                     if papers.get(job["cve_id"]):
                         record["papers"] = papers[job["cve_id"]]
+                    from enrichment.research_associations import refresh as refresh_research
+                    try:
+                        local = refresh_research(record)
+                        trace.setdefault("local_research", {})[job["cve_id"]] = {
+                            "status": local["status"], "relations": len(local["items"])}
+                        if local["status"] == "partial":
+                            errors.append("research_associations_error")
+                    except Exception as exc:
+                        errors.append("research_associations_error")
+                        trace.setdefault("local_research", {})[job["cve_id"]] = {"error_type": type(exc).__name__}
                 updated = store.apply_enrichment(records,
                     expected_revisions={job["cve_id"]: job["revision"] for job in jobs},
                     job_tokens={job["cve_id"]: {"id": job["id"], "lease_token": job["lease_token"]}

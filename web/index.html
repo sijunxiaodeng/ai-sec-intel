@@ -58,7 +58,7 @@
           <small>接口配置</small>
         </button>
       </nav>
-      <p class="rail-foot">监测 → 富集 → 资料 → 问答</p>
+      <p class="rail-foot">监测 → 富集 → 资产风险 → 证据问答</p>
     </aside>
 
     <div class="main">
@@ -104,8 +104,16 @@
             </div>
             <div class="go">打开 →</div>
           </li>
-          <li data-go="library">
+          <li data-go="risks">
             <div class="idx">03</div>
+            <div class="stack-body">
+              <b>资产风险</b>
+              <span class="duty">登记组件，查看版本影响、研判依据与处置记录</span>
+            </div>
+            <div class="go">打开 →</div>
+          </li>
+          <li data-go="library">
+            <div class="idx">04</div>
             <div class="stack-body">
               <b>资料库</b>
               <span class="duty">沉淀可检索原文与片段</span>
@@ -113,7 +121,7 @@
             <div class="go">打开 →</div>
           </li>
           <li data-go="ask">
-            <div class="idx">04</div>
+            <div class="idx">05</div>
             <div class="stack-body">
               <b>证据问答</b>
               <span class="duty">先检索证据，再组织回答</span>
@@ -123,6 +131,10 @@
         </ol>
 
         <div class="stats" id="stats"></div>
+        <article class="panel" id="overview-risk-panel">
+          <header class="panel-head"><h2>待处置资产风险</h2><button type="button" class="ghost" id="overview-risk-open">查看全部资产风险</button></header>
+          <div id="overview-risk-list"><p class="hint">正在读取待办…</p></div>
+        </article>
         <div class="split">
           <article class="panel">
             <header class="panel-head"><h2>最近情报</h2></header>
@@ -139,10 +151,11 @@
       <section id="risks" class="view" hidden>
         <article class="panel">
           <header class="panel-head"><h2>资产风险与研判</h2></header>
-          <p class="hint">新情报和资产变更会自动触发相关评估。结论依据登记信息与来源证据；版本命中尚不代表已验证可利用。</p>
+          <p class="hint">登记资产后自动匹配已有情报；新情报、来源证据或资产版本变化后自动重新判断，无需逐条选择 CVE。Agent 在后台继续补充证据。</p>
           <div class="live-actions">
             <button type="button" class="primary" id="risk-refresh">刷新结果</button>
             <button type="button" class="ghost" id="risk-inventory">管理资产清单</button>
+            <button type="button" class="ghost" id="risk-demo">载入并评估演示</button>
             <button type="button" class="ghost" id="risk-reassess">重新评估相关情报</button>
             <label for="risk-filter">结论</label>
             <select id="risk-filter"><option value="">全部</option><option value="matched_version">版本命中</option><option value="unknown">待确认</option><option value="not_matched">当前范围未命中</option><option value="invalidated">结论已过期</option></select>
@@ -301,25 +314,39 @@
           </article>
         </div>
         <details class="filter-drawer" id="asset-drawer" open>
-          <summary>影响资产</summary>
+          <summary>资产风险 · 影响资产登记</summary>
           <div class="panel asset-import">
             <h3 class="subhead">自行登记的组件清单</h3>
-            <p class="hint">登记 AI 组件清单，与当前选中漏洞做版本匹配。不扫描互联网。</p>
+            <p class="hint">保存组件后自动判断与已有情报的关联，新情报进入后自动更新风险。选择单个漏洞可查看匹配明细。</p>
             <div class="toolbar">
-              <button type="button" class="ghost" id="asset-demo">填入演示清单</button>
-              <label for="asset-file">读取 JSON</label>
+              <button type="button" class="primary" id="asset-demo">载入并评估演示</button>
+              <label for="asset-file">读取 JSON / CycloneDX JSON</label>
               <input id="asset-file" type="file" accept=".json,application/json" />
             </div>
-            <label for="asset-json">资产 JSON</label>
+            <form id="asset-entry-form" class="asset-entry-grid">
+              <label>资产编号<input id="asset-entry-id" required maxlength="64" pattern="[A-Za-z0-9_.-]+" placeholder="ai-01" /></label>
+              <label>名称<input id="asset-entry-name" required maxlength="120" placeholder="推理服务" /></label>
+              <label>组件标识<select id="asset-entry-component"><option value="">手动填写 CPE 标识</option><option value="ollama/ollama">Ollama（ollama / ollama）</option><option value="huggingface/transformers">Transformers（huggingface / transformers）</option></select></label>
+              <label>厂商<input id="asset-entry-vendor" required maxlength="100" placeholder="ollama" /></label>
+              <label>产品<input id="asset-entry-product" required maxlength="100" placeholder="ollama" /></label>
+              <label>版本<input id="asset-entry-version" maxlength="100" placeholder="未知可留空" /></label>
+              <label>网络暴露<select id="asset-entry-exposure"><option value="unknown">待确认</option><option value="internet">互联网</option><option value="internal">内部网络</option><option value="isolated">隔离环境</option></select></label>
+              <label class="asset-entry-check"><input type="checkbox" id="asset-entry-demo" /> 演示资产</label>
+              <button type="submit" class="ghost">加入编辑清单（未保存）</button>
+            </form>
+            <p id="asset-entry-message" class="hint">可逐条填写；厂商和产品使用来源中的精确 CPE 标识。</p>
+            <label for="asset-json">高级 JSON / 文件编辑</label>
             <textarea id="asset-json" rows="5" spellcheck="false" placeholder='{"assets":[{"asset_id":"ai-01","name":"推理服务","vendor":"ollama","product":"ollama","version":"0.1.33"}]}'></textarea>
             <div class="ask-row">
-              <label for="asset-cve">匹配漏洞</label>
+              <label for="asset-cve">单条详情（可选）</label>
               <select id="asset-cve"></select>
               <button type="button" class="primary" id="asset-preview">预览匹配</button>
               <button type="button" class="ghost" id="asset-save">保存清单</button>
               <button type="button" class="ghost" id="asset-evaluate">评估已保存清单</button>
+              <button type="button" class="ghost" id="asset-sync">同步到资产风险</button>
+              <button type="button" class="ghost" id="asset-open-risks">打开资产风险与处置</button>
             </div>
-            <p id="asset-message" class="hint">演示清单为虚构组件；预览不会自动保存。</p>
+            <p id="asset-message" class="hint">点击“载入并评估演示”可保存 3 条明确标记的演示资产并查看结果；预览只检查编辑内容。</p>
             <div class="split">
               <div>
                 <h3 class="subhead">匹配结果</h3>
@@ -343,6 +370,8 @@
             </div>
             <label for="asset-observation-fields">FOFA 数组列名（按原导出顺序，逗号分隔；对象记录可留空）</label>
             <input id="asset-observation-fields" type="text" spellcheck="false" placeholder="填写实际请求或导出声明的列名，不推测列顺序" />
+            <button type="button" class="text-btn" id="asset-observation-field-template">填入常见 FOFA 列名（请核对顺序）</button>
+            <p class="hint">FOFA 可使用带 fields 和 results 的导出对象，例如 fields: ["host", "ip", "port", "product", "product.version"]；列名须与实际导出顺序一致。Shodan 可导入原始对象或 JSONL，每行一条观测。</p>
             <label for="asset-observation-json">平台原始结果</label>
             <textarea id="asset-observation-json" rows="5" spellcheck="false" placeholder="粘贴平台导出的 JSON 或 JSONL 内容，再预览核对。"></textarea>
             <div class="toolbar">
@@ -452,7 +481,6 @@
         </details>
       </section>
 
-      <section id="assets" class="view" hidden aria-hidden="true"></section>
 
       <section id="ask" class="view" hidden>
         <div class="ia-banner">
@@ -585,6 +613,7 @@
   </div>
   <script src="/assets/app.js?v=20261015-source-registry"></script>
   <script src="/assets/risks.js?v=20261015-batch-investigations"></script>
+  <script src="/assets/asset-workflow.js"></script>
   <script src="/assets/acceptance.js?v=20261015-acceptance"></script>
   <script src="/assets/live.js"></script>
 </body>

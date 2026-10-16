@@ -65,6 +65,8 @@ def _startup():
     start_model_review()
     from acceptance.worker import start as start_acceptance_observer
     start_acceptance_observer()
+    from automation.asset_matching import start as start_asset_matching
+    start_asset_matching()
 
 
 @app.on_event("shutdown")
@@ -75,6 +77,8 @@ def _shutdown():
     stop_model_review()
     from acceptance.worker import stop as stop_acceptance_observer
     stop_acceptance_observer()
+    from automation.asset_matching import stop as stop_asset_matching
+    stop_asset_matching()
 
 
 class CollectBody(BaseModel):
@@ -1114,6 +1118,8 @@ def item_detail(cve_id: str):
     payload["references"] = record.get("references") or []
     payload["poc"] = record.get("poc") or []
     payload["papers"] = record.get("papers") or []
+    from enrichment.research_associations import current as research_current
+    payload["research_associations"] = research_current(record)
     payload["vector"] = (record.get("cvss") or {}).get("vector")
     payload["cvss_version"] = (record.get("cvss") or {}).get("version")
     from rag.ingest import document_status
@@ -1126,6 +1132,11 @@ def item_detail(cve_id: str):
         payload["assessment"] = (record["item"].get("raw_data") or {}).get("automatic_assessment") or assess(cve_id.upper())
     except Exception as exc:
         payload["assessment"] = {"status": "error", "detail": "自动评估暂不可用：%s" % str(exc)[:160]}
+    try:
+        asset_report = impact_report(payload["assessment"], load_assets())
+        payload["asset_summary"] = {key: asset_report[key] for key in ("asset_count", "demo_count", "counts")}
+    except (ValueError, KeyError, OSError):
+        payload["asset_summary"] = None
     payload["related_guidance"] = (record["item"].get("raw_data") or {}).get("related_guidance")
     payload["poc_code"] = (record["item"].get("raw_data") or {}).get("poc_code")
     return payload
@@ -1184,6 +1195,27 @@ def article_candidates(cve_id: str, top_k: int = 4):
         raise HTTPException(status_code=503, detail="本地论文与文章候选检索未完成，请稍后重试。") from exc
 
 
+@app.get("/api/research-associations/{cve_id}")
+def research_associations(cve_id: str):
+    from enrichment.research_associations import current
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="知识库中没有这条情报")
+    return current(record)
+
+
+@app.post("/api/research-associations/{cve_id}/refresh")
+def refresh_research_associations(cve_id: str):
+    from enrichment.research_associations import refresh_and_save
+    record = get_record(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="知识库中没有这条情报")
+    try:
+        return refresh_and_save(record)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/api/guidance/{cve_id}")
 def related_guidance(cve_id: str):
     try:
@@ -1231,7 +1263,9 @@ def _asset_assessment(cve_id):
 @app.get("/api/assets")
 def assets():
     rows = load_assets()
-    return {"items": rows, "count": len(rows), "demo_count": sum(bool(r.get("is_demo")) for r in rows)}
+    from automation.asset_matching import state as matching_state
+    return {"items": rows, "count": len(rows), "demo_count": sum(bool(r.get("is_demo")) for r in rows),
+            "automatic_matching": matching_state()}
 
 
 @app.post("/api/assets/import")
@@ -1240,6 +1274,10 @@ def assets_import(body: AssetImport):
         result = import_assets(body.model_dump())
         from automation.investigation_queue import reconcile
         result["investigations_queued"] = reconcile(reason="assets_changed")
+        from automation.asset_matching import run_batch as match_assets
+        result["automatic_matches_completed"] = match_assets()
+        from automation.processing import worker_state
+        result["worker"] = worker_state()
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -1253,11 +1291,15 @@ class RiskDispositionBody(BaseModel):
 
 @app.get("/api/risks")
 def asset_risks(status: str = "", asset_id: str = "", cve_id: str = "",
-                limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+                limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                actionable: bool = False):
     from enrichment.risk_register import list_risks
     try:
-        return list_risks(status=status or None, asset_id=asset_id or None,
-                          cve_id=cve_id or None, limit=limit, offset=offset)
+        result = list_risks(status=status or None, asset_id=asset_id or None,
+                            cve_id=cve_id or None, limit=limit, offset=offset, actionable=actionable)
+        from automation.asset_matching import state as matching_state
+        result["automatic_matching"] = matching_state()
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -1325,6 +1367,26 @@ def assets_preview(body: AssetPreview):
 @app.get("/api/asset-impact/{cve_id}")
 def asset_impact(cve_id: str):
     return impact_report(_asset_assessment(cve_id), load_assets())
+
+
+@app.post("/api/asset-impact/{cve_id}/save")
+def asset_impact_save(cve_id: str):
+    from enrichment.asset_workflow import evaluate_saved
+    report = _asset_assessment(cve_id)
+    try:
+        return evaluate_saved(cve_id.upper(), report)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/assets/demo/evaluate")
+def assets_demo_evaluate():
+    from enrichment.asset_workflow import load_demo
+    report = _asset_assessment("CVE-2024-37032")
+    try:
+        return load_demo("CVE-2024-37032", report)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/asset-observations/demo")

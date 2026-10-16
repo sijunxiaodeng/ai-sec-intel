@@ -70,6 +70,49 @@ class InvestigationQueueTest(unittest.TestCase):
         self.assertEqual(risk["job_id"], job["id"])
         self.assertEqual(queue.history(job["id"])[0]["run_id"], risk["run_id"])
 
+    def test_assets_are_automatically_matched_with_research_worker_disabled(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        with patch.dict(os.environ, {"AUTO_INGEST_ON_COLLECT": "0"}), patch("automation.asset_matching.assess", return_value=self.report):
+            client = TestClient(app)
+            response = client.post("/api/assets/import", json={"assets": [self.asset]})
+            self.assertEqual(response.status_code, 200)
+            risk = client.get("/api/risks").json()["items"][0]
+            self.assertEqual(risk["status"], "matched_version")
+            self.assertEqual(risk["evaluation_mode"], "automatic_rules")
+            client.post("/api/assets/import", json={"assets": [dict(self.asset, version="0.1.34")]})
+            self.assertEqual(client.get("/api/risks").json()["items"][0]["status"], "not_matched")
+
+    def test_new_intelligence_matches_without_selecting_a_cve(self):
+        from automation.asset_matching import run_batch
+        assets.import_assets({"assets": [self.asset]})
+        queue.reconcile()
+        with patch("automation.asset_matching.assess", return_value=self.report):
+            self.assertEqual(run_batch(), 1)
+        self.assertEqual(risk_register.list_risks()["items"][0]["status"], "matched_version")
+
+    def test_one_click_demo_saves_three_results_and_is_repeatable(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        client = TestClient(app)
+        with patch("api.app._asset_assessment", return_value=self.report):
+            first = client.post("/api/assets/demo/evaluate")
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(first.json()["counts"], {"matched_version": 1, "not_matched": 1, "unknown": 1})
+            self.assertEqual(client.get("/api/risks").json()["total"], 3)
+            self.assertEqual(client.post("/api/assets/demo/evaluate").status_code, 200)
+            self.assertEqual(client.get("/api/assets").json()["count"], 3)
+            self.assertEqual(client.get("/api/risks").json()["total"], 3)
+
+    def test_demo_never_overwrites_a_real_asset_using_its_reserved_id(self):
+        from fastapi.testclient import TestClient
+        from api.app import app
+        assets.import_assets({"assets": [dict(self.asset, asset_id="demo-ollama-old", is_demo=False)]})
+        with patch("api.app._asset_assessment", return_value=self.report):
+            response = TestClient(app).post("/api/assets/demo/evaluate")
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(assets.load_assets()[0]["is_demo"])
+
     def test_inventory_upgrade_reopens_task_and_clears_only_with_evidence(self):
         assets.import_assets({"assets": [self.asset]})
         queue.reconcile()

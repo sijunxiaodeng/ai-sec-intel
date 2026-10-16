@@ -61,6 +61,22 @@ def reconcile(records=None, *, reason="intelligence_updated", force=False, expli
                 from enrichment.risk_register import _invalidate
                 for saved in conn.execute("SELECT payload_json FROM asset_risks WHERE cve_id=?", (cve_id,)).fetchall():
                     _invalidate(conn, json.loads(saved[0]), "evidence_updated")
+        # Local matching has an independent lane and does not wait for network
+        # enrichment, document fetches, the LLM, or the research worker switch.
+        for cve_id, revision, context in rows:
+            if not assets or explicit:
+                continue
+            old = conn.execute("SELECT id,context_json FROM processing_jobs WHERE cve_id=? AND revision=? AND stage='asset_match'",
+                               (cve_id, revision)).fetchone()
+            if old and json.loads(old["context_json"]).get("inventory_fingerprint") == fingerprint and not force:
+                continue
+            if old:
+                conn.execute("""UPDATE processing_jobs SET status='pending',attempts=0,error='',lease_token=NULL,
+                    lease_until=NULL,available_at=?,updated_at=?,context_json=? WHERE id=?""",
+                    (now, now, json.dumps(context), old["id"]))
+            else:
+                conn.execute("""INSERT INTO processing_jobs(cve_id,revision,stage,available_at,created_at,updated_at,context_json)
+                    VALUES(?,?,'asset_match',?,?,?,?)""", (cve_id, revision, now, now, now, json.dumps(context)))
     return inserted
 
 

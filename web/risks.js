@@ -46,13 +46,14 @@ function renderRiskEvidence(target, row) {
 
 function renderRisks(data) {
   var target = $("risk-list"); clear(target);
-  $("risk-summary").textContent = "当前筛选共 " + data.total + " 条资产与情报关联。待确认、结论过期均不能作为安全结论。";
-  if (!data.items.length) add(target, "p", "empty", "暂无关联结果。请先登记资产，或等待相关研判完成；没有结果不代表没有风险。");
+  $("risk-summary").textContent = "当前筛选共 " + data.total + " 条资产与情报关联。" + ((data.automatic_matching || {}).running ? "自动判断运行中：新情报和资产变化后自动更新，无需选择 CVE。" : "自动判断状态请检查服务是否启动。") + "待确认、结论过期均不能作为安全结论。";
+  if (!data.items.length) add(target, "p", "empty", "暂无关联结果。可点“载入并评估演示”查看完整示例；已有清单可在登记区即时评估并同步结果。");
   data.items.forEach(function (row) {
     var card = add(target, "article", "asset-card");
     add(card, "h3", "", (row.asset.name || row.asset_id) + " · " + row.cve_id);
     add(card, "p", "desc", row.label + " · " + row.priority + " · " + row.disposition_label);
     add(card, "p", "meta", row.asset.product + " " + (row.asset.version || "版本未知") + " · 更新于 " + formatStamp(row.updated_at));
+    add(card, "p", "meta", "评估方式：" + ({automatic_rules: "自动版本匹配，Agent 后续补充证据", immediate_rules: "即时规则评估", agent_research: "Agent 证据研判"}[row.evaluation_mode] || "已保存评估"));
     add(card, "p", "desc", row.reason);
     renderRiskEvidence(card, row);
     var form = add(card, "form", "live-actions");
@@ -74,7 +75,7 @@ function renderRisks(data) {
       event.preventDefault(); save.disabled = true;
       api(riskPath(row) + "/disposition", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({status: select.value, note: note.value, expected_fingerprint: row.fingerprint})})
-        .then(function () { riskEditing = false; return loadRisks(); }).catch(showError).finally(function () { save.disabled = false; });
+        .then(function () { riskEditing = false; if (typeof loadOverviewRisks === "function") loadOverviewRisks(); return loadRisks(); }).catch(showError).finally(function () { save.disabled = false; });
     });
   });
   $("risk-prev").disabled = riskOffset === 0;

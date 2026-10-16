@@ -995,3 +995,11 @@ button[aria-busy="true"] { pointer-events: none; }
   .monitor-live-row { grid-template-columns: 84px minmax(0, 1fr); }
   .field { grid-template-columns: 96px minmax(0, 1fr); }
 }
+
+/* Asset forms use the existing panel layout. */
+.asset-entry-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:18px 0; align-items:end; }
+.asset-entry-grid label { display:flex; flex-direction:column; gap:6px; color:var(--muted); font-size:15px; min-width:0; }
+.asset-entry-grid input, .asset-entry-grid select { width:100%; min-width:0; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#fff; }
+.asset-entry-grid .asset-entry-check { flex-direction:row; align-items:center; padding:10px 0; }
+.asset-entry-check input { width:auto; }
+#overview-risk-panel { margin-bottom:20px; }

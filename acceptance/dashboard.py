@@ -68,12 +68,20 @@ def runtime_signals():
             if "knowledge_records" in tables:
                 counts = {key: 0 for key in ("cvss", "epss", "kev", "papers", "affected", "poc")}
                 live = 0
+                research = {"records": 0, "papers": 0, "articles": 0}
                 for row in connection.execute("SELECT payload_json FROM knowledge_records"):
                     record = json.loads(row[0])
                     item = record.get("item") or {}
                     if (item.get("raw_data") or {}).get("sample_mode"):
                         continue
                     live += 1
+                    associations = (item.get("raw_data") or {}).get("research_associations") or {}
+                    from database.store import source_revision
+                    if associations.get("source_revision") == source_revision(record):
+                        items = associations.get("items") or []
+                        research["records"] += bool(items)
+                        research["papers"] += sum(row.get("category") == "paper" for row in items)
+                        research["articles"] += sum(row.get("category") == "blog" for row in items)
                     for key in counts:
                         value = record.get(key) if record.get(key) is not None else item.get(key)
                         if value is not None and value != [] and value != "":
@@ -81,6 +89,7 @@ def runtime_signals():
                 result["field_coverage"] = {"live_records": live, "counts": counts,
                                              "present_dimensions": sum(value > 0 for value in counts.values()),
                                              "note": "字段存在率，不是富化准确率；版本字段不等于真实资产已受影响"}
+                result["research_associations"] = dict(research, note="已保存的候选关联计数；按漏洞/资料关系计数，未代替语义复核")
             if "processing_jobs" in tables:
                 result["processing"] = [dict(row) for row in connection.execute(
                     "SELECT stage,status,COUNT(*) count FROM processing_jobs GROUP BY stage,status")]

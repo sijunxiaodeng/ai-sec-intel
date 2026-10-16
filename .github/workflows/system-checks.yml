@@ -20,6 +20,7 @@ env:
   B_MONITOR_ENABLED: '0'
   B_MONITOR_ON_REFRESH: '0'
   AUTO_INGEST_ON_COLLECT: '0'
+  ASSET_AUTO_MATCH_ENABLED: '0'
   AUTO_CLASSIFY_V5: '0'
   ACCEPTANCE_OBSERVATION_ENABLED: '0'
   CLASSIFY_V5_MAX_LLM_CALLS: '0'
@@ -99,6 +100,8 @@ jobs:
         run: |
           node --check web/app.js
           node --check web/risks.js
+          node --check web/asset-workflow.js
+          node questions/test_asset_workflow_ui.js
           node --check web/live.js
           node questions/test_live_ui.js
           node questions/test_risks_ui.js

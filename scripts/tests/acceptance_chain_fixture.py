@@ -98,7 +98,9 @@ def run(directory):
             # Upgrade via the real API invalidates old state and triggers new work.
             imported = request_json(base, "/api/assets/import", {"assets": [dict(asset, version="1.2.0")]})
             assert imported["investigations_queued"] == 1
-            assert request_json(base, "/api/risks/fixture-only/" + cve)["status"] == "invalidated"
+            automatic = request_json(base, "/api/risks/fixture-only/" + cve)
+            assert automatic["status"] == "not_matched" and automatic["evaluation_mode"] == "automatic_rules"
+            assert any(event["event"] == "invalidated" for event in automatic["history"])
             assert queue.run_pending() == 1
             risk = request_json(base, "/api/risks/fixture-only/" + cve)
             assert risk["status"] == "not_matched" and risk["disposition"] != "resolved"

@@ -40,7 +40,7 @@ def _check_job(conn, job_id, run_id, cve_id, source_revision):
     exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='processing_jobs'").fetchone()
     job = conn.execute("SELECT cve_id,revision,status,lease_token,lease_until,stage FROM processing_jobs WHERE id=?", (job_id,)).fetchone() if exists else None
     if (not job or job["cve_id"] != cve_id or job["revision"] != source_revision
-            or job["stage"] != "investigate" or job["status"] != "running"
+            or job["stage"] not in {"investigate", "asset_match"} or job["status"] != "running"
             or not job["lease_token"] or (job["lease_until"] or 0) <= time.time()
             or run_id != str(job_id) + "-" + job["lease_token"]):
         raise StaleWork("资产评估任务的版本或租约已失效")
@@ -268,7 +268,7 @@ def candidate_assets(record, assets, assessment=None):
 
 def evaluate_record(record, *, assessment=None, db_path=None, asset_db=None, evidence_db=None,
                     run_id=None, job_id=None, expected_inventory_fingerprint=None,
-                    require_current_record=True):
+                    require_current_record=True, evaluation_mode="agent_research"):
     """Upsert current decisions for a record and all relevant registered assets.
 
     The optional assessment is a program-generated ``assessment.assess`` report,
@@ -357,6 +357,7 @@ def evaluate_record(record, *, assessment=None, db_path=None, asset_db=None, evi
                 "created_at": (previous or {}).get("created_at") or _now(),
                 "updated_at": _now() if changed else previous["updated_at"], "evaluated_at": _now(),
                 "run_id": run_id, "job_id": job_id, "invalidation_reason": None,
+                "evaluation_mode": evaluation_mode,
             }
             _save(conn, risk, "evaluated" if changed else None)
             created += int(previous is None)
@@ -370,7 +371,7 @@ def evaluate_record(record, *, assessment=None, db_path=None, asset_db=None, evi
 
 
 def list_risks(*, db_path=None, asset_db=None, status=None, disposition=None,
-               asset_id=None, cve_id=None, limit=200, offset=0):
+               asset_id=None, cve_id=None, limit=200, offset=0, actionable=False):
     if status is not None and status not in STATES:
         raise ValueError("无效的风险结论")
     if disposition is not None and disposition not in DISPOSITIONS:
@@ -381,6 +382,7 @@ def list_risks(*, db_path=None, asset_db=None, status=None, disposition=None,
         rows = [json.loads(row[0]) for row in conn.execute("SELECT payload_json FROM asset_risks")]
     rows = [row for row in rows if (not status or row["status"] == status)
             and (not disposition or row["disposition"] == disposition)
+            and (not actionable or (row["disposition"] in {"pending", "in_progress", "pending_review"} and row["status"] != "not_matched"))
             and (not asset_id or row["asset_id"] == asset_id)
             and (not cve_id or row["cve_id"] == cve_id.upper())]
     rows.sort(key=lambda row: (row["status"] == "invalidated", row["priority_rank"], row["asset_id"], row["cve_id"]))
