@@ -295,7 +295,7 @@ details summary::marker { color: var(--text-tertiary); }
 .asset-card .desc { font-size: 13px; }
 .asset-card details { margin-top: 8px; }
 #risk-list { margin-top: 16px; }
-#risk-summary, #investigation-worker, #investigation-summary { margin-top: 12px; }
+#risk-summary, #risk-demo-message, #investigation-worker, #investigation-summary { margin-top: 12px; }
 #investigation-form { margin-top: 16px; align-items: end; }
 #investigation-cve { flex: 1 1 280px; }
 #investigation-input-help { margin-top: 8px; }

@@ -61,23 +61,50 @@ function loadOverviewRisks() {
 
 async function runAssetDemo(button) {
   var buttons = [$("asset-demo"), $("risk-demo")].filter(Boolean);
-  buttons.forEach(function (node) { node.disabled = true; });
+  if (buttons.some(function (node) { return node.disabled; })) return;
+  var labels = buttons.map(function (node) { return node.textContent; });
+  var riskResult = $("risk-demo-result"), report;
+  function feedback(text) {
+    [$("asset-message"), $("risk-demo-message")].filter(Boolean).forEach(function (node) {
+      node.textContent = text;
+      node.hidden = false;
+    });
+  }
+  buttons.forEach(function (node) {
+    node.disabled = true;
+    node.textContent = "正在载入并评估…";
+    node.setAttribute("aria-busy", "true");
+  });
+  if (riskResult) riskResult.hidden = true;
   clearError();
-  $("asset-message").textContent = "正在保存演示组件并评估；其他已登记资产保留。";
+  feedback("正在保存演示组件并评估 CVE-2024-37032；其他已登记资产保留。");
   try {
-    var report = await api("/api/assets/demo/evaluate", {method: "POST"});
+    report = await api("/api/assets/demo/evaluate", {method: "POST"});
     assetImpactRequestVersions.declared += 1;
     $("asset-json").value = JSON.stringify({assets: report.demo_assets}, null, 2);
-    await loadAssets("CVE-2024-37032");
     renderAssetImpact(report);
-    $("asset-message").textContent = "已保存 3 条演示资产并同步 " + report.risks_saved + " 条资产风险，可打开资产风险查看依据与处置。";
+    if (riskResult && $("risk-demo-impact")) {
+      renderAssetImpact(report, $("risk-demo-impact"));
+      riskResult.hidden = false;
+    }
+    var complete = "演示评估完成：已保存 " + report.demo_assets.length + " 条演示资产并同步 " + report.risks_saved
+      + " 条 CVE-2024-37032 资产风险。重复载入会更新原记录，关联总数可能不变；可展开本次结果查看。";
+    feedback(complete);
+    await loadAssets("CVE-2024-37032");
     if ($("risks") && !$("risks").hidden) await loadRisks();
     await loadOverviewRisks();
+    feedback(complete);
     return report;
   } catch (error) {
-    $("asset-message").textContent = "演示未完整确认，请刷新清单与风险列表后查看；" + error.message;
+    feedback((report ? "演示评估已保存，但刷新列表未完整完成；请点击“刷新结果”。" : "演示未能确认完成，请刷新清单与风险列表后查看。") + "原因：" + error.message);
     throw error;
-  } finally { buttons.forEach(function (node) { node.disabled = false; }); }
+  } finally {
+    buttons.forEach(function (node, index) {
+      node.disabled = false;
+      node.textContent = labels[index];
+      node.removeAttribute("aria-busy");
+    });
+  }
 }
 
 on("risk-demo", "click", function () { runAssetDemo($("risk-demo")).catch(showError); });

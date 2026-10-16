@@ -162,6 +162,11 @@
             <label for="risk-filter">结论</label>
             <select id="risk-filter"><option value="">全部</option><option value="matched_version">版本命中</option><option value="unknown">待确认</option><option value="not_matched">当前范围未命中</option><option value="invalidated">结论已过期</option></select>
           </div>
+          <p id="risk-demo-message" class="hint" role="status" aria-live="polite" hidden></p>
+          <details id="risk-demo-result" class="filter-drawer" hidden>
+            <summary>查看本次演示评估结果 · CVE-2024-37032</summary>
+            <div id="risk-demo-impact"></div>
+          </details>
           <p id="risk-summary" class="hint" role="status"></p>
           <div id="risk-list"></div>
           <div class="live-actions"><button type="button" class="ghost" id="risk-prev">上一页</button><span id="risk-page"></span><button type="button" class="ghost" id="risk-next">下一页</button></div>

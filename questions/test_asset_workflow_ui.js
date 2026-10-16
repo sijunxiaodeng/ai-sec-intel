@@ -3,14 +3,22 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const elements = {}, handlers = {}, calls = [];
-function element(id) { return elements[id] ||= {value:'',textContent:'',children:[],hidden:true}; }
+let demoGate, demoFailure, refreshFailure;
+function element(id) { return elements[id] ||= {value:'',textContent:'',children:[],hidden:true,
+  setAttribute(key,value){this[key]=value;}, removeAttribute(key){delete this[key];}}; }
 const ctx = vm.createContext({
   $:element, on:(id,event,fn)=>{handlers[id+':'+event]=fn;},
   clear:el=>{el.children=[];}, add:(el,tag,cls,text)=>{const child={tag,textContent:text,children:[],addEventListener(){}};el.children.push(child);return child;},
   clearError(){}, showError:e=>{throw e;}, setView(){},
-  api:(url,options)=>{calls.push({url,options});return Promise.resolve(url.includes('demo/evaluate') ? {demo_assets:[{is_demo:true}],risks_saved:3} : {items:[],total:0});},
+  api:async(url,options)=>{calls.push({url,options});
+    if (!url.includes('demo/evaluate')) return {items:[],total:0};
+    if (demoGate) await demoGate;
+    if (demoFailure) throw demoFailure;
+    return {cve_id:'CVE-2024-37032',demo_assets:[{is_demo:true},{is_demo:true},{is_demo:true}],risks_saved:3};
+  },
   assetImpactRequestVersions:{declared:0},
-  loadAssets:async()=>{}, renderAssetImpact(){}, loadRisks:async()=>{},
+  loadAssets:async()=>{}, renderAssetImpact(report,target){calls.push({render:target || element('asset-impact'),report});},
+  loadRisks:async()=>{if(refreshFailure) throw refreshFailure;},
   assetPayload:()=>JSON.parse(element('asset-json').value),
 });
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../web/asset-workflow.js'),'utf8'),ctx);
@@ -31,12 +39,45 @@ async function main(){
   assert.equal(element('asset-demo').disabled,false);
   assert.ok(element('asset-message').textContent.includes('同步 3 条'));
   assert.ok(JSON.parse(element('asset-json').value).assets[0].is_demo);
+  element('risk-demo').textContent='载入并评估演示';
+  element('asset-demo').textContent='载入并评估演示';
+  element('risks').hidden=false;
+  let releaseDemo;
+  demoGate=new Promise(resolve=>{releaseDemo=resolve;});
+  const pending=ctx.runAssetDemo(element('risk-demo'));
+  assert.equal(element('risk-demo-message').hidden,false,'progress must be visible on the risk page');
+  assert.ok(element('risk-demo-message').textContent.includes('正在保存'));
+  assert.equal(element('risk-demo').disabled,true);
+  assert.equal(element('risk-demo')['aria-busy'],'true');
+  assert.ok(element('risk-demo').textContent.includes('正在载入'));
+  const requestCount=calls.filter(row=>row.url==='/api/assets/demo/evaluate').length;
+  await ctx.runAssetDemo(element('asset-demo'));
+  assert.equal(calls.filter(row=>row.url==='/api/assets/demo/evaluate').length,requestCount,'busy controls must not submit twice');
+  releaseDemo(); await pending; demoGate=null;
+  assert.ok(element('risk-demo-message').textContent.includes('演示评估完成'));
+  assert.ok(element('risk-demo-message').textContent.includes('关联总数可能不变'));
+  assert.equal(element('risk-demo-result').hidden,false);
+  assert.ok(calls.some(row=>row.render===element('risk-demo-impact')),'current-page details must use the actual API report');
+  assert.equal(element('risk-demo').textContent,'载入并评估演示');
+  assert.equal(element('risk-demo')['aria-busy'],undefined);
+  demoFailure=Error('连接中断');
+  await assert.rejects(ctx.runAssetDemo(element('risk-demo')),/连接中断/);
+  assert.ok(element('risk-demo-message').textContent.includes('连接中断'));
+  assert.equal(element('risk-demo-message').hidden,false);
+  assert.equal(element('risk-demo-result').hidden,true,'old success details must not describe a failed new attempt');
+  assert.equal(element('risk-demo').disabled,false);
+  demoFailure=null; refreshFailure=Error('列表读取失败');
+  await assert.rejects(ctx.runAssetDemo(element('risk-demo')),/列表读取失败/);
+  assert.ok(element('risk-demo-message').textContent.includes('演示评估已保存'),'a read failure must not imply that the saved assessment was rolled back');
+  assert.equal(element('risk-demo-result').hidden,false);
+  assert.equal(element('risk-demo').disabled,false);
+  refreshFailure=null;
   element('asset-entry-id').value='ai-1';element('asset-entry-name').value='service';
   element('asset-entry-vendor').value='ollama';element('asset-entry-product').value='ollama';
   element('asset-entry-exposure').value='unknown';element('asset-json').value='';
   handlers['asset-entry-form:submit']({preventDefault(){}});
   assert.equal(JSON.parse(element('asset-json').value).assets[0].asset_id,'ai-1');
   assert.ok(element('asset-entry-message').textContent.includes('尚未保存'));
-  console.log('asset workflow UI: one-click persistence, bounded CycloneDX conversion, unknown identities and form staging passed');
+  console.log('asset workflow UI: visible progress/results/errors, duplicate-submit protection, saved-result refresh errors, persistence and inventory conversion passed');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});
