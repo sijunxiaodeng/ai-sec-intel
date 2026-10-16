@@ -5,6 +5,7 @@ import time
 
 from database import store
 from enrichment.assets import load_assets
+from enrichment.asset_candidates import archived_identities
 
 
 def reconcile(records=None, *, reason="intelligence_updated", force=False, explicit=False,
@@ -21,6 +22,9 @@ def reconcile(records=None, *, reason="intelligence_updated", force=False, expli
         return 0
     fingerprint = inventory_fingerprint(assets)
     records = store.load_kb() if records is None else records
+    records = list(records)
+    archived = archived_identities((r.get("item") or {}).get("cve_id") for r in records)
+    registered_identities = {(a["part"], a["vendor"], a["product"]) for a in assets}
     with processing._connection() as conn:
         linked = {row[0] for row in conn.execute("SELECT DISTINCT cve_id FROM asset_risks")} if conn.execute(
             "SELECT 1 FROM sqlite_master WHERE name='asset_risks'").fetchone() else set()
@@ -30,7 +34,8 @@ def reconcile(records=None, *, reason="intelligence_updated", force=False, expli
         if not item.get("cve_id") or (item.get("raw_data") or {}).get("sample_mode"):
             continue
         # A changed component must also revisit its existing risk links.
-        related = bool(candidate_assets(record, assets)) or item["cve_id"] in linked
+        related = (bool(candidate_assets(record, assets)) or item["cve_id"] in linked
+                   or bool(registered_identities & archived.get(item["cve_id"], set())))
         if not explicit and not related:
             continue
         context = {"inventory_fingerprint": fingerprint, "reason": reason, "explicit": explicit}

@@ -80,6 +80,9 @@ def capture(cve_ids, commit, *, quota=10, provider_responses=()):
                 frozen, prediction = feeds.get(kind), record.get(kind)
                 if not frozen or not isinstance(prediction, dict):
                     continue
+                valid_statuses = {"ok", "empty"} if kind == "epss" else {"listed", "not_listed"}
+                if prediction.get("status") not in valid_statuses:
+                    continue  # An error status has no enrichment fact to score.
                 if kind == "epss":
                     if cve_id not in frozen.get("query_cve_ids", []):
                         continue
@@ -110,8 +113,8 @@ def capture(cve_ids, commit, *, quota=10, provider_responses=()):
                      "scope": "Direct mention or related mechanism; does not prove shared affected versions"},
                     relation["url"], relation["source_response_sha256"], "library source excerpts",
                     extra={"document_id": relation["document_id"], "content_scope": relation["content_scope"]})
-            # Feed payloads are retained as dated system observations; without an
-            # independently frozen provider response they are coverage only.
+            # Keep error/missing feed observations visible as coverage; they
+            # cannot become correct facts merely because their dict is nonempty.
             coverage.append({"cve_id": cve_id, "product": record["item"].get("product"),
                 "epss_status": (record.get("epss") or {}).get("status"),
                 "kev_status": (record.get("kev") or {}).get("status"),

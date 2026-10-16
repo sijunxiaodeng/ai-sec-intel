@@ -113,6 +113,19 @@ class InvestigationQueueTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertFalse(assets.load_assets()[0]["is_demo"])
 
+    def test_blank_product_still_routes_from_archived_component_identity(self):
+        from automation.asset_matching import run_batch
+        cv = "CVE-2026-44551"
+        record = enriched_record({"cve_id": cv, "product": "", "title": "AI framework issue"})
+        store.upsert([record])
+        assets.import_assets({"assets": [self.asset]})
+        with patch.object(queue, "archived_identities", return_value={cv: {("a", "ollama", "ollama")}}):
+            queue.reconcile([store.get_record(cv)])
+        with patch("automation.asset_matching.assess", return_value=dict(self.report, cve_id=cv)):
+            self.assertEqual(run_batch(), 1)
+        risk = risk_register.list_risks(cve_id=cv)["items"][0]
+        self.assertEqual(risk["status"], "matched_version")
+
     def test_inventory_upgrade_reopens_task_and_clears_only_with_evidence(self):
         assets.import_assets({"assets": [self.asset]})
         queue.reconcile()
