@@ -37,7 +37,7 @@
 .acceptance label.ac-checkbox { flex-direction: row; align-items: flex-start; color: var(--ink); }
 .acceptance button:focus-visible, .acceptance a:focus-visible, .acceptance input:focus-visible, .acceptance select:focus-visible, .acceptance summary:focus-visible, .acceptance textarea:focus-visible { outline: 3px solid #68a89d; outline-offset: 2px; }
 .ac-select-label { margin: 16px 0 10px; }
-.ac-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.ac-metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 10px; margin: 14px 0; }
 .ac-metric h3 { font-size: 13px; margin: 0 0 12px; }
 .ac-number { font-size: 25px; color: #245d58; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ac-number-label { font-size: 11px; color: var(--muted); margin: 3px 0 10px; }

@@ -114,8 +114,11 @@ function acRenderQuality() {
   add(parent, "span", "ac-badge pending", visibility[run.dataset_visibility] || "数据集属性未说明");
   acMeta(parent, [["实际运行时间", acStamp(run.run_at)], ["导入时间", acStamp(run.imported_at)], ["评测代码提交", run.source_commit || "未登记（版本未知）"], ["模型 / 模式", acText(run.model) + " / " + acText(run.mode)], ["记录用途", run.purpose === "acceptance" ? "验收记录（不改变数据集属性）" : "开发验证"], ["统计单元", run.evaluation_unit === "fact_unit" ? "事先确定的富化事实单元" : "题目"], ["原始题单 SHA-256", run.dataset_sha256 || "未提供"], ["来源摘要", run.source_hashes_complete ? "摘要字段齐全（未重新请求来源；内容正确性仍需复核）" : "不完整 / 待核对"]]);
   add(parent, "p", "hint", "自动检查：通过 " + acCount(stats.automatic_passed) + " · 未通过 " + acCount(stats.automatic_failed) + " · 未检查 " + acCount(stats.automatic_unchecked) + "。这些是规则检查计数，不作为语义准确率。");
-  var grid = add(parent, "div", "ac-metric-grid");
-  [["basic", "基础问答", "目标 ≥70%"], ["multi_hop", "明确多跳问答", "目标 ≥85%；仅统计冻结为 multi_hop 的题目"], ["enrichment", "富化事实", "目标 ≥70% / ≥85% / ≥95%"]].forEach(function (item) {
+  var metricGroups = [["basic", "基础问答", "目标 ≥70%"], ["multi_hop", "明确多跳问答", "目标 ≥85%；仅统计冻结为 multi_hop 的题目"], ["enrichment", "富化事实", "目标 ≥70% / ≥85% / ≥95%"]].filter(function (item) {
+    return ((stats.by_kind || {})[item[0]] || {}).cases > 0;
+  });
+  var grid = metricGroups.length ? add(parent, "div", "ac-metric-grid") : null;
+  metricGroups.forEach(function (item) {
     var group = (stats.by_kind || {})[item[0]] || {}, card = add(grid, "div", "ac-metric");
     add(card, "h3", "", item[1]); add(card, "div", "ac-number", acRate(group.independent_accuracy));
     add(card, "p", "ac-number-label", "按声明独立复核准确率"); add(card, "p", "hint", item[2]);
@@ -129,12 +132,12 @@ function acRenderQuality() {
   });
   var extraGroups = [["complex", "比较 / 多轮等复杂题"], ["other", "其他题型"]].filter(function (item) { return ((stats.by_kind || {})[item[0]] || {}).cases > 0; });
   if (extraGroups.length) {
-    acTable(parent, ["补充题型（不代替明确多跳）", "题量", "已留复核记录", "复核子集准确率", "按声明独立复核准确率"], extraGroups.map(function (item) {
+    acTable(parent, ["补充题型", "题量", "已留复核记录", "复核子集准确率", "按声明独立复核准确率"], extraGroups.map(function (item) {
       var group = stats.by_kind[item[0]];
       return [item[1], acCount(group.cases), acCount(group.reviewed_cases), acRate(group.reviewed_subset_accuracy) + " / 分母 " + acCount(group.reviewed_subset_denominator), acRate(group.independent_accuracy) + " / 分母 " + acCount(group.independent_denominator)];
     }));
   }
-  add(parent, "p", "hint", "比较或普通多轮追问不自动算多跳；明确多跳需在冻结题单中登记其跨证据推理要求。无多跳样本时，该项继续待验证。");
+  if (((stats.by_kind || {}).multi_hop || {}).cases > 0) add(parent, "p", "hint", "比较或普通多轮追问不自动算多跳；明确多跳需在冻结题单中登记其跨证据推理要求。");
   if ((stats.independent_blockers || []).length) acLimitDetails(parent, "本批次核验限制", stats.independent_blockers);
   var timing = stats.timing || {};
   acMeta(parent, [["完整批次题量", acCount(stats.cases)], ["尚未归类题量", acCount(stats.unclassified_cases)], ["模型使用", "尝试 " + acCount(stats.model_attempted_cases) + " 题 / 实际采用 " + acCount(stats.used_model_cases) + " 题"], ["响应耗时", "P95 " + acSeconds(timing.p95_seconds) + " / 最大 " + acSeconds(timing.max_seconds) + " / 有效样本 " + acCount(timing.sample_count)], ["超过 5 秒", acCount(timing.over_5_seconds) + " 题；这是性能记录，5 秒不是初赛硬性门槛"]]);

@@ -66,6 +66,20 @@ async function main() {
   assert.match(texts(elements['ac-quality-summary']), /按声明独立复核准确率/);
   assert.match(texts(elements['ac-quality-summary']), /明确多跳问答/);
   assert.match(texts(elements['ac-quality-summary']), /比较或普通多轮追问不自动算多跳/);
+  assert.doesNotMatch(texts(elements['ac-quality-summary']), /富化事实\n/);
+  const originalRun = context.acceptanceState.run;
+  context.acceptanceState.run = {...originalRun, statistics: {...originalRun.statistics, by_kind: {
+    basic: {...group, reviewed_cases: 2, independent_accuracy: 0.5, independent_blockers: []},
+    multi_hop: {cases: 0}, enrichment: {cases: 0}
+  }}};
+  context.acRenderQuality();
+  assert.match(texts(elements['ac-quality-summary']), /基础问答\n50.0%/);
+  assert.doesNotMatch(texts(elements['ac-quality-summary']), /明确多跳问答|富化事实\n|无多跳样本|比较或普通多轮追问/);
+  context.acceptanceState.run.statistics.by_kind.enrichment = group;
+  context.acRenderQuality();
+  assert.match(texts(elements['ac-quality-summary']), /富化事实\n待验证/, 'existing samples must retain their actual review state');
+  context.acceptanceState.run = originalRun;
+  context.acRenderQuality();
   assert.match(texts(elements['ac-quality-summary']), /评测代码提交\n未登记（版本未知）/);
   context.acceptanceState.run.source_commit = 'a'.repeat(40); context.acRenderQuality();
   assert.match(texts(elements['ac-quality-summary']), new RegExp('评测代码提交\\na{40}'));
