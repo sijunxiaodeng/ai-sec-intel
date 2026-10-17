@@ -4,6 +4,17 @@
 
 登记资产后自动匹配已有情报，新情报和资产变更会自动更新持久风险；Agent 在后台创建相关研判任务，按证据缺口选择工具并保存风险结论、出处和处置记录。在“资产风险”页查看结果和任务轨迹。可选启用受约束的 LLM 工具选择；默认使用规则规划。实现、开关与边界见 [智能体编排与工具轨迹](docs/智能体编排与工具轨迹.md)。
 
+## 验证模型自主选择工具
+
+`scripts/evaluate_investigation_ab.py` 在独立目录中，对3个真实CVE的7个预设缺口场景运行模型/规则成对对照。真实本机模型选工具，原采集处理函数读取同一份冻结HTTP响应；保存初始状态摘要、模型输入与原始返回、工具结果、补齐项、回退和耗时。正式数据库以只读方式取样，副本独立写入，不追加人工复核。
+
+```powershell
+python scripts/evaluate_investigation_ab.py --data "本机data/main目录" --settings "本机data/main/model-settings.json" --output "新的独立实验目录" --repetitions 3
+python scripts/audit_investigation_ab.py "新的独立实验目录"
+```
+
+后续复现可加 `--provider-snapshot "既有实验/http" --initial-snapshot "既有实验/snapshot"`，保证初始证据与来源字节相同；另用 `--catalog-order reversed --bounded-only` 检查候选顺序敏感性，并与正常顺序结果分开报告。仅支持本机Ollama接口；来源错误也会冻结，不自动替换为成功。回放耗时排除公网延迟，来源采集耗时另存；缺口检查项与语义准确率分开，模型选择被采纳也不自动代表比规则更好。
+
 ## 一键启动（Docker）
 
 ```bash
