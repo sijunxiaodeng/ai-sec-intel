@@ -388,6 +388,8 @@ def _schema(con):
           cve_id TEXT PRIMARY KEY, first_retracted_at TEXT NOT NULL,
           last_retracted_at TEXT NOT NULL);
     """)
+    from database.read_cache import install_knowledge_version
+    install_knowledge_version(con)
 
 
 def _read_records(con, include_out_of_scope=False):
@@ -640,6 +642,15 @@ def retracted_ids():
     con = _connect()
     try:
         return {row[0] for row in con.execute("SELECT cve_id FROM scope_tombstones")}
+    finally:
+        con.close()
+
+
+def is_retracted(cve_id):
+    """Check one exclusion without scanning payloads or all tombstones."""
+    con = _connect()
+    try:
+        return con.execute("SELECT 1 FROM scope_tombstones WHERE cve_id=?", (cve_id,)).fetchone() is not None
     finally:
         con.close()
 

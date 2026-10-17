@@ -1,19 +1,23 @@
 """保持整条情报返回格式，附加片段；样例库独立于监测库。"""
 
+import atexit
 import copy
 import re
 from pathlib import Path
 from enrichment.guidance import library_for, report as guidance_report
 from database.store import load_kb
 from database import store as main_store
+from database.read_cache import ReadViewCache
 from rag.answer import TOPIC_WORDS
-from rag.evidence import CVE, DEFAULT_DB, _tokens, load_records
+from rag.evidence import CVE, DEFAULT_DB, _tokens, load_record, load_records
 from rag.hybrid import search as search_chunks
 
 
 def knowledge_records(db_path=DEFAULT_DB):
-    records = copy.deepcopy(load_kb())
-    withdrawn = {row["item"]["cve_id"] for row in load_kb(include_out_of_scope=True)
+    stored = load_kb(include_out_of_scope=True)
+    records = copy.deepcopy([row for row in stored
+                             if (row["item"].get("raw_data") or {}).get("_store", {}).get("in_scope") is not False])
+    withdrawn = {row["item"]["cve_id"] for row in stored
                  if (row["item"].get("raw_data") or {}).get("_store", {}).get("in_scope") is False}
     withdrawn.update(main_store.retracted_ids())
     known = {row["item"]["cve_id"]: row for row in records}
@@ -29,6 +33,15 @@ def knowledge_records(db_path=DEFAULT_DB):
             current["references"] = list(dict.fromkeys((current.get("references") or []) + (row.get("references") or []) + (row["item"].get("references") or [])))
     from enrichment.assessment import enrich_view
     return enrich_view(records, db_path)
+
+
+_VIEW_CACHE = ReadViewCache()
+atexit.register(_VIEW_CACHE.clear)
+
+
+def cached_knowledge_records(db_path=DEFAULT_DB):
+    """API bulk view; commits in either store invalidate the next read."""
+    return _VIEW_CACHE.get((main_store.database_path(), db_path), lambda: knowledge_records(db_path))
 
 
 def _empty_guidance(cve_id, detail=""):
@@ -85,8 +98,24 @@ def _attach_guidance(record, db_path, library_db=None, poc_db=None):
 
 
 def get_record(cve_id, db_path=DEFAULT_DB, *, library_db=None, poc_db=None):
-    record = next((row for row in knowledge_records(db_path) if row["item"]["cve_id"].upper() == cve_id.upper()), None)
-    return _attach_guidance(record, db_path, library_db, poc_db) if record else None
+    """Read and enrich only the requested CVE, preserving archive/scope rules."""
+    key = cve_id.upper()
+    record = main_store.get_record(key, include_out_of_scope=True)
+    if record and (record["item"].get("raw_data") or {}).get("_store", {}).get("in_scope") is False:
+        return None
+    # An archive-only sample must not resurrect a withdrawn/deleted main item.
+    archived = None if main_store.is_retracted(key) else load_record(key, db_path)
+    if record and archived:
+        record["references"] = list(dict.fromkeys(
+            (record.get("references") or []) + (archived.get("references") or [])
+            + (archived["item"].get("references") or [])))
+    elif not record:
+        record = archived
+    if not record:
+        return None
+    from enrichment.assessment import enrich_view
+    record = enrich_view([record], db_path)[0]
+    return _attach_guidance(record, db_path, library_db, poc_db)
 
 
 def _blob(record):

@@ -11,7 +11,7 @@ from agents.orchestrator import last_steps, run_answer, run_collect, run_enrich,
 from automation.schedule import countable_latency, start as start_schedule, state as monitor_state
 from config.llm import chat, configured
 from config.settings import public_settings, save_settings
-from rag.retrieve import get_record, knowledge_records
+from rag.retrieve import get_record, cached_knowledge_records as knowledge_records
 from enrichment.assets import AssetImport, AssetPreview, import_assets, load_assets, impact_report
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
