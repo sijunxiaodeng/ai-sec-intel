@@ -1262,10 +1262,19 @@ var detailRequestVersion = 0;
 function openDetail(cveId) {
   selectedEnrichId = String(cveId);
   var requestVersion = ++detailRequestVersion;
-  setView("enrich");
+  // Selecting another CVE is not page navigation: setView also reloads the
+  // full list and asset forms. Keep those in place and fetch only this detail.
+  var view = $("enrich");
+  if (!view || view.hidden) setView("enrich");
+  var list = $("enrich-list");
+  if (list) list.querySelectorAll("[data-item-id]").forEach(function (row) {
+    var selected = row.getAttribute("data-item-id") === selectedEnrichId;
+    row.classList.toggle("is-selected", selected);
+    row.setAttribute("aria-pressed", String(selected));
+  });
   clearError();
   showToast("正在加载「" + cveId + "」详情…", "busy");
-  api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
+  return api("/api/items/" + encodeURIComponent(cveId)).then(function (detail) {
     if (requestVersion !== detailRequestVersion) return;
     if (!detail || detail.cve_id !== cveId) throw new Error("详情返回的 CVE 与请求不一致，未采用该响应。");
     renderDetail(detail);

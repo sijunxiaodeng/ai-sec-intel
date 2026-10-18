@@ -14,6 +14,7 @@ class Element {
 }
 function descendants(element) { return element.children.flatMap(row => [row, ...descendants(row)]); }
 const panel = new Element("div"), calls = [], errors = [], toasts = [];
+const enrichList = {querySelectorAll: () => []}; // List selection is covered by test_enrich_detail_ui.js.
 const cve = "CVE-2024-37032";
 function fixture(id = cve) {
   return {cve_id: id, status: "static_reviewed", detail: "Only static review", items: [{
@@ -36,7 +37,7 @@ let result = fixture();
 const context = vm.createContext({
   // The full browser script initializes this state before the extracted renderer.
   offlineDemo: false,
-  document: {createElement: tag => new Element(tag)}, $: () => panel,
+  document: {createElement: tag => new Element(tag)}, $: id => id === "enrich-list" ? enrichList : panel,
   api: (url, options) => { calls.push({url, options}); return typeof result === "function" ? result(url, options) : result instanceof Error ? Promise.reject(result) : Promise.resolve(result); },
   itemSourceLabels: () => [], missingText: (value, fallback) => value || fallback,
   scoreText: value => String(value), epssText: () => "unknown", kevText: () => "unknown",
